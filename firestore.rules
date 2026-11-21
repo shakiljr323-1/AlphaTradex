@@ -1,0 +1,625 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // =========================================================================
+    // Global Security Primitives
+    // =========================================================================
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        request.auth.token.email == 'shakiljr323@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isNonEmptyString(val, maxLen) {
+      return val is string && val.size() >= 1 && val.size() <= maxLen;
+    }
+
+    function isBoundedString(val, maxLen) {
+      return val is string && val.size() <= maxLen;
+    }
+
+    // =========================================================================
+    // Entity Validation Blueprints
+    // =========================================================================
+
+    function isValidPlatformConfig(data) {
+      return data.keys().hasAll([
+        'companyName', 'companyTagline', 'companyDescription', 'companyGoal',
+        'riskDisclosure', 'trustpilotScore', 'trustpilotReviews', 'nortonScore',
+        'isoScore', 'certikScore', 'minWithdrawalUsd', 'eliteCapitalLockDays',
+        'totalProfitDays', 'globalPaused', 'packages', 'mlmRates',
+        'depositWallets', 'pumpFunToken', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'companyName', 'companyTagline', 'companyDescription', 'companyGoal',
+        'riskDisclosure', 'trustpilotScore', 'trustpilotReviews', 'nortonScore',
+        'isoScore', 'certikScore', 'minWithdrawalUsd', 'eliteCapitalLockDays',
+        'totalProfitDays', 'globalPaused', 'packages', 'mlmRates',
+        'depositWallets', 'paymentMethods', 'pumpFunToken', 'dashboardAnnouncement', 'updatedAt'
+      ])
+      && isNonEmptyString(data.companyName, 120)
+      && isBoundedString(data.companyTagline, 200)
+      && isBoundedString(data.companyDescription, 1500)
+      && isBoundedString(data.companyGoal, 1500)
+      && isBoundedString(data.riskDisclosure, 1500)
+      && data.trustpilotScore is number && data.trustpilotScore >= 0 && data.trustpilotScore <= 5
+      && data.trustpilotReviews is number && data.trustpilotReviews >= 0
+      && data.nortonScore is number && data.nortonScore >= 0 && data.nortonScore <= 5
+      && data.isoScore is number && data.isoScore >= 0 && data.isoScore <= 5
+      && data.certikScore is number && data.certikScore >= 0 && data.certikScore <= 5
+      && data.minWithdrawalUsd is number && data.minWithdrawalUsd >= 1
+      && data.eliteCapitalLockDays is number && data.eliteCapitalLockDays >= 1
+      && data.totalProfitDays is number && data.totalProfitDays >= 1
+      && data.globalPaused is bool
+      && data.packages is list && data.packages.size() >= 1 && data.packages.size() <= 10
+      && data.packages[0] is map
+      && data.mlmRates is map
+      && data.depositWallets is map
+      && (!('paymentMethods' in data) || (
+        data.paymentMethods is list &&
+        data.paymentMethods.size() >= 1 &&
+        data.paymentMethods.size() <= 25 &&
+        data.paymentMethods[0] is map
+      ))
+      && (!('dashboardAnnouncement' in data) || (
+        data.dashboardAnnouncement is map &&
+        data.dashboardAnnouncement.keys().hasAll(['enabled', 'tone', 'title', 'message']) &&
+        data.dashboardAnnouncement.keys().hasOnly(['enabled', 'tone', 'title', 'message', 'updatedBy']) &&
+        data.dashboardAnnouncement.enabled is bool &&
+        data.dashboardAnnouncement.tone in ['info', 'warning', 'urgent', 'success'] &&
+        isBoundedString(data.dashboardAnnouncement.title, 120) &&
+        isBoundedString(data.dashboardAnnouncement.message, 500) &&
+        (!('updatedBy' in data.dashboardAnnouncement) || isBoundedString(data.dashboardAnnouncement.updatedBy, 120))
+      ))
+      && data.pumpFunToken is map
+      && data.updatedAt == request.time;
+    }
+
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll([
+        'uid', 'email', 'fullName', 'handle', 'role', 'referredByUid',
+        'referredByHandle', 'uplineChain', 'kycStatus', 'idType', 'idNumber',
+        'idPhotoData', 'portraitPhotoData', 'usdBalance', 'profitBalance',
+        'totalInvested', 'totalWithdrawn', 'isMentor', 'mentorGiftedCapital',
+        'mentorRequiredVolume', 'mentorBroughtVolume', 'createdAt', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'uid', 'email', 'fullName', 'handle', 'role', 'referredByUid',
+        'referredByHandle', 'uplineChain', 'kycStatus', 'idType', 'idNumber',
+        'idPhotoData', 'portraitPhotoData', 'usdBalance', 'profitBalance',
+        'totalInvested', 'totalWithdrawn', 'isMentor', 'mentorGiftedCapital',
+        'mentorRequiredVolume', 'mentorBroughtVolume', 'createdAt', 'updatedAt'
+      ])
+      && isValidId(data.uid) && data.uid == userId
+      && isNonEmptyString(data.email, 254)
+      && isNonEmptyString(data.fullName, 120)
+      && isValidId(data.handle) && data.handle.size() <= 32
+      && data.role in ['user', 'admin']
+      && isBoundedString(data.referredByUid, 128)
+      && isBoundedString(data.referredByHandle, 32)
+      && data.uplineChain is list && data.uplineChain.size() <= 3
+      && (data.uplineChain.size() == 0 || data.uplineChain[0] is string)
+      && data.kycStatus in ['unsubmitted', 'pending', 'approved', 'rejected']
+      && data.idType in ['NID', 'Passport', 'Driving License', '']
+      && isBoundedString(data.idNumber, 64)
+      && isBoundedString(data.idPhotoData, 300000)
+      && isBoundedString(data.portraitPhotoData, 300000)
+      && data.usdBalance is number && data.usdBalance >= 0
+      && data.profitBalance is number && data.profitBalance >= 0
+      && data.totalInvested is number && data.totalInvested >= 0
+      && data.totalWithdrawn is number && data.totalWithdrawn >= 0
+      && data.isMentor is bool
+      && data.mentorGiftedCapital is number && data.mentorGiftedCapital >= 0
+      && data.mentorRequiredVolume is number && data.mentorRequiredVolume >= 0
+      && data.mentorBroughtVolume is number && data.mentorBroughtVolume >= 0
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidPublicHandle(data, handleId) {
+      return data.keys().hasAll(['uid', 'handle', 'displayName', 'uplineUids', 'createdAt'])
+      && data.keys().hasOnly(['uid', 'handle', 'displayName', 'uplineUids', 'createdAt'])
+      && isValidId(data.uid) && data.uid == request.auth.uid
+      && isValidId(data.handle) && data.handle == handleId && data.handle.size() <= 32
+      && isNonEmptyString(data.displayName, 120)
+      && data.uplineUids is list && data.uplineUids.size() <= 3
+      && (data.uplineUids.size() == 0 || data.uplineUids[0] is string)
+      && data.createdAt == request.time;
+    }
+
+    function isValidEmailLookup(data) {
+      return data.keys().hasAll(['uid', 'handle', 'displayName', 'createdAt'])
+      && data.keys().hasOnly(['uid', 'handle', 'displayName', 'createdAt'])
+      && isValidId(data.uid) && data.uid == request.auth.uid
+      && isValidId(data.handle) && data.handle.size() <= 32
+      && isNonEmptyString(data.displayName, 120)
+      && data.createdAt == request.time;
+    }
+
+    function isValidReferralLink(data) {
+      return data.keys().hasAll([
+        'referrerUid', 'refereeUid', 'refereeHandle', 'refereeName',
+        'level', 'totalInvestedUsd', 'createdAt', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'referrerUid', 'refereeUid', 'refereeHandle', 'refereeName',
+        'level', 'totalInvestedUsd', 'createdAt', 'updatedAt'
+      ])
+      && isValidId(data.referrerUid)
+      && isValidId(data.refereeUid)
+      && isValidId(data.refereeHandle) && data.refereeHandle.size() <= 32
+      && isNonEmptyString(data.refereeName, 120)
+      && data.level is number && data.level >= 1 && data.level <= 3
+      && data.totalInvestedUsd is number && data.totalInvestedUsd >= 0
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidInvestment(data) {
+      return data.keys().hasAll([
+        'uid', 'packageNumber', 'packageId', 'packageName', 'capital',
+        'dailyPercent', 'aiMode', 'totalProfitDays', 'capitalLockDays',
+        'isMentorGifted', 'claimedProfit', 'status', 'startedAtMs',
+        'createdAt', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'uid', 'packageNumber', 'packageId', 'packageName', 'capital',
+        'dailyPercent', 'aiMode', 'totalProfitDays', 'capitalLockDays',
+        'isMentorGifted', 'claimedProfit', 'status', 'startedAtMs',
+        'createdAt', 'updatedAt'
+      ])
+      && isValidId(data.uid)
+      && data.packageNumber is number && data.packageNumber >= 1
+      && isNonEmptyString(data.packageId, 64)
+      && isNonEmptyString(data.packageName, 80)
+      && data.capital is number && data.capital > 0
+      && data.dailyPercent is number && data.dailyPercent > 0 && data.dailyPercent <= 50
+      && isNonEmptyString(data.aiMode, 100)
+      && data.totalProfitDays is number && data.totalProfitDays >= 1
+      && data.capitalLockDays is number && data.capitalLockDays >= 0
+      && data.isMentorGifted is bool
+      && data.claimedProfit is number && data.claimedProfit >= 0
+      && data.status in ['active', 'completed', 'capital_requested', 'capital_withdrawn']
+      && data.startedAtMs is number && data.startedAtMs > 0
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidCryptoDeposit(data) {
+      return data.keys().hasAll([
+        'uid', 'userEmail', 'userName', 'network', 'walletAddress',
+        'amountUsd', 'txId', 'status', 'adminNote', 'createdAt', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'uid', 'userEmail', 'userName', 'network', 'walletAddress',
+        'amountUsd', 'txId', 'status', 'adminNote', 'createdAt', 'updatedAt'
+      ])
+      && isValidId(data.uid)
+      && isNonEmptyString(data.userEmail, 254)
+      && isNonEmptyString(data.userName, 120)
+      && isValidId(data.network) && data.network.size() <= 64
+      && isNonEmptyString(data.walletAddress, 160)
+      && data.amountUsd is number && data.amountUsd > 0 && data.amountUsd <= 10000000
+      && isNonEmptyString(data.txId, 160)
+      && data.status in ['pending', 'approved', 'rejected']
+      && isBoundedString(data.adminNote, 300)
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidUserPaymentMethod(data, userId) {
+      return data.keys().hasAll([
+        'uid', 'label', 'methodId', 'methodName', 'accountAddress',
+        'accountHolder', 'isDefault', 'createdAt', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'uid', 'label', 'methodId', 'methodName', 'accountAddress',
+        'accountHolder', 'isDefault', 'createdAt', 'updatedAt'
+      ])
+      && isValidId(data.uid) && data.uid == userId
+      && isNonEmptyString(data.label, 80)
+      && isValidId(data.methodId) && data.methodId.size() <= 64
+      && isNonEmptyString(data.methodName, 80)
+      && isNonEmptyString(data.accountAddress, 160)
+      && isBoundedString(data.accountHolder, 120)
+      && data.isDefault is bool
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidWithdrawal(data) {
+      return data.keys().hasAll([
+        'uid', 'userEmail', 'userName', 'type', 'source', 'investmentId',
+        'packageNumber', 'investmentDate', 'principalCapital', 'totalProfitGenerated',
+        'amountUsd', 'network', 'destinationAddress', 'status', 'adminNote',
+        'createdAt', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'uid', 'userEmail', 'userName', 'type', 'source', 'investmentId',
+        'packageNumber', 'investmentDate', 'principalCapital', 'totalProfitGenerated',
+        'amountUsd', 'network', 'destinationAddress', 'status', 'adminNote',
+        'createdAt', 'updatedAt'
+      ])
+      && isValidId(data.uid)
+      && isNonEmptyString(data.userEmail, 254)
+      && isNonEmptyString(data.userName, 120)
+      && data.type in ['instant_profit', 'manual_capital']
+      && data.source in ['package_profit', 'mlm_commission', 'mentor_profit', 'elite_capital']
+      && isBoundedString(data.investmentId, 128)
+      && data.packageNumber is number && data.packageNumber >= 0
+      && isBoundedString(data.investmentDate, 64)
+      && data.principalCapital is number && data.principalCapital >= 0
+      && data.totalProfitGenerated is number && data.totalProfitGenerated >= 0
+      && data.amountUsd is number && data.amountUsd > 0
+      && isValidId(data.network) && data.network.size() <= 64
+      && isNonEmptyString(data.destinationAddress, 160)
+      && data.status in ['completed', 'pending', 'approved', 'rejected']
+      && isBoundedString(data.adminNote, 300)
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidP2PTransfer(data) {
+      return data.keys().hasAll([
+        'senderUid', 'senderHandle', 'senderName', 'receiverUid',
+        'receiverHandle', 'receiverName', 'amountUsd', 'note', 'createdAt'
+      ]) && data.keys().hasOnly([
+        'senderUid', 'senderHandle', 'senderName', 'receiverUid',
+        'receiverHandle', 'receiverName', 'amountUsd', 'note', 'createdAt'
+      ])
+      && isValidId(data.senderUid) && data.senderUid == request.auth.uid
+      && isValidId(data.senderHandle) && data.senderHandle.size() <= 32
+      && isNonEmptyString(data.senderName, 120)
+      && isValidId(data.receiverUid) && data.receiverUid != data.senderUid
+      && isValidId(data.receiverHandle) && data.receiverHandle.size() <= 32
+      && isNonEmptyString(data.receiverName, 120)
+      && data.amountUsd is number && data.amountUsd > 0 && data.amountUsd <= 1000000
+      && isBoundedString(data.note, 200)
+      && data.createdAt == request.time;
+    }
+
+    function isValidMlmCommission(data) {
+      return data.keys().hasAll([
+        'beneficiaryUid', 'fromUid', 'fromName', 'level',
+        'investmentAmount', 'ratePercent', 'commissionUsd', 'createdAt'
+      ]) && data.keys().hasOnly([
+        'beneficiaryUid', 'fromUid', 'fromName', 'level',
+        'investmentAmount', 'ratePercent', 'commissionUsd', 'createdAt'
+      ])
+      && isValidId(data.beneficiaryUid)
+      && isValidId(data.fromUid)
+      && isNonEmptyString(data.fromName, 120)
+      && data.level is number && data.level >= 1 && data.level <= 3
+      && data.investmentAmount is number && data.investmentAmount > 0
+      && data.ratePercent is number && data.ratePercent > 0 && data.ratePercent <= 50
+      && data.commissionUsd is number && data.commissionUsd > 0
+      && data.createdAt == request.time;
+    }
+
+    function isValidMemeCoinInvestment(data) {
+      return data.keys().hasAll([
+        'uid', 'userName', 'tokenTicker', 'mintAddress', 'paymentMethod',
+        'amountUsd', 'tokenQuantity', 'entryPriceUsd', 'txSignature', 'createdAt'
+      ]) && data.keys().hasOnly([
+        'uid', 'userName', 'tokenTicker', 'mintAddress', 'paymentMethod',
+        'amountUsd', 'tokenQuantity', 'entryPriceUsd', 'txSignature', 'createdAt'
+      ])
+      && isValidId(data.uid) && data.uid == request.auth.uid
+      && isNonEmptyString(data.userName, 120)
+      && isNonEmptyString(data.tokenTicker, 24)
+      && isNonEmptyString(data.mintAddress, 80)
+      && data.paymentMethod in ['USD_VAULT', 'SOL_WALLET']
+      && data.amountUsd is number && data.amountUsd > 0
+      && data.tokenQuantity is number && data.tokenQuantity > 0
+      && data.entryPriceUsd is number && data.entryPriceUsd > 0
+      && isBoundedString(data.txSignature, 160)
+      && data.createdAt == request.time;
+    }
+
+    // =========================================================================
+    // Collection Rules
+    // =========================================================================
+
+    match /test/connection {
+      allow get: if true;
+    }
+
+    match /config/{docId} {
+      allow get: if isValidId(docId);
+      allow create, update: if isValidId(docId) && isAdmin() && isValidPlatformConfig(incoming());
+      allow delete: if false;
+    }
+
+    match /admins/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow create, update, delete: if isValidId(userId) && isAdmin();
+    }
+
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isValidId(userId)
+        && isVerifiedUser()
+        && isOwner(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().role == 'user'
+        && incoming().kycStatus in ['unsubmitted', 'pending']
+        && incoming().usdBalance == 0
+        && incoming().profitBalance == 0
+        && incoming().totalInvested == 0
+        && incoming().totalWithdrawn == 0
+        && incoming().isMentor == false
+        && incoming().mentorGiftedCapital == 0
+        && incoming().mentorRequiredVolume == 0
+        && incoming().mentorBroughtVolume == 0
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isValidId(userId)
+        && isVerifiedUser()
+        && isValidUserProfile(incoming(), userId)
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            isOwner(userId)
+            && incoming().role == existing().role
+            && incoming().kycStatus == 'pending'
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'fullName', 'idType', 'idNumber', 'idPhotoData', 'portraitPhotoData', 'kycStatus', 'updatedAt'
+            ])
+          )
+          || (
+            isOwner(userId)
+            && incoming().role == existing().role
+            && incoming().kycStatus == existing().kycStatus
+            && incoming().isMentor == existing().isMentor
+            && incoming().mentorGiftedCapital == existing().mentorGiftedCapital
+            && incoming().mentorRequiredVolume == existing().mentorRequiredVolume
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'usdBalance', 'profitBalance', 'totalInvested', 'totalWithdrawn', 'updatedAt'
+            ])
+          )
+          || (
+            incoming().role == existing().role
+            && incoming().kycStatus == existing().kycStatus
+            && incoming().usdBalance >= existing().usdBalance
+            && incoming().profitBalance >= existing().profitBalance
+            && incoming().mentorBroughtVolume >= existing().mentorBroughtVolume
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'usdBalance', 'profitBalance', 'mentorBroughtVolume', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if false;
+
+      match /paymentMethods/{methodDocId} {
+        allow get: if isValidId(userId) && isValidId(methodDocId) && (isOwner(userId) || isAdmin());
+        allow list: if isValidId(userId) && isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+        allow create: if isValidId(userId)
+          && isValidId(methodDocId)
+          && isVerifiedUser()
+          && isOwner(userId)
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && isValidUserPaymentMethod(incoming(), userId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(userId)
+          && isValidId(methodDocId)
+          && isVerifiedUser()
+          && (isOwner(userId) || isAdmin())
+          && isValidUserPaymentMethod(incoming(), userId)
+          && incoming().uid == existing().uid
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'label', 'methodId', 'methodName', 'accountAddress', 'accountHolder', 'isDefault', 'updatedAt'
+          ]);
+        allow delete: if isValidId(userId) && isValidId(methodDocId) && isVerifiedUser() && (isOwner(userId) || isAdmin());
+      }
+    }
+
+    match /handles/{handle} {
+      allow get: if isValidId(handle) && isSignedIn();
+      allow list: if isAdmin();
+      allow create: if isValidId(handle) && isVerifiedUser() && isValidPublicHandle(incoming(), handle);
+      allow update, delete: if isAdmin();
+    }
+
+    match /emailHashes/{emailHash} {
+      allow get: if isValidId(emailHash) && isSignedIn();
+      allow list: if false;
+      allow create: if isValidId(emailHash) && isVerifiedUser() && isValidEmailLookup(incoming());
+      allow update, delete: if isAdmin();
+    }
+
+    match /referrals/{referralId} {
+      allow get: if isValidId(referralId) && isSignedIn() && (
+        existing().referrerUid == request.auth.uid ||
+        existing().refereeUid == request.auth.uid ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        resource.data.referrerUid == request.auth.uid ||
+        resource.data.refereeUid == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isValidId(referralId)
+        && isVerifiedUser()
+        && isValidReferralLink(incoming())
+        && (incoming().refereeUid == request.auth.uid || isAdmin())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(referralId)
+        && isVerifiedUser()
+        && isValidReferralLink(incoming())
+        && incoming().referrerUid == existing().referrerUid
+        && incoming().refereeUid == existing().refereeUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() || (
+            existing().refereeUid == request.auth.uid &&
+            incoming().totalInvestedUsd >= existing().totalInvestedUsd &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['totalInvestedUsd', 'updatedAt'])
+          )
+        );
+      allow delete: if false;
+    }
+
+    match /investments/{investmentId} {
+      allow get: if isValidId(investmentId) && isSignedIn() && (existing().uid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow create: if isValidId(investmentId)
+        && isVerifiedUser()
+        && isValidInvestment(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() || (
+            incoming().uid == request.auth.uid &&
+            incoming().isMentorGifted == false &&
+            incoming().claimedProfit == 0 &&
+            incoming().status == 'active'
+          )
+        );
+      allow update: if isValidId(investmentId)
+        && isVerifiedUser()
+        && isValidInvestment(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() || (
+            existing().uid == request.auth.uid &&
+            existing().status != 'capital_withdrawn' &&
+            incoming().claimedProfit >= existing().claimedProfit &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['claimedProfit', 'status', 'updatedAt'])
+          )
+        );
+      allow delete: if false;
+    }
+
+    match /cryptoDeposits/{depositId} {
+      allow get: if isValidId(depositId) && isSignedIn() && (existing().uid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow create: if isValidId(depositId)
+        && isVerifiedUser()
+        && isValidCryptoDeposit(incoming())
+        && incoming().uid == request.auth.uid
+        && incoming().status == 'pending'
+        && incoming().adminNote == ''
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(depositId)
+        && isAdmin()
+        && isValidCryptoDeposit(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && existing().status == 'pending'
+        && incoming().status in ['approved', 'rejected']
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'adminNote', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    match /withdrawals/{withdrawalId} {
+      allow get: if isValidId(withdrawalId) && isSignedIn() && (existing().uid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow create: if isValidId(withdrawalId)
+        && isVerifiedUser()
+        && isValidWithdrawal(incoming())
+        && incoming().uid == request.auth.uid
+        && incoming().adminNote == ''
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (
+          (incoming().type == 'instant_profit' && incoming().status == 'completed') ||
+          (incoming().type == 'manual_capital' && incoming().status == 'pending')
+        );
+      allow update: if isValidId(withdrawalId)
+        && isAdmin()
+        && isValidWithdrawal(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && existing().status == 'pending'
+        && incoming().status in ['approved', 'rejected']
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'adminNote', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    match /p2pTransfers/{transferId} {
+      allow get: if isValidId(transferId) && isSignedIn() && (
+        existing().senderUid == request.auth.uid ||
+        existing().receiverUid == request.auth.uid ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        resource.data.senderUid == request.auth.uid ||
+        resource.data.receiverUid == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isValidId(transferId)
+        && isVerifiedUser()
+        && isValidP2PTransfer(incoming());
+      allow update, delete: if false;
+    }
+
+    match /mlmCommissions/{commissionId} {
+      allow get: if isValidId(commissionId) && isSignedIn() && (
+        existing().beneficiaryUid == request.auth.uid ||
+        existing().fromUid == request.auth.uid ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        resource.data.beneficiaryUid == request.auth.uid ||
+        resource.data.fromUid == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isValidId(commissionId)
+        && isVerifiedUser()
+        && isValidMlmCommission(incoming())
+        && (incoming().fromUid == request.auth.uid || isAdmin());
+      allow update, delete: if false;
+    }
+
+    match /memeCoinInvestments/{allocationId} {
+      allow get: if isValidId(allocationId) && isSignedIn() && (existing().uid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow create: if isValidId(allocationId)
+        && isVerifiedUser()
+        && isValidMemeCoinInvestment(incoming());
+      allow update, delete: if false;
+    }
+  }
+}

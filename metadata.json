@@ -1,0 +1,6 @@
+{
+  "name": "Vanguard Trade & Vault",
+  "description": "Institutional multi-asset crypto vault, AI trading packages, MLM referral & mentor desk, and Pump.fun meme coin launchpad.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

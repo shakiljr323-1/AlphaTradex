@@ -1,0 +1,390 @@
+{
+  "entities": {
+    "PlatformConfig": {
+      "title": "PlatformConfig",
+      "description": "Global dynamic configuration controlled exclusively by Super Admin at /admin.",
+      "type": "object",
+      "properties": {
+        "companyName": { "type": "string", "maxLength": 120 },
+        "companyTagline": { "type": "string", "maxLength": 200 },
+        "companyDescription": { "type": "string", "maxLength": 1500 },
+        "companyGoal": { "type": "string", "maxLength": 1500 },
+        "riskDisclosure": { "type": "string", "maxLength": 1500 },
+        "trustpilotScore": { "type": "number" },
+        "trustpilotReviews": { "type": "number" },
+        "nortonScore": { "type": "number" },
+        "isoScore": { "type": "number" },
+        "certikScore": { "type": "number" },
+        "minWithdrawalUsd": { "type": "number" },
+        "eliteCapitalLockDays": { "type": "number" },
+        "totalProfitDays": { "type": "number" },
+        "globalPaused": { "type": "boolean" },
+        "packages": { "type": "array" },
+        "mlmRates": { "type": "object" },
+        "depositWallets": { "type": "object" },
+        "paymentMethods": { "type": "array" },
+        "pumpFunToken": { "type": "object" },
+        "dashboardAnnouncement": { "type": "object" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "companyName",
+        "companyGoal",
+        "trustpilotScore",
+        "minWithdrawalUsd",
+        "eliteCapitalLockDays",
+        "totalProfitDays",
+        "globalPaused",
+        "packages",
+        "mlmRates",
+        "depositWallets",
+        "pumpFunToken"
+      ]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Private user account, KYC record, balances, referral metadata, and mentor gifted status.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "maxLength": 254 },
+        "fullName": { "type": "string", "maxLength": 120 },
+        "handle": { "type": "string", "maxLength": 32, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "role": { "type": "string", "enum": ["user", "admin"] },
+        "referredByUid": { "type": "string", "maxLength": 128 },
+        "referredByHandle": { "type": "string", "maxLength": 32 },
+        "uplineChain": { "type": "array" },
+        "kycStatus": { "type": "string", "enum": ["unsubmitted", "pending", "approved", "rejected"] },
+        "idType": { "type": "string", "enum": ["NID", "Passport", "Driving License", ""] },
+        "idNumber": { "type": "string", "maxLength": 64 },
+        "idPhotoData": { "type": "string", "maxLength": 300000 },
+        "portraitPhotoData": { "type": "string", "maxLength": 300000 },
+        "usdBalance": { "type": "number" },
+        "profitBalance": { "type": "number" },
+        "totalInvested": { "type": "number" },
+        "totalWithdrawn": { "type": "number" },
+        "isMentor": { "type": "boolean" },
+        "mentorGiftedCapital": { "type": "number" },
+        "mentorRequiredVolume": { "type": "number" },
+        "mentorBroughtVolume": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid",
+        "email",
+        "fullName",
+        "handle",
+        "role",
+        "kycStatus",
+        "usdBalance",
+        "profitBalance",
+        "totalInvested",
+        "totalWithdrawn",
+        "isMentor",
+        "mentorGiftedCapital",
+        "mentorRequiredVolume",
+        "mentorBroughtVolume",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PublicHandle": {
+      "title": "PublicHandle",
+      "description": "Non-PII handle index for referral code and P2P handle lookup.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "handle": { "type": "string", "maxLength": 32, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "handle", "displayName", "createdAt"]
+    },
+    "EmailLookup": {
+      "title": "EmailLookup",
+      "description": "SHA-256 email hash index for P2P transfer lookup without exposing email PII.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "handle": { "type": "string", "maxLength": 32, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "handle", "displayName", "createdAt"]
+    },
+    "Investment": {
+      "title": "Investment",
+      "description": "Active 200 profit-day AI trading package or mentor gifted allocation.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "packageNumber": { "type": "number" },
+        "packageId": { "type": "string", "maxLength": 64 },
+        "packageName": { "type": "string", "maxLength": 80 },
+        "capital": { "type": "number" },
+        "dailyPercent": { "type": "number" },
+        "aiMode": { "type": "string", "maxLength": 100 },
+        "totalProfitDays": { "type": "number" },
+        "capitalLockDays": { "type": "number" },
+        "isMentorGifted": { "type": "boolean" },
+        "claimedProfit": { "type": "number" },
+        "status": { "type": "string", "enum": ["active", "completed", "capital_requested", "capital_withdrawn"] },
+        "startedAtMs": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid",
+        "packageNumber",
+        "packageId",
+        "packageName",
+        "capital",
+        "dailyPercent",
+        "aiMode",
+        "totalProfitDays",
+        "capitalLockDays",
+        "isMentorGifted",
+        "claimedProfit",
+        "status",
+        "startedAtMs",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CryptoDeposit": {
+      "title": "CryptoDeposit",
+      "description": "Crypto-only deposit submission (USDT TRC20, USDT ERC20, SOL) pending admin review.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userEmail": { "type": "string", "maxLength": 254 },
+        "userName": { "type": "string", "maxLength": 120 },
+        "network": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "walletAddress": { "type": "string", "maxLength": 160 },
+        "amountUsd": { "type": "number" },
+        "txId": { "type": "string", "maxLength": 160 },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "adminNote": { "type": "string", "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid",
+        "userEmail",
+        "userName",
+        "network",
+        "walletAddress",
+        "amountUsd",
+        "txId",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Withdrawal": {
+      "title": "Withdrawal",
+      "description": "Instant profit withdrawals ($10 min) and manual capital withdrawal requests.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userEmail": { "type": "string", "maxLength": 254 },
+        "userName": { "type": "string", "maxLength": 120 },
+        "type": { "type": "string", "enum": ["instant_profit", "manual_capital"] },
+        "source": { "type": "string", "enum": ["package_profit", "mlm_commission", "mentor_profit", "elite_capital"] },
+        "investmentId": { "type": "string", "maxLength": 128 },
+        "packageNumber": { "type": "number" },
+        "investmentDate": { "type": "string", "maxLength": 64 },
+        "principalCapital": { "type": "number" },
+        "totalProfitGenerated": { "type": "number" },
+        "amountUsd": { "type": "number" },
+        "network": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "destinationAddress": { "type": "string", "maxLength": 160 },
+        "status": { "type": "string", "enum": ["completed", "pending", "approved", "rejected"] },
+        "adminNote": { "type": "string", "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid",
+        "userEmail",
+        "userName",
+        "type",
+        "source",
+        "amountUsd",
+        "network",
+        "destinationAddress",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "P2PTransfer": {
+      "title": "P2PTransfer",
+      "description": "User-to-user direct USD balance transfer ledger.",
+      "type": "object",
+      "properties": {
+        "senderUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "senderHandle": { "type": "string", "maxLength": 32 },
+        "senderName": { "type": "string", "maxLength": 120 },
+        "receiverUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "receiverHandle": { "type": "string", "maxLength": 32 },
+        "receiverName": { "type": "string", "maxLength": 120 },
+        "amountUsd": { "type": "number" },
+        "note": { "type": "string", "maxLength": 200 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "senderUid",
+        "senderHandle",
+        "senderName",
+        "receiverUid",
+        "receiverHandle",
+        "receiverName",
+        "amountUsd",
+        "createdAt"
+      ]
+    },
+    "MlmCommission": {
+      "title": "MlmCommission",
+      "description": "Multi-level referral commission payout record.",
+      "type": "object",
+      "properties": {
+        "beneficiaryUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "fromUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "fromName": { "type": "string", "maxLength": 120 },
+        "level": { "type": "number" },
+        "investmentAmount": { "type": "number" },
+        "ratePercent": { "type": "number" },
+        "commissionUsd": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "beneficiaryUid",
+        "fromUid",
+        "fromName",
+        "level",
+        "investmentAmount",
+        "ratePercent",
+        "commissionUsd",
+        "createdAt"
+      ]
+    },
+    "MemeCoinInvestment": {
+      "title": "MemeCoinInvestment",
+      "description": "Direct Pump.fun meme coin allocation record.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userName": { "type": "string", "maxLength": 120 },
+        "tokenTicker": { "type": "string", "maxLength": 24 },
+        "mintAddress": { "type": "string", "maxLength": 80 },
+        "paymentMethod": { "type": "string", "enum": ["USD_VAULT", "SOL_WALLET"] },
+        "amountUsd": { "type": "number" },
+        "tokenQuantity": { "type": "number" },
+        "entryPriceUsd": { "type": "number" },
+        "txSignature": { "type": "string", "maxLength": 160 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid",
+        "userName",
+        "tokenTicker",
+        "mintAddress",
+        "paymentMethod",
+        "amountUsd",
+        "tokenQuantity",
+        "entryPriceUsd",
+        "createdAt"
+      ]
+    },
+    "UserPaymentMethod": {
+      "title": "UserPaymentMethod",
+      "description": "User saved payout / receiving payment method stored under /users/{userId}/paymentMethods/{methodDocId}.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "label": { "type": "string", "maxLength": 80 },
+        "methodId": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "methodName": { "type": "string", "maxLength": 80 },
+        "accountAddress": { "type": "string", "maxLength": 160 },
+        "accountHolder": { "type": "string", "maxLength": 120 },
+        "isDefault": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid",
+        "label",
+        "methodId",
+        "methodName",
+        "accountAddress",
+        "accountHolder",
+        "isDefault",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AdminDoc": {
+      "title": "AdminDoc",
+      "description": "Authorized Super Admin role marker.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 254 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/config/{docId}": {
+      "schema": { "$ref": "#/entities/PlatformConfig" },
+      "description": "Global platform rules, company info, packages, wallets, paymentMethods, and Pump.fun token config."
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private user account, KYC data, balances, and mentor gifted status."
+    },
+    "/users/{userId}/paymentMethods/{methodDocId}": {
+      "schema": { "$ref": "#/entities/UserPaymentMethod" },
+      "description": "User saved payout / payment method accounts for quick withdrawals."
+    },
+    "/handles/{handle}": {
+      "schema": { "$ref": "#/entities/PublicHandle" },
+      "description": "Non-PII handle lookup for referral codes and P2P transfers."
+    },
+    "/emailHashes/{emailHash}": {
+      "schema": { "$ref": "#/entities/EmailLookup" },
+      "description": "Hashed email lookup for P2P transfers without exposing emails."
+    },
+    "/investments/{investmentId}": {
+      "schema": { "$ref": "#/entities/Investment" },
+      "description": "Active 200 profit-day AI trading packages and mentor gifted packages."
+    },
+    "/cryptoDeposits/{depositId}": {
+      "schema": { "$ref": "#/entities/CryptoDeposit" },
+      "description": "Deposit requests across admin-configured crypto and custom payment methods."
+    },
+    "/withdrawals/{withdrawalId}": {
+      "schema": { "$ref": "#/entities/Withdrawal" },
+      "description": "Instant profit withdrawals and manual capital withdrawal requests."
+    },
+    "/p2pTransfers/{transferId}": {
+      "schema": { "$ref": "#/entities/P2PTransfer" },
+      "description": "User-to-user P2P USD balance transfers."
+    },
+    "/mlmCommissions/{commissionId}": {
+      "schema": { "$ref": "#/entities/MlmCommission" },
+      "description": "Multi-level referral commission records."
+    },
+    "/memeCoinInvestments/{allocationId}": {
+      "schema": { "$ref": "#/entities/MemeCoinInvestment" },
+      "description": "Direct Pump.fun meme coin allocation records."
+    },
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/AdminDoc" },
+      "description": "Authorized Super Admin role documents."
+    }
+  }
+}
