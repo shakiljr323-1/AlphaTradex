@@ -15,6 +15,24 @@ interface PulsePacket {
   color: string;
 }
 
+function traceRoundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+): void {
+  const radius = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.arcTo(x + w, y, x + w, y + h, radius);
+  ctx.arcTo(x + w, y + h, x, y + h, radius);
+  ctx.arcTo(x, y + h, x, y, radius);
+  ctx.arcTo(x, y, x + w, y, radius);
+  ctx.closePath();
+}
+
 /**
  * Full-screen institutional AI Trading Robot live execution backdrop.
  * Renders continuous candlestick streams, EMA ribbons, neural orderflow vectors,
@@ -208,8 +226,7 @@ export const AiRobotBackdrop: React.FC = () => {
         ctx.fillStyle = 'rgba(11, 17, 30, 0.78)';
         ctx.strokeStyle = dir === -1 ? 'rgba(16, 185, 129, 0.45)' : 'rgba(249, 115, 22, 0.45)';
         ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.roundRect(cardX, cardY, 84, 42, 6);
+        traceRoundRect(ctx, cardX, cardY, 84, 42, 6);
         ctx.fill();
         ctx.stroke();
 
@@ -274,8 +291,7 @@ export const AiRobotBackdrop: React.FC = () => {
       ctx.fillStyle = 'rgba(6, 12, 24, 0.95)';
       ctx.strokeStyle = 'rgba(56, 189, 248, 0.6)';
       ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.roundRect(-40, -98, 80, 22, 6);
+      traceRoundRect(ctx, -40, -98, 80, 22, 6);
       ctx.fill();
       ctx.stroke();
 
@@ -292,8 +308,7 @@ export const AiRobotBackdrop: React.FC = () => {
       // Crisp Left & Right Optical Nodes
       [-18, 18].forEach((ex) => {
         ctx.fillStyle = '#FB923C';
-        ctx.beginPath();
-        ctx.roundRect(ex - 8, -90, 16, 6, 3);
+        traceRoundRect(ctx, ex - 8, -90, 16, 6, 3);
         ctx.fill();
       });
 

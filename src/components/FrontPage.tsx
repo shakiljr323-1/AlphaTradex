@@ -223,8 +223,15 @@ export const FrontPage: React.FC<FrontPageProps> = ({
     try {
       await signInWithGoogle(referralCode);
     } catch (err: unknown) {
-      const msg = (err as Error)?.message || 'Google authentication was cancelled or failed.';
-      setErrorMsg(msg);
+      const code = (err as { code?: string })?.code || '';
+      if (code === 'auth/unauthorized-domain') {
+        setErrorMsg(
+          `Domain "${window.location.hostname}" is not yet authorized in Firebase Console (Authentication -> Settings -> Authorized domains). Add "${window.location.hostname}" there or sign in with Email/Password.`
+        );
+      } else {
+        const msg = (err as Error)?.message || 'Google authentication was cancelled or failed.';
+        setErrorMsg(msg);
+      }
     } finally {
       setSubmitting(false);
     }

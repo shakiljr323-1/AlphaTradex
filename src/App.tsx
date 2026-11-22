@@ -16,7 +16,7 @@ import { NavSection } from './types/platform';
 function checkIsAdminRoute(): boolean {
   const path = window.location.pathname.replace(/\/+$/, '');
   const hash = window.location.hash.replace(/\/+$/, '');
-  return path === '/admin' || hash === '#/admin';
+  return path === '/admin' || path.endsWith('/admin') || hash === '#/admin';
 }
 
 const AppRouter: React.FC = () => {
@@ -48,8 +48,10 @@ const AppRouter: React.FC = () => {
     if (window.location.hash === '#/admin') {
       window.location.hash = '';
     }
-    if (window.location.pathname === '/admin') {
-      window.history.pushState({}, '', '/');
+    const cleanPath = window.location.pathname.replace(/\/+$/, '');
+    if (cleanPath === '/admin' || cleanPath.endsWith('/admin')) {
+      const nextPath = cleanPath.replace(/\/admin$/, '') || '/';
+      window.history.pushState({}, '', nextPath.endsWith('/') ? nextPath : `${nextPath}/`);
     }
     setIsAdminRoute(false);
   };

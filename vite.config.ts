@@ -4,33 +4,44 @@ import fs from 'fs';
 import path from 'path';
 import {defineConfig} from 'vite';
 
-export default defineConfig(() => {
+export default defineConfig(({command}) => {
+  const rootDir = import.meta.dirname;
   return {
+    base: process.env.VITE_BASE_PATH || (command === 'build' ? './' : '/'),
     plugins: [
       react(),
       tailwindcss(),
-      // Copies src/assets into dist/ so root-relative URLs like
-      // "/src/assets/images/..." (e.g. generate_image output) still resolve
-      // in production builds. Do not remove.
+      // Copies src/assets into dist/ and adds GitHub Pages SPA helpers (.nojekyll + 404.html)
       {
-        name: 'copy-unbundled-src-assets',
+        name: 'copy-unbundled-src-assets-and-gh-pages',
         apply: 'build',
         closeBundle(error?: Error): void {
           if (error) {
             return;
           }
-          const distDir = path.resolve(__dirname, 'dist');
-          const srcAssets = path.resolve(__dirname, 'src/assets');
+          const distDir = path.resolve(rootDir, 'dist');
+          const srcAssets = path.resolve(rootDir, 'src/assets');
           const distAssets = path.resolve(distDir, 'src/assets');
           if (fs.existsSync(distDir) && fs.existsSync(srcAssets)) {
             fs.cpSync(srcAssets, distAssets, {recursive: true, force: true});
+          }
+          if (fs.existsSync(distDir)) {
+            const nojekyllPath = path.join(distDir, '.nojekyll');
+            if (!fs.existsSync(nojekyllPath)) {
+              fs.writeFileSync(nojekyllPath, '');
+            }
+            const indexHtmlPath = path.join(distDir, 'index.html');
+            const notFoundPath = path.join(distDir, '404.html');
+            if (fs.existsSync(indexHtmlPath)) {
+              fs.copyFileSync(indexHtmlPath, notFoundPath);
+            }
           }
         },
       },
     ],
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': path.resolve(rootDir, '.'),
       },
     },
     server: {
