@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
@@ -71,6 +71,8 @@ interface PlatformContextValue {
   authReady: boolean;
   userProfile: UserProfile | null;
   profileLoading: boolean;
+  provisioningError: string | null;
+  retryProfileSync: () => Promise<void>;
   isAdminUser: boolean;
   platformConfig: PlatformConfig;
   investments: Investment[];
@@ -85,7 +87,10 @@ interface PlatformContextValue {
   referralLinkClicks: number;
   savedPaymentMethods: UserPaymentMethod[];
   // Auth & KYC
-  signInWithGoogle: (referralCode?: string) => Promise<void>;
+  signInWithGoogle: (
+    referralCode?: string,
+    kycDraft?: Partial<KycDraft>
+  ) => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<void>;
   signUpWithKyc: (params: {
     email: string;
@@ -200,6 +205,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [authReady, setAuthReady] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
+  const [provisioningError, setProvisioningError] = useState<string | null>(null);
+  const [authSyncTick, setAuthSyncTick] = useState(0);
+  const provisioningInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
   const [isAdminDoc, setIsAdminDoc] = useState(false);
   const [platformConfig, setPlatformConfig] = useState<PlatformConfig>(DEFAULT_PLATFORM_CONFIG);
 
@@ -333,120 +341,199 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const ensureUserProvisioned = useCallback(async (user: User, draft?: KycDraft | null) => {
     if (!user.emailVerified) return;
 
-    const userRef = doc(db, 'users', user.uid);
-    let snap;
-    try {
-      snap = await getDoc(userRef);
-    } catch (err) {
-      handleFirestoreError(err, OperationType.GET, `users/${user.uid}`);
+    const existingTask = provisioningInFlightRef.current.get(user.uid);
+    if (existingTask) {
+      return existingTask;
     }
 
-    if (snap.exists()) return;
-
-    const handle = generateHandleFromUid(user.uid);
-    const fullName =
-      draft?.fullName?.trim() ||
-      user.displayName?.trim() ||
-      (user.email ? user.email.split('@')[0] : 'Vault Client');
-    const email = (user.email || '').trim().toLowerCase();
-
-    let referredByUid = '';
-    let referredByHandle = '';
-    let uplineChain: string[] = [];
-
-    const refCode = (draft?.referralCode || localStorage.getItem('vtv_pending_ref') || '').trim().toUpperCase();
-    if (refCode && refCode !== handle) {
+    const task = (async () => {
+      setProvisioningError(null);
+      const userRef = doc(db, 'users', user.uid);
+      let snap;
       try {
-        const refHandleSnap = await getDoc(doc(db, 'handles', refCode));
-        if (refHandleSnap.exists()) {
-          const refData = refHandleSnap.data() as {
-            uid: string;
-            handle: string;
-            uplineUids?: string[];
-          };
-          if (refData.uid !== user.uid) {
-            referredByUid = refData.uid;
-            referredByHandle = refData.handle;
-            uplineChain = [refData.uid, ...(refData.uplineUids || []).slice(0, 2)];
+        snap = await getDoc(userRef);
+      } catch (err) {
+        // Token may have just been verified — force refresh once and retry
+        try {
+          await user.getIdToken(true);
+          snap = await getDoc(userRef);
+        } catch (retryErr) {
+          const msg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+          setProvisioningError(msg);
+          handleFirestoreError(retryErr, OperationType.GET, `users/${user.uid}`);
+        }
+      }
+
+      if (snap.exists()) return;
+
+      let handle = generateHandleFromUid(user.uid);
+      let shouldCreateHandleDoc = true;
+      try {
+        const existingHandleSnap = await getDoc(doc(db, 'handles', handle));
+        if (existingHandleSnap.exists()) {
+          const existingUid = (existingHandleSnap.data() as { uid?: string }).uid;
+          if (existingUid === user.uid) {
+            shouldCreateHandleDoc = false;
+          } else {
+            const suffix = user.uid.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(-4) || '99';
+            handle = `${handle}_${suffix}`.slice(0, 32);
           }
         }
       } catch {
-        // Invalid or unreadable ref code ignored cleanly
+        // Proceed with default generated handle
       }
-    }
 
-    const hasKycFields = Boolean(draft?.idType && draft?.idNumber);
-    const batch = writeBatch(db);
+      const fullName = (
+        draft?.fullName?.trim() ||
+        user.displayName?.trim() ||
+        (user.email ? user.email.split('@')[0] : 'Vault Client')
+      ).slice(0, 120);
+      const email = (user.email || '').trim().toLowerCase().slice(0, 254);
 
-    const newClientRecord = {
-      uid: user.uid,
-      email,
-      fullName,
-      handle,
-      role: 'user' as const,
-      referredByUid,
-      referredByHandle,
-      uplineChain,
-      kycStatus: (hasKycFields ? 'pending' : 'unsubmitted') as UserProfile['kycStatus'],
-      idType: (draft?.idType || '') as UserProfile['idType'],
-      idNumber: draft?.idNumber || '',
-      idPhotoData: draft?.idPhotoData || '',
-      portraitPhotoData: draft?.portraitPhotoData || '',
-      usdBalance: 0,
-      profitBalance: 0,
-      totalInvested: 0,
-      totalWithdrawn: 0,
-      isMentor: false,
-      mentorGiftedCapital: 0,
-      mentorRequiredVolume: 0,
-      mentorBroughtVolume: 0,
-    };
+      let referredByUid = '';
+      let referredByHandle = '';
+      let uplineChain: string[] = [];
 
-    batch.set(userRef, {
-      ...newClientRecord,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
+      const refCode = (
+        draft?.referralCode ||
+        localStorage.getItem('vtv_pending_ref') ||
+        ''
+      )
+        .trim()
+        .toUpperCase();
+      if (refCode && refCode !== handle) {
+        try {
+          const refHandleSnap = await getDoc(doc(db, 'handles', refCode));
+          if (refHandleSnap.exists()) {
+            const refData = refHandleSnap.data() as {
+              uid: string;
+              handle: string;
+              uplineUids?: string[];
+            };
+            if (refData.uid && refData.uid !== user.uid) {
+              referredByUid = refData.uid.slice(0, 128);
+              referredByHandle = (refData.handle || refCode).slice(0, 32);
+              uplineChain = [refData.uid, ...(refData.uplineUids || []).slice(0, 2)].filter(
+                (u) => typeof u === 'string' && /^[a-zA-Z0-9_-]+$/.test(u)
+              );
+            }
+          }
+        } catch {
+          // Invalid or unreadable ref code ignored cleanly
+        }
+      }
 
-    batch.set(doc(db, 'handles', handle), {
-      uid: user.uid,
-      handle,
-      displayName: fullName,
-      uplineUids: uplineChain,
-      createdAt: serverTimestamp(),
-    });
+      const cleanIdNumber = (draft?.idNumber || '').trim().slice(0, 64);
+      const cleanIdPhoto =
+        draft?.idPhotoData && draft.idPhotoData.length <= 300000 ? draft.idPhotoData : '';
+      const cleanPortrait =
+        draft?.portraitPhotoData && draft.portraitPhotoData.length <= 300000
+          ? draft.portraitPhotoData
+          : '';
+      const hasKycFields = Boolean(draft?.idType && cleanIdNumber);
+      const batch = writeBatch(db);
 
-    if (email) {
-      const emailHash = await sha256Hex(email);
-      batch.set(doc(db, 'emailHashes', emailHash), {
+      const newClientRecord = {
         uid: user.uid,
+        email,
+        fullName,
         handle,
-        displayName: fullName,
-        createdAt: serverTimestamp(),
-      });
-    }
+        role: 'user' as const,
+        referredByUid,
+        referredByHandle,
+        uplineChain,
+        kycStatus: (hasKycFields ? 'pending' : 'unsubmitted') as UserProfile['kycStatus'],
+        idType: (draft?.idType || '') as UserProfile['idType'],
+        idNumber: cleanIdNumber,
+        idPhotoData: cleanIdPhoto,
+        portraitPhotoData: cleanPortrait,
+        usdBalance: 0,
+        profitBalance: 0,
+        totalInvested: 0,
+        totalWithdrawn: 0,
+        isMentor: false,
+        mentorGiftedCapital: 0,
+        mentorRequiredVolume: 0,
+        mentorBroughtVolume: 0,
+      };
 
-    uplineChain.forEach((uplineUid, idx) => {
-      const level = idx + 1;
-      const refDocId = `${user.uid}_L${level}`;
-      batch.set(doc(db, 'referrals', refDocId), {
-        referrerUid: uplineUid,
-        refereeUid: user.uid,
-        refereeHandle: handle,
-        refereeName: fullName,
-        level,
-        totalInvestedUsd: 0,
+      batch.set(userRef, {
+        ...newClientRecord,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-    });
 
+      if (shouldCreateHandleDoc) {
+        batch.set(doc(db, 'handles', handle), {
+          uid: user.uid,
+          handle,
+          displayName: fullName,
+          uplineUids: uplineChain,
+          createdAt: serverTimestamp(),
+        });
+      }
+
+      if (email) {
+        try {
+          const emailHash = await sha256Hex(email);
+          const existingEmailSnap = await getDoc(doc(db, 'emailHashes', emailHash));
+          if (!existingEmailSnap.exists()) {
+            batch.set(doc(db, 'emailHashes', emailHash), {
+              uid: user.uid,
+              handle,
+              displayName: fullName,
+              createdAt: serverTimestamp(),
+            });
+          }
+        } catch {
+          // Non-fatal if WebCrypto unavailable or hash doc already present
+        }
+      }
+
+      uplineChain.forEach((uplineUid, idx) => {
+        const level = idx + 1;
+        const refDocId = `${user.uid}_L${level}`;
+        batch.set(doc(db, 'referrals', refDocId), {
+          referrerUid: uplineUid,
+          refereeUid: user.uid,
+          refereeHandle: handle,
+          refereeName: fullName,
+          level,
+          totalInvestedUsd: 0,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      });
+
+      try {
+        await batch.commit();
+      } catch (err) {
+        // Retry once with refreshed auth token in case email_verified claim just updated
+        try {
+          await user.getIdToken(true);
+          await batch.commit();
+        } catch (retryErr) {
+          const msg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+          setProvisioningError(msg);
+          handleFirestoreError(retryErr, OperationType.WRITE, `users/${user.uid}`);
+        }
+      }
+
+      try {
+        localStorage.removeItem(`vtv_kyc_draft_${user.uid}`);
+        localStorage.removeItem('vtv_pending_kyc_draft');
+        localStorage.removeItem('vtv_pending_ref');
+      } catch {
+        // Ignore storage errors
+      }
+      setAuthSyncTick((t) => t + 1);
+    })();
+
+    provisioningInFlightRef.current.set(user.uid, task);
     try {
-      await batch.commit();
-      localStorage.removeItem(`vtv_kyc_draft_${user.uid}`);
-      localStorage.removeItem('vtv_pending_ref');
-    } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}`);
+      await task;
+    } finally {
+      provisioningInFlightRef.current.delete(user.uid);
     }
   }, []);
 
@@ -455,6 +542,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const unsub = onAuthStateChanged(auth, async (user) => {
       setAuthUser(user);
       setAuthReady(true);
+      setProvisioningError(null);
       if (!user) {
         setUserProfile(null);
         setIsAdminDoc(false);
@@ -473,7 +561,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
 
       if (user.emailVerified) {
-        const rawDraft = localStorage.getItem(`vtv_kyc_draft_${user.uid}`);
+        const rawDraft =
+          localStorage.getItem(`vtv_kyc_draft_${user.uid}`) ||
+          localStorage.getItem('vtv_pending_kyc_draft');
         let draft: KycDraft | null = null;
         if (rawDraft) {
           try {
@@ -482,7 +572,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             draft = null;
           }
         }
-        await ensureUserProvisioned(user, draft);
+        try {
+          await ensureUserProvisioned(user, draft);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          setProvisioningError(msg);
+        }
 
         // Check /admins/{uid}
         try {
@@ -500,6 +595,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     if (!authUser || !authUser.emailVerified) {
       setUserProfile(null);
+      setProfileLoading(false);
       return;
     }
 
@@ -654,7 +750,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       unsubRefs();
       unsubPaymentMethods();
     };
-  }, [authUser]);
+  }, [authUser, authSyncTick]);
 
   // Subscribe to live referral link click stats for the authenticated user's handle
   useEffect(() => {
@@ -685,12 +781,51 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return () => unsub();
   }, [authUser?.emailVerified, userProfile?.handle]);
 
-  const signInWithGoogle = async (referralCode?: string) => {
-    if (referralCode) {
-      localStorage.setItem('vtv_pending_ref', referralCode.trim().toUpperCase());
+  const signInWithGoogle = async (
+    referralCode?: string,
+    kycDraft?: Partial<KycDraft>
+  ) => {
+    const ref = (kycDraft?.referralCode || referralCode || '').trim().toUpperCase();
+    if (ref) {
+      try {
+        localStorage.setItem('vtv_pending_ref', ref);
+      } catch {
+        // Ignore storage error
+      }
     }
+    const hasDraft = Boolean(
+      kycDraft &&
+        (kycDraft.fullName?.trim() ||
+          (kycDraft.idType && kycDraft.idNumber?.trim()))
+    );
+    const normalizedDraft: KycDraft | null = hasDraft
+      ? {
+          fullName: (kycDraft?.fullName || '').trim(),
+          referralCode: ref,
+          idType: kycDraft?.idType || '',
+          idNumber: (kycDraft?.idNumber || '').trim(),
+          idPhotoData: kycDraft?.idPhotoData || '',
+          portraitPhotoData: kycDraft?.portraitPhotoData || '',
+        }
+      : null;
+
+    if (normalizedDraft) {
+      try {
+        localStorage.setItem('vtv_pending_kyc_draft', JSON.stringify(normalizedDraft));
+      } catch {
+        // Ignore storage error
+      }
+    }
+
     const res = await signInWithPopup(auth, googleProvider);
-    await ensureUserProvisioned(res.user, null);
+    if (normalizedDraft) {
+      try {
+        localStorage.setItem(`vtv_kyc_draft_${res.user.uid}`, JSON.stringify(normalizedDraft));
+      } catch {
+        // Ignore storage error
+      }
+    }
+    await ensureUserProvisioned(res.user, normalizedDraft);
   };
 
   const signInWithEmail = async (email: string, password: string) => {
@@ -716,7 +851,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       idPhotoData: params.idPhotoData,
       portraitPhotoData: params.portraitPhotoData,
     };
-    localStorage.setItem(`vtv_kyc_draft_${cred.user.uid}`, JSON.stringify(draft));
+    try {
+      localStorage.setItem(`vtv_kyc_draft_${cred.user.uid}`, JSON.stringify(draft));
+      localStorage.setItem('vtv_pending_kyc_draft', JSON.stringify(draft));
+    } catch {
+      // Ignore storage error
+    }
     if (!cred.user.emailVerified) {
       await sendEmailVerification(cred.user);
       return { needsEmailVerification: true };
@@ -735,11 +875,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!authUser) throw new Error('Authentication required.');
     try {
       await updateDoc(doc(db, 'users', authUser.uid), {
-        fullName: params.fullName.trim(),
+        fullName: params.fullName.trim().slice(0, 120),
         idType: params.idType,
-        idNumber: params.idNumber.trim(),
-        idPhotoData: params.idPhotoData,
-        portraitPhotoData: params.portraitPhotoData,
+        idNumber: params.idNumber.trim().slice(0, 64),
+        idPhotoData: params.idPhotoData.slice(0, 300000),
+        portraitPhotoData: params.portraitPhotoData.slice(0, 300000),
         kycStatus: 'pending',
         updatedAt: serverTimestamp(),
       });
@@ -757,9 +897,13 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!auth.currentUser) return false;
     await auth.currentUser.reload();
     const updated = auth.currentUser;
-    setAuthUser(updated);
     if (updated.emailVerified) {
-      const rawDraft = localStorage.getItem(`vtv_kyc_draft_${updated.uid}`);
+      await updated.getIdToken(true);
+      setAuthUser(updated);
+      setAuthSyncTick((t) => t + 1);
+      const rawDraft =
+        localStorage.getItem(`vtv_kyc_draft_${updated.uid}`) ||
+        localStorage.getItem('vtv_pending_kyc_draft');
       let draft: KycDraft | null = null;
       if (rawDraft) {
         try {
@@ -773,6 +917,29 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
     return false;
   };
+
+  const retryProfileSync = useCallback(async () => {
+    const current = auth.currentUser;
+    if (!current) return;
+    await current.reload();
+    if (current.emailVerified) {
+      await current.getIdToken(true);
+      setAuthUser(current);
+      const rawDraft =
+        localStorage.getItem(`vtv_kyc_draft_${current.uid}`) ||
+        localStorage.getItem('vtv_pending_kyc_draft');
+      let draft: KycDraft | null = null;
+      if (rawDraft) {
+        try {
+          draft = JSON.parse(rawDraft) as KycDraft;
+        } catch {
+          draft = null;
+        }
+      }
+      await ensureUserProvisioned(current, draft);
+      setAuthSyncTick((t) => t + 1);
+    }
+  }, [ensureUserProvisioned]);
 
   const signOutUser = async () => {
     await signOut(auth);
@@ -1998,6 +2165,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         authReady,
         userProfile,
         profileLoading,
+        provisioningError,
+        retryProfileSync,
         isAdminUser,
         platformConfig,
         investments,

@@ -79,6 +79,7 @@ export const FrontPage: React.FC<FrontPageProps> = ({
   const [portraitPhotoData, setPortraitPhotoData] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [providerNotEnabled, setProviderNotEnabled] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
 
   // Dedicated Page interactive states
@@ -145,6 +146,7 @@ export const FrontPage: React.FC<FrontPageProps> = ({
   const handleSignInSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
+    setProviderNotEnabled(false);
     setSuccessMsg('');
     setSubmitting(true);
     try {
@@ -152,8 +154,9 @@ export const FrontPage: React.FC<FrontPageProps> = ({
     } catch (err: unknown) {
       const code = (err as { code?: string })?.code || '';
       if (code === 'auth/operation-not-allowed') {
+        setProviderNotEnabled(true);
         setErrorMsg(
-          'Email/Password sign-in is not yet enabled in Firebase Console (Authentication -> Sign-in method -> Email/Password). Use "Continue with Google" below for instant access.'
+          'Email/Password sign-in is not yet enabled in Firebase Console (Authentication -> Sign-in method -> Email/Password). Use "Continue with Google" for instant access, or enable the Email/Password provider in Firebase Console.'
         );
       } else if (
         code === 'auth/invalid-credential' ||
@@ -172,6 +175,7 @@ export const FrontPage: React.FC<FrontPageProps> = ({
   const handleSignUpSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
+    setProviderNotEnabled(false);
     setSuccessMsg('');
 
     if (!fullName.trim() || !regEmail.trim() || regPassword.length < 6 || !idNumber.trim()) {
@@ -203,8 +207,9 @@ export const FrontPage: React.FC<FrontPageProps> = ({
     } catch (err: unknown) {
       const code = (err as { code?: string })?.code || '';
       if (code === 'auth/operation-not-allowed') {
+        setProviderNotEnabled(true);
         setErrorMsg(
-          'Email/Password registration is not yet enabled in Firebase Console (Authentication -> Sign-in method -> Email/Password). Click "Continue with Google" below to enter immediately and submit KYC inside your Vault.'
+          'Email/Password registration is not yet enabled in Firebase Console (Authentication -> Sign-in method -> Email/Password). Click "Continue with Google" below to enter immediately—your KYC details from this form will be saved automatically.'
         );
       } else if (code === 'auth/email-already-in-use') {
         setErrorMsg('This email is already registered. Switch to Sign In or use Continue with Google.');
@@ -218,10 +223,22 @@ export const FrontPage: React.FC<FrontPageProps> = ({
 
   const handleGoogleAuth = async () => {
     setErrorMsg('');
+    setProviderNotEnabled(false);
     setSuccessMsg('');
     setSubmitting(true);
     try {
-      await signInWithGoogle(referralCode);
+      const kycDraft =
+        authMode === 'signup' && (fullName.trim() || idNumber.trim())
+          ? {
+              fullName,
+              referralCode,
+              idType,
+              idNumber,
+              idPhotoData,
+              portraitPhotoData,
+            }
+          : undefined;
+      await signInWithGoogle(referralCode, kycDraft);
     } catch (err: unknown) {
       const code = (err as { code?: string })?.code || '';
       if (code === 'auth/unauthorized-domain') {
@@ -357,6 +374,7 @@ export const FrontPage: React.FC<FrontPageProps> = ({
                     onClick={() => {
                       setAuthMode('signin');
                       setErrorMsg('');
+                      setProviderNotEnabled(false);
                       setSuccessMsg('');
                     }}
                     className={`px-3.5 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
@@ -372,6 +390,7 @@ export const FrontPage: React.FC<FrontPageProps> = ({
                     onClick={() => {
                       setAuthMode('signup');
                       setErrorMsg('');
+                      setProviderNotEnabled(false);
                       setSuccessMsg('');
                     }}
                     className={`px-3.5 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
@@ -386,8 +405,23 @@ export const FrontPage: React.FC<FrontPageProps> = ({
               </div>
 
               {errorMsg && (
-                <div className="mt-4 p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-800 leading-relaxed">
-                  {errorMsg}
+                <div className="mt-4 p-3.5 rounded-lg bg-red-50 border border-red-200 text-xs text-red-800 leading-relaxed space-y-2.5">
+                  <div>{errorMsg}</div>
+                  {providerNotEnabled && (
+                    <button
+                      type="button"
+                      disabled={submitting}
+                      onClick={handleGoogleAuth}
+                      className="px-3.5 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-semibold inline-flex items-center gap-2 transition-colors"
+                    >
+                      <span>
+                        {authMode === 'signup'
+                          ? 'Continue with Google & Submit KYC'
+                          : 'Continue with Google Now'}
+                      </span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -397,6 +431,48 @@ export const FrontPage: React.FC<FrontPageProps> = ({
                   <span>{successMsg}</span>
                 </div>
               )}
+
+              {/* Recommended Instant Google Sign-In */}
+              <div className="mt-5 space-y-4">
+                <button
+                  type="button"
+                  disabled={submitting}
+                  onClick={handleGoogleAuth}
+                  className="w-full py-2.5 px-4 rounded-lg border border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-900 text-sm font-semibold transition-colors flex items-center justify-center gap-2.5"
+                >
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      fill="#4285F4"
+                      d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
+                    />
+                    <path
+                      fill="#34A853"
+                      d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24Z"
+                    />
+                    <path
+                      fill="#FBBC05"
+                      d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14Z"
+                    />
+                    <path
+                      fill="#EA4335"
+                      d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96Z"
+                    />
+                  </svg>
+                  <span>
+                    {authMode === 'signup'
+                      ? 'Continue with Google (Instant Account + KYC)'
+                      : 'Continue with Google (Instant Sign In)'}
+                  </span>
+                </button>
+
+                <div className="flex items-center gap-3">
+                  <div className="h-px flex-1 bg-slate-200" />
+                  <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider">
+                    or use Email &amp; Password
+                  </span>
+                  <div className="h-px flex-1 bg-slate-200" />
+                </div>
+              </div>
 
               {authMode === 'signin' ? (
                 <form onSubmit={handleSignInSubmit} className="mt-5 space-y-4">
@@ -621,41 +697,6 @@ export const FrontPage: React.FC<FrontPageProps> = ({
                 </form>
               )}
 
-              {/* Divider & Google Sign-In */}
-              <div className="my-5 flex items-center gap-3">
-                <div className="h-px flex-1 bg-slate-200" />
-                <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider">
-                  or
-                </span>
-                <div className="h-px flex-1 bg-slate-200" />
-              </div>
-
-              <button
-                type="button"
-                disabled={submitting}
-                onClick={handleGoogleAuth}
-                className="w-full py-2.5 px-4 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-sm font-semibold transition-colors flex items-center justify-center gap-2.5"
-              >
-                <svg className="w-4 h-4" viewBox="0 0 24 24" aria-hidden="true">
-                  <path
-                    fill="#4285F4"
-                    d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
-                  />
-                  <path
-                    fill="#34A853"
-                    d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24Z"
-                  />
-                  <path
-                    fill="#FBBC05"
-                    d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14Z"
-                  />
-                  <path
-                    fill="#EA4335"
-                    d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96Z"
-                  />
-                </svg>
-                <span>Continue with Google</span>
-              </button>
             </>
           )}
         </div>

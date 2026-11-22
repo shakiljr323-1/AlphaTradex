@@ -28,6 +28,7 @@ import {
   PlusCircle,
   QrCode,
   Receipt,
+  RefreshCw,
   Rocket,
   Send,
   ShieldCheck,
@@ -99,6 +100,8 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
     authUser,
     userProfile,
     profileLoading,
+    provisioningError,
+    retryProfileSync,
     platformConfig,
     investments,
     deposits,
@@ -138,10 +141,31 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
   const [busyAction, setBusyAction] = useState(false);
   const [copiedText, setCopiedText] = useState('');
   const [selectedBreakdown, setSelectedBreakdown] = useState<Withdrawal | null>(null);
+  const [retryingSync, setRetryingSync] = useState(false);
+  const [showSyncFallback, setShowSyncFallback] = useState(false);
+  const autoRetryTriggeredRef = useRef<string | null>(null);
 
   useEffect(() => {
     setActiveNav(initialSection);
   }, [initialSection]);
+
+  useEffect(() => {
+    if (!authUser || !authUser.emailVerified || userProfile) {
+      setShowSyncFallback(false);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setShowSyncFallback(true);
+    }, 3500);
+
+    if (!profileLoading && !provisioningError && autoRetryTriggeredRef.current !== authUser.uid) {
+      autoRetryTriggeredRef.current = authUser.uid;
+      void retryProfileSync();
+    }
+
+    return () => window.clearTimeout(timer);
+  }, [authUser, userProfile, profileLoading, provisioningError, retryProfileSync]);
 
   // Capital withdrawal target modal
   const [capitalTargetInv, setCapitalTargetInv] = useState<Investment | null>(null);
@@ -342,10 +366,67 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
   }
 
   if (profileLoading || !userProfile) {
+    const showRecoveryActions = Boolean(provisioningError) || showSyncFallback || !profileLoading;
     return (
       <div className="relative z-10 min-h-screen flex items-center justify-center p-6">
-        <div className="bg-[#0B111E]/90 backdrop-blur-xl border border-slate-700/80 rounded-xl px-6 py-5 text-sm text-slate-200 font-mono shadow-2xl">
-          Synchronizing {platformConfig.companyName} Vault Ledger...
+        <div className="max-w-md w-full bg-[#0B111E]/95 backdrop-blur-xl border border-slate-700/80 rounded-2xl p-6 space-y-4 shadow-2xl text-slate-100">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0">
+              {provisioningError ? (
+                <AlertTriangle className="w-5 h-5" />
+              ) : (
+                <RefreshCw className={`w-5 h-5 ${retryingSync || profileLoading ? 'animate-spin' : ''}`} />
+              )}
+            </div>
+            <div>
+              <h2 className="font-display font-bold text-white text-base">
+                Synchronizing {platformConfig.companyName} Vault Ledger...
+              </h2>
+              <p className="text-xs text-slate-400">
+                {authUser?.email || 'Initializing authenticated session'}
+              </p>
+            </div>
+          </div>
+
+          {provisioningError ? (
+            <div className="p-3 rounded-lg bg-red-950/70 border border-red-700/60 text-xs text-red-200 leading-relaxed">
+              {formatVaultError(provisioningError)}
+            </div>
+          ) : (
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Connecting your verified account to the ledger. If this takes more than a few seconds,
+              use Retry Ledger Sync below to refresh your token and provision your vault record.
+            </p>
+          )}
+
+          {showRecoveryActions && (
+            <div className="flex flex-col sm:flex-row gap-2.5 pt-1">
+              <button
+                type="button"
+                disabled={retryingSync}
+                onClick={async () => {
+                  setRetryingSync(true);
+                  try {
+                    await retryProfileSync();
+                  } finally {
+                    setRetryingSync(false);
+                  }
+                }}
+                className="flex-1 py-2.5 px-4 rounded-lg bg-orange-600 hover:bg-orange-500 disabled:opacity-60 text-white text-xs font-semibold flex items-center justify-center gap-2 transition-colors"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${retryingSync ? 'animate-spin' : ''}`} />
+                {retryingSync ? 'Retrying Sync...' : 'Retry Ledger Sync'}
+              </button>
+              <button
+                type="button"
+                onClick={signOutUser}
+                className="py-2.5 px-4 rounded-lg border border-slate-700 hover:bg-slate-800 text-slate-300 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                Sign Out
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );
