@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AdminRouteGate } from './components/AdminRouteGate';
 import { AiRobotBackdrop } from './components/AiRobotBackdrop';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -23,10 +23,9 @@ const AppRouter: React.FC = () => {
   const { authUser, authReady, platformConfig } = usePlatform();
   const [isAdminRoute, setIsAdminRoute] = useState<boolean>(checkIsAdminRoute);
   const [activeSection, setActiveSection] = useState<NavSection>('home');
-  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signup');
+  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
   const [showHomeView, setShowHomeView] = useState(false);
-  const [dashTargetTab, setDashTargetTab] = useState<'dashboard' | 'forex-market'>('dashboard');
-  const authCardRef = useRef<HTMLDivElement | null>(null);
+  const [dashTargetTab, setDashTargetTab] = useState<'dashboard' | 'forex-market' | 'pump-fun'>('dashboard');
 
   useEffect(() => {
     const syncRoute = () => setIsAdminRoute(checkIsAdminRoute());
@@ -93,12 +92,18 @@ const AppRouter: React.FC = () => {
     );
   }
 
-  const scrollToAuth = (mode: 'signin' | 'signup') => {
+  const openDedicatedAuth = (mode: 'signin' | 'signup') => {
     setAuthMode(mode);
-    authCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setActiveSection('auth');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const openDashboardFromHome = (targetNav: 'dashboard' | 'forex-market' = 'dashboard') => {
+  const handleSelectSection = (section: NavSection) => {
+    setActiveSection(section);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const openDashboardFromHome = (targetNav: 'dashboard' | 'forex-market' | 'pump-fun' = 'dashboard') => {
     setDashTargetTab(targetNav);
     setShowHomeView(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -111,9 +116,10 @@ const AppRouter: React.FC = () => {
         companyName={platformConfig.companyName}
         coinName={platformConfig.pumpFunToken.name}
         activeSection={activeSection}
-        onSelectSection={setActiveSection}
-        onOpenSignIn={() => scrollToAuth('signin')}
-        onOpenRegister={() => scrollToAuth('signup')}
+        authMode={authMode}
+        onSelectSection={handleSelectSection}
+        onOpenSignIn={() => openDedicatedAuth('signin')}
+        onOpenRegister={() => openDedicatedAuth('signup')}
         globalPaused={platformConfig.globalPaused}
         isSignedIn={Boolean(authUser)}
         onOpenDashboard={() => openDashboardFromHome('dashboard')}
@@ -121,10 +127,10 @@ const AppRouter: React.FC = () => {
       <div className="relative z-10 flex-1">
         <FrontPage
           activeSection={activeSection}
-          onSelectSection={setActiveSection}
+          onSelectSection={handleSelectSection}
           authMode={authMode}
           setAuthMode={setAuthMode}
-          authCardRef={authCardRef}
+          onOpenAuth={openDedicatedAuth}
           onOpenDashboard={authUser ? openDashboardFromHome : undefined}
         />
       </div>

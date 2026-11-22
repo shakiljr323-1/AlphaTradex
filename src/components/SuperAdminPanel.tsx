@@ -6,6 +6,7 @@ import {
   Bell,
   CheckCircle2,
   Coins,
+  Cpu,
   CreditCard,
   Download,
   Gift,
@@ -20,6 +21,7 @@ import {
   Settings,
   Shield,
   ShieldCheck,
+  Sparkles,
   Trash2,
   Users,
   X,
@@ -29,6 +31,11 @@ import { usePlatform } from '../context/PlatformContext';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import {
   AnnouncementTone,
+  BannerAdConfig,
+  BannerAdPlacement,
+  BannerAdTheme,
+  CoinMiningPlan,
+  CoinMiningStake,
   CryptoDeposit,
   Investment,
   MemeCoinInvestment,
@@ -40,7 +47,22 @@ import {
   UserProfile,
   Withdrawal,
 } from '../types/platform';
+import { BannerAdSlot } from './AlphatradexCoinHub';
 import { CapitalRequestModal } from './CapitalRequestModal';
+import { AlphatradexLogo3D } from './AlphatradexLogo3D';
+
+function formatUiError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err || 'Action failed.');
+  if (raw.startsWith('{') && raw.includes('"error"')) {
+    try {
+      const parsed = JSON.parse(raw) as { error?: string };
+      if (parsed?.error) return parsed.error;
+    } catch {
+      // Ignore parse error
+    }
+  }
+  return raw;
+}
 
 type AdminTab =
   | 'approvals'
@@ -48,6 +70,7 @@ type AdminTab =
   | 'mentors'
   | 'packages'
   | 'announcements'
+  | 'coin-ads-mining'
   | 'company'
   | 'wallets-meme'
   | 'audit';
@@ -82,19 +105,25 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
   const [allP2P, setAllP2P] = useState<P2PTransfer[]>([]);
   const [allMlm, setAllMlm] = useState<MlmCommission[]>([]);
   const [allMeme, setAllMeme] = useState<MemeCoinInvestment[]>([]);
+  const [allCoinStakes, setAllCoinStakes] = useState<CoinMiningStake[]>([]);
 
   const [clientSearch, setClientSearch] = useState('');
   const [clientKycFilter, setClientKycFilter] = useState<'all' | 'pending' | 'approved' | 'unsubmitted' | 'rejected'>('all');
 
   const [mentorTargetUid, setMentorTargetUid] = useState('');
-  const [mentorGiftAmount, setMentorGiftAmount] = useState('500');
-  const [mentorDailyPct, setMentorDailyPct] = useState('2.0');
+  const [mentorGiftAmount, setMentorGiftAmount] = useState(
+    String(platformConfig.mentorConfig?.defaultGiftCapital || 500)
+  );
+  const [mentorDailyPct, setMentorDailyPct] = useState(
+    String(platformConfig.mentorConfig?.defaultDailyPercent || 2.0)
+  );
   const [mentorAiMode, setMentorAiMode] = useState('AI Mentor Institutional Desk');
 
   const [newPmName, setNewPmName] = useState('');
   const [newPmCode, setNewPmCode] = useState('');
   const [newPmCategory, setNewPmCategory] = useState<PaymentMethodCategory>('crypto');
   const [newPmAccount, setNewPmAccount] = useState('');
+  const [newPmWithdrawAddress, setNewPmWithdrawAddress] = useState('');
   const [newPmInstructions, setNewPmInstructions] = useState('');
   const [newPmMinDeposit, setNewPmMinDeposit] = useState('10');
   const [newPmMinWithdraw, setNewPmMinWithdraw] = useState('10');
@@ -141,6 +170,11 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
       (snap) => setAllInvestments(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Investment, 'id'>) }))),
       (err) => handleFirestoreError(err, OperationType.LIST, 'investments')
     );
+    const u8 = onSnapshot(
+      query(collection(db, 'coinMiningStakes'), orderBy('startedAtMs', 'desc')),
+      (snap) => setAllCoinStakes(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<CoinMiningStake, 'id'>) }))),
+      (err) => handleFirestoreError(err, OperationType.LIST, 'coinMiningStakes')
+    );
 
     return () => {
       u1();
@@ -150,11 +184,12 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
       u5();
       u6();
       u7();
+      u8();
     };
   }, []);
 
   const notify = (type: 'ok' | 'err', text: string) => {
-    setStatusMsg({ type, text });
+    setStatusMsg({ type, text: type === 'err' ? formatUiError(text) : text });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -164,7 +199,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
       await updatePlatformConfig(nextConfig);
       notify('ok', 'Platform configuration published globally to Firestore.');
     } catch (err) {
-      notify('err', (err as Error).message);
+      notify('err', formatUiError(err));
     } finally {
       setBusy(false);
     }
@@ -234,6 +269,8 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
     URL.revokeObjectURL(url);
   };
 
+  const mentorMultiplier = Math.max(1, Number(draftConfig.mentorConfig?.volumeMultiplier) || 4);
+
   const navGroups: {
     heading: string;
     items: { id: AdminTab; label: string; Icon: React.ComponentType<{ className?: string }> }[];
@@ -247,16 +284,17 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
           Icon: ShieldCheck,
         },
         { id: 'clients', label: `Client Database (${allUsers.length})`, Icon: Users },
-        { id: 'mentors', label: 'Mentor Gifts (4× Rule)', Icon: Gift },
+        { id: 'mentors', label: `Mentor Gifts (${mentorMultiplier}× Rule)`, Icon: Gift },
       ],
     },
     {
       heading: 'PLATFORM CONTROLS',
       items: [
         { id: 'announcements', label: 'Dashboard Notice Bar', Icon: Megaphone },
-        { id: 'packages', label: 'Packages & 200-Day Rules', Icon: Settings },
+        { id: 'packages', label: 'Packages & Commissions', Icon: Settings },
+        { id: 'coin-ads-mining', label: 'Banner Ads & Coin Mining', Icon: Sparkles },
+        { id: 'wallets-meme', label: 'Addresses & Meme Coin', Icon: Coins },
         { id: 'company', label: 'Company & Trust Ratings', Icon: Shield },
-        { id: 'wallets-meme', label: 'Payments, Wallets & Meme', Icon: Coins },
       ],
     },
     {
@@ -277,9 +315,11 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
       >
         <div className="h-16 px-4 flex items-center justify-between border-b border-slate-800/80 shrink-0">
           <div className="flex items-center gap-2.5 min-w-0">
-            <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-orange-500 to-orange-600 flex items-center justify-center font-display font-extrabold text-white text-base shrink-0">
-              V
-            </span>
+            <AlphatradexLogo3D
+              variant="mark"
+              size="sm"
+              companyName={draftConfig.companyName || 'Alphatradex'}
+            />
             <div className="min-w-0">
               <div className="font-display font-bold text-white text-sm truncate">Super Admin</div>
               <div className="text-[10px] font-mono text-orange-400 truncate">/admin Control Desk</div>
@@ -568,6 +608,8 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                               try {
                                 await approveKyc(u.uid);
                                 notify('ok', `KYC approved for ${u.fullName}.`);
+                              } catch (err) {
+                                notify('err', formatUiError(err));
                               } finally {
                                 setBusy(false);
                               }
@@ -584,6 +626,8 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                               try {
                                 await rejectKyc(u.uid);
                                 notify('ok', `KYC rejected for ${u.fullName}.`);
+                              } catch (err) {
+                                notify('err', formatUiError(err));
                               } finally {
                                 setBusy(false);
                               }
@@ -637,6 +681,8 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                               try {
                                 await approveCapitalWithdrawal(w);
                                 notify('ok', `Approved capital withdrawal for Package #${w.packageNumber}.`);
+                              } catch (err) {
+                                notify('err', formatUiError(err));
                               } finally {
                                 setBusy(false);
                               }
@@ -653,6 +699,8 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                               try {
                                 await rejectCapitalWithdrawal(w, 'Capital lock review declined');
                                 notify('ok', `Rejected capital withdrawal for Package #${w.packageNumber}.`);
+                              } catch (err) {
+                                notify('err', formatUiError(err));
                               } finally {
                                 setBusy(false);
                               }
@@ -694,10 +742,11 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5 text-center">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-9 gap-2.5 text-center">
                 {[
                   { label: 'users', count: allUsers.length },
                   { label: 'investments', count: allInvestments.length },
+                  { label: 'coinStakes', count: allCoinStakes.length },
                   { label: 'cryptoDeposits', count: allDeposits.length },
                   { label: 'withdrawals', count: allWithdrawals.length },
                   { label: 'p2pTransfers', count: allP2P.length },
@@ -820,6 +869,8 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                                   try {
                                     await approveKyc(u.uid);
                                     notify('ok', `KYC approved for ${u.fullName}.`);
+                                  } catch (err) {
+                                    notify('err', formatUiError(err));
                                   } finally {
                                     setBusy(false);
                                   }
@@ -838,6 +889,8 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                                   try {
                                     await rejectKyc(u.uid);
                                     notify('ok', `KYC rejected for ${u.fullName}.`);
+                                  } catch (err) {
+                                    notify('err', formatUiError(err));
                                   } finally {
                                     setBusy(false);
                                   }
@@ -857,16 +910,15 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
             </section>
           )}
 
-          {/* TAB 2: MENTOR GIFTED ACCOUNTS (4x RULE) */}
+          {/* TAB 2: MENTOR GIFTED ACCOUNTS & OVERRIDE COMMISSION */}
           {tab === 'mentors' && (
             <section className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               <div className="lg:col-span-5 bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
                 <h2 className="font-display font-bold text-slate-900 text-base">
-                  Gift Mentor Account (Automatic 4× Volume Rule)
+                  Gift Mentor Account (Automatic {mentorMultiplier}× Volume Rule)
                 </h2>
                 <p className="text-xs text-slate-500">
-                  Gifted capital begins weekday profit accrual immediately, but profit withdrawals remain
-                  locked until referred volume reaches 4 × Gifted Capital.
+                  Gifted capital accrues weekday profit immediately, while withdrawals unlock after referred team volume hits {mentorMultiplier}× Gifted Capital. Active mentors also earn a +{draftConfig.mentorConfig.mentorCommissionPercent}% override commission on direct L1 package activations.
                 </p>
 
                 <form
@@ -887,8 +939,8 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                       notify(
                         'ok',
                         `Mentor account gifted ($${Number(mentorGiftAmount).toFixed(2)} capital, $${(
-                          Number(mentorGiftAmount) * 4
-                        ).toFixed(2)} 4× volume required).`
+                          Number(mentorGiftAmount) * mentorMultiplier
+                        ).toFixed(2)} (${mentorMultiplier}×) volume required).`
                       );
                     } catch (err) {
                       notify('err', (err as Error).message);
@@ -959,8 +1011,8 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                   </div>
 
                   <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs font-mono">
-                    Required 4× Referred Volume:{' '}
-                    <strong>${(Number(mentorGiftAmount || 0) * 4).toFixed(2)}</strong>
+                    Required {mentorMultiplier}× Referred Volume:{' '}
+                    <strong>${(Number(mentorGiftAmount || 0) * mentorMultiplier).toFixed(2)}</strong>
                   </div>
 
                   <button
@@ -975,7 +1027,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
 
               <div className="lg:col-span-7 bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
                 <h3 className="font-display font-bold text-slate-900 text-base">
-                  Active Mentor Accounts &amp; 4× Progress ({mentorUsers.length})
+                  Active Mentor Accounts &amp; Volume Progress ({mentorUsers.length})
                 </h3>
                 {mentorUsers.length === 0 ? (
                   <p className="text-xs text-slate-500">No mentor accounts gifted yet.</p>
@@ -998,7 +1050,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                                 unlocked ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-900'
                               }`}
                             >
-                              {unlocked ? '4× Unlocked' : 'Locked'}
+                              {unlocked ? 'Volume Unlocked' : 'Locked'}
                             </span>
                           </div>
                           <div className="flex justify-between font-mono text-slate-600 tabular-nums">
@@ -1022,148 +1074,432 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
             </section>
           )}
 
-          {/* TAB 3: PACKAGES & 200-DAY SCHEDULE RULES */}
+          {/* TAB 3: PACKAGES CRUD, INTEREST RATES, REFERRAL & MENTOR COMMISSIONS */}
           {tab === 'packages' && (
-            <section className="bg-white border border-slate-200 rounded-2xl p-6 space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="font-display font-bold text-slate-900 text-lg">
-                    Packages, 200-Day Schedule &amp; Withdrawal Rules
-                  </h2>
-                  <p className="text-xs text-slate-500">
-                    Changes propagate immediately to the Front Page and User Vaults.
-                  </p>
+            <section className="space-y-6">
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-6">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="font-display font-bold text-slate-900 text-lg">
+                      Investment Packages, Interest Rates &amp; Withdrawal Rules
+                    </h2>
+                    <p className="text-xs text-slate-500">
+                      Add, edit, or delete investment plans and adjust daily interest rates globally.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextIdx = draftConfig.packages.length + 1;
+                        setDraftConfig({
+                          ...draftConfig,
+                          packages: [
+                            ...draftConfig.packages,
+                            {
+                              id: `pkg_${Date.now().toString(36)}`,
+                              name: `Custom Tier ${nextIdx}`,
+                              capital: 2500,
+                              dailyPercent: 3.5,
+                              aiMode: 'AI Institutional Hybrid',
+                              profitDays: draftConfig.totalProfitDays || 200,
+                              capitalLockDays: 90,
+                              description: 'Configurable institutional AI strategy package.',
+                            },
+                          ],
+                        });
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-semibold"
+                    >
+                      <Plus className="w-3.5 h-3.5 text-orange-600" />
+                      Add New Package
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => handleSaveConfig()}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      Save All Rules &amp; Rates
+                    </button>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => handleSaveConfig()}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold"
-                >
-                  <Save className="w-3.5 h-3.5" />
-                  Save All Rules
-                </button>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Global Min Profit Withdrawal ($)
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={draftConfig.minWithdrawalUsd}
+                      onChange={(e) =>
+                        setDraftConfig({ ...draftConfig, minWithdrawalUsd: Math.max(1, Number(e.target.value) || 1) })
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Default Profit Days (Mon–Fri)
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={draftConfig.totalProfitDays}
+                      onChange={(e) =>
+                        setDraftConfig({ ...draftConfig, totalProfitDays: Math.max(1, Number(e.target.value) || 1) })
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Elite Capital Lock (Calendar Days)
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={draftConfig.eliteCapitalLockDays}
+                      onChange={(e) =>
+                        setDraftConfig({
+                          ...draftConfig,
+                          eliteCapitalLockDays: Math.max(1, Number(e.target.value) || 1),
+                        })
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  {draftConfig.packages.map((pkg, idx) => (
+                    <div
+                      key={pkg.id}
+                      className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-3"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono text-xs font-bold text-slate-600">
+                          ID: {pkg.id} · Daily Return: ${((pkg.capital * pkg.dailyPercent) / 100).toFixed(2)}/day
+                        </span>
+                        {draftConfig.packages.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setDraftConfig({
+                                ...draftConfig,
+                                packages: draftConfig.packages.filter((_, i) => i !== idx),
+                              })
+                            }
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold text-red-600 hover:bg-red-50"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            Delete
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-500 mb-1">Name</label>
+                          <input
+                            type="text"
+                            value={pkg.name}
+                            onChange={(e) => {
+                              const pkgs = [...draftConfig.packages];
+                              pkgs[idx] = { ...pkg, name: e.target.value };
+                              setDraftConfig({ ...draftConfig, packages: pkgs });
+                            }}
+                            className="w-full px-3 py-1.5 rounded border border-slate-200 bg-white text-xs font-semibold"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-500 mb-1">Capital ($)</label>
+                          <input
+                            type="number"
+                            min={1}
+                            value={pkg.capital}
+                            onChange={(e) => {
+                              const pkgs = [...draftConfig.packages];
+                              pkgs[idx] = { ...pkg, capital: Math.max(1, Number(e.target.value) || 1) };
+                              setDraftConfig({ ...draftConfig, packages: pkgs });
+                            }}
+                            className="w-full px-3 py-1.5 rounded border border-slate-200 bg-white text-xs font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-500 mb-1">Daily Interest (%)</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            min={0.1}
+                            max={50}
+                            value={pkg.dailyPercent}
+                            onChange={(e) => {
+                              const pkgs = [...draftConfig.packages];
+                              pkgs[idx] = { ...pkg, dailyPercent: Math.max(0.1, Number(e.target.value) || 0.1) };
+                              setDraftConfig({ ...draftConfig, packages: pkgs });
+                            }}
+                            className="w-full px-3 py-1.5 rounded border border-slate-200 bg-white text-xs font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-500 mb-1">AI Mode</label>
+                          <input
+                            type="text"
+                            value={pkg.aiMode}
+                            onChange={(e) => {
+                              const pkgs = [...draftConfig.packages];
+                              pkgs[idx] = { ...pkg, aiMode: e.target.value };
+                              setDraftConfig({ ...draftConfig, packages: pkgs });
+                            }}
+                            className="w-full px-3 py-1.5 rounded border border-slate-200 bg-white text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-500 mb-1">Profit Days</label>
+                          <input
+                            type="number"
+                            min={1}
+                            value={pkg.profitDays}
+                            onChange={(e) => {
+                              const pkgs = [...draftConfig.packages];
+                              pkgs[idx] = { ...pkg, profitDays: Math.max(1, Number(e.target.value) || 1) };
+                              setDraftConfig({ ...draftConfig, packages: pkgs });
+                            }}
+                            className="w-full px-3 py-1.5 rounded border border-slate-200 bg-white text-xs font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-500 mb-1">Capital Lock (d)</label>
+                          <input
+                            type="number"
+                            min={0}
+                            value={pkg.capitalLockDays}
+                            onChange={(e) => {
+                              const pkgs = [...draftConfig.packages];
+                              pkgs[idx] = { ...pkg, capitalLockDays: Math.max(0, Number(e.target.value) || 0) };
+                              setDraftConfig({ ...draftConfig, packages: pkgs });
+                            }}
+                            className="w-full px-3 py-1.5 rounded border border-slate-200 bg-white text-xs font-mono"
+                          />
+                        </div>
+                        <div className="md:col-span-6">
+                          <label className="block text-[11px] font-semibold text-slate-500 mb-1">Description</label>
+                          <input
+                            type="text"
+                            value={pkg.description}
+                            onChange={(e) => {
+                              const pkgs = [...draftConfig.packages];
+                              pkgs[idx] = { ...pkg, description: e.target.value };
+                              setDraftConfig({ ...draftConfig, packages: pkgs });
+                            }}
+                            className="w-full px-3 py-1.5 rounded border border-slate-200 bg-white text-xs"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Minimum Profit Withdrawal ($)
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={draftConfig.minWithdrawalUsd}
-                    onChange={(e) =>
-                      setDraftConfig({ ...draftConfig, minWithdrawalUsd: Number(e.target.value) })
-                    }
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Default Profit Days (Mon–Fri)
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={draftConfig.totalProfitDays}
-                    onChange={(e) =>
-                      setDraftConfig({ ...draftConfig, totalProfitDays: Number(e.target.value) })
-                    }
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Elite Capital Lock (Calendar Days)
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={draftConfig.eliteCapitalLockDays}
-                    onChange={(e) =>
-                      setDraftConfig({ ...draftConfig, eliteCapitalLockDays: Number(e.target.value) })
-                    }
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono text-sm"
-                  />
-                </div>
-              </div>
+              {/* Referral & Mentor Commission Controls */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <h3 className="font-display font-bold text-slate-900 text-base">
+                        Referral Commission Rates (All Plans)
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Instant commission credited to upline Income Wallet on package activation.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => handleSaveConfig()}
+                      className="px-3.5 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shrink-0"
+                    >
+                      Save Rates
+                    </button>
+                  </div>
 
-              <div className="space-y-4">
-                {draftConfig.packages.map((pkg, idx) => (
-                  <div
-                    key={pkg.id}
-                    className="p-4 rounded-xl border border-slate-200 grid grid-cols-1 md:grid-cols-5 gap-3"
-                  >
+                  <div className="grid grid-cols-3 gap-3">
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-500 mb-1">Name</label>
-                      <input
-                        type="text"
-                        value={pkg.name}
-                        onChange={(e) => {
-                          const pkgs = [...draftConfig.packages];
-                          pkgs[idx] = { ...pkg, name: e.target.value };
-                          setDraftConfig({ ...draftConfig, packages: pkgs });
-                        }}
-                        className="w-full px-3 py-1.5 rounded border border-slate-200 text-xs font-semibold"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-500 mb-1">Capital ($)</label>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">Level 1 (%)</label>
                       <input
                         type="number"
-                        value={pkg.capital}
-                        onChange={(e) => {
-                          const pkgs = [...draftConfig.packages];
-                          pkgs[idx] = { ...pkg, capital: Number(e.target.value) };
-                          setDraftConfig({ ...draftConfig, packages: pkgs });
-                        }}
-                        className="w-full px-3 py-1.5 rounded border border-slate-200 text-xs font-mono"
+                        step="0.5"
+                        min={0}
+                        max={50}
+                        value={draftConfig.mlmRates.level1}
+                        onChange={(e) =>
+                          setDraftConfig({
+                            ...draftConfig,
+                            mlmRates: { ...draftConfig.mlmRates, level1: Math.max(0, Number(e.target.value) || 0) },
+                          })
+                        }
+                        className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono text-sm"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-500 mb-1">Daily (%)</label>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">Level 2 (%)</label>
                       <input
                         type="number"
-                        step="0.1"
-                        value={pkg.dailyPercent}
-                        onChange={(e) => {
-                          const pkgs = [...draftConfig.packages];
-                          pkgs[idx] = { ...pkg, dailyPercent: Number(e.target.value) };
-                          setDraftConfig({ ...draftConfig, packages: pkgs });
-                        }}
-                        className="w-full px-3 py-1.5 rounded border border-slate-200 text-xs font-mono"
+                        step="0.5"
+                        min={0}
+                        max={50}
+                        value={draftConfig.mlmRates.level2}
+                        onChange={(e) =>
+                          setDraftConfig({
+                            ...draftConfig,
+                            mlmRates: { ...draftConfig.mlmRates, level2: Math.max(0, Number(e.target.value) || 0) },
+                          })
+                        }
+                        className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono text-sm"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-500 mb-1">AI Trading Mode</label>
-                      <input
-                        type="text"
-                        value={pkg.aiMode}
-                        onChange={(e) => {
-                          const pkgs = [...draftConfig.packages];
-                          pkgs[idx] = { ...pkg, aiMode: e.target.value };
-                          setDraftConfig({ ...draftConfig, packages: pkgs });
-                        }}
-                        className="w-full px-3 py-1.5 rounded border border-slate-200 text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-500 mb-1">Profit Days</label>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">Level 3 (%)</label>
                       <input
                         type="number"
-                        value={pkg.profitDays}
-                        onChange={(e) => {
-                          const pkgs = [...draftConfig.packages];
-                          pkgs[idx] = { ...pkg, profitDays: Number(e.target.value) };
-                          setDraftConfig({ ...draftConfig, packages: pkgs });
-                        }}
-                        className="w-full px-3 py-1.5 rounded border border-slate-200 text-xs font-mono"
+                        step="0.5"
+                        min={0}
+                        max={50}
+                        value={draftConfig.mlmRates.level3}
+                        onChange={(e) =>
+                          setDraftConfig({
+                            ...draftConfig,
+                            mlmRates: { ...draftConfig.mlmRates, level3: Math.max(0, Number(e.target.value) || 0) },
+                          })
+                        }
+                        className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono text-sm"
                       />
                     </div>
                   </div>
-                ))}
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <h3 className="font-display font-bold text-slate-900 text-base">
+                        Mentor Commission &amp; Volume Controls
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Extra override commission credited to active Mentors when their L1 downline activates a package.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setDraftConfig({
+                          ...draftConfig,
+                          mentorConfig: {
+                            ...draftConfig.mentorConfig,
+                            enabled: !draftConfig.mentorConfig.enabled,
+                          },
+                        })
+                      }
+                      className={`px-3 py-1.5 rounded-lg border text-xs font-semibold shrink-0 ${
+                        draftConfig.mentorConfig.enabled
+                          ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                          : 'border-slate-200 bg-slate-100 text-slate-600'
+                      }`}
+                    >
+                      {draftConfig.mentorConfig.enabled ? 'Override ON' : 'Override OFF'}
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                        Mentor Bonus (%)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.5"
+                        min={0}
+                        max={50}
+                        value={draftConfig.mentorConfig.mentorCommissionPercent}
+                        onChange={(e) =>
+                          setDraftConfig({
+                            ...draftConfig,
+                            mentorConfig: {
+                              ...draftConfig.mentorConfig,
+                              mentorCommissionPercent: Math.max(0, Number(e.target.value) || 0),
+                            },
+                          })
+                        }
+                        className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                        Volume Rule (×)
+                      </label>
+                      <input
+                        type="number"
+                        step="1"
+                        min={1}
+                        max={20}
+                        value={draftConfig.mentorConfig.volumeMultiplier}
+                        onChange={(e) =>
+                          setDraftConfig({
+                            ...draftConfig,
+                            mentorConfig: {
+                              ...draftConfig.mentorConfig,
+                              volumeMultiplier: Math.max(1, Number(e.target.value) || 4),
+                            },
+                          })
+                        }
+                        className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                        Default Gift ($)
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={draftConfig.mentorConfig.defaultGiftCapital}
+                        onChange={(e) => {
+                          const val = Math.max(1, Number(e.target.value) || 500);
+                          setMentorGiftAmount(String(val));
+                          setDraftConfig({
+                            ...draftConfig,
+                            mentorConfig: { ...draftConfig.mentorConfig, defaultGiftCapital: val },
+                          });
+                        }}
+                        className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                        Default Daily (%)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        min={0.1}
+                        max={50}
+                        value={draftConfig.mentorConfig.defaultDailyPercent}
+                        onChange={(e) => {
+                          const val = Math.max(0.1, Number(e.target.value) || 2.0);
+                          setMentorDailyPct(String(val));
+                          setDraftConfig({
+                            ...draftConfig,
+                            mentorConfig: { ...draftConfig.mentorConfig, defaultDailyPercent: val },
+                          });
+                        }}
+                        className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono text-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
             </section>
           )}
@@ -1494,7 +1830,545 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
             </section>
           )}
 
-          {/* TAB 5: CRYPTO WALLETS, PAYMENT METHODS, MLM & PUMP.FUN CONFIG */}
+          {/* TAB: BANNER ADS, PAID COIN MINING & FREE TAP-TO-MINE CONTROLS */}
+          {tab === 'coin-ads-mining' && (
+            <section className="space-y-6">
+              {/* 1. Banner Ad Studio */}
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="font-display font-bold text-slate-900 text-lg flex items-center gap-2">
+                      <Sparkles className="w-5 h-5 text-orange-600" />
+                      Banner Ad Manager (Alphatradex Coin Page &amp; Site-Wide)
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Run promotional banner ads on the Alphatradex Coin page or globally across all pages. Supports external links or in-page mining jump links (#coin-mining-desk).
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newAd: BannerAdConfig = {
+                          id: `ad_${Date.now().toString(36)}`,
+                          enabled: true,
+                          title: 'New Alphatradex ($ATX) Promotion',
+                          subtitle: 'Stake or tap daily to grow your on-chain allocation.',
+                          badgeText: 'Featured',
+                          ctaText: 'Start Mining',
+                          ctaUrl: '#coin-mining-desk',
+                          imageUrl: '',
+                          placement: 'coin_page',
+                          theme: 'gold',
+                        };
+                        setDraftConfig({
+                          ...draftConfig,
+                          bannerAds: [...(draftConfig.bannerAds || []), newAd],
+                        });
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-semibold"
+                    >
+                      <Plus className="w-3.5 h-3.5 text-orange-600" />
+                      Add Banner Ad
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => handleSaveConfig()}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      Publish Ads &amp; Mining Settings
+                    </button>
+                  </div>
+                </div>
+
+                {(draftConfig.bannerAds || []).length === 0 ? (
+                  <p className="text-xs text-slate-500 py-4 text-center border border-dashed border-slate-200 rounded-xl">
+                    No banner ads configured yet. Click &ldquo;Add Banner Ad&rdquo; to launch a campaign.
+                  </p>
+                ) : (
+                  <div className="space-y-4">
+                    {(draftConfig.bannerAds || []).map((ad, idx) => {
+                      const updateAd = (patch: Partial<BannerAdConfig>) => {
+                        const list = [...(draftConfig.bannerAds || [])];
+                        list[idx] = { ...ad, ...patch };
+                        setDraftConfig({ ...draftConfig, bannerAds: list });
+                      };
+                      return (
+                        <div key={ad.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50/60 space-y-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-xs font-bold text-slate-700">{ad.id}</span>
+                              <button
+                                type="button"
+                                onClick={() => updateAd({ enabled: !ad.enabled })}
+                                className={`px-2.5 py-0.5 rounded text-[11px] font-semibold ${
+                                  ad.enabled
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-slate-200 text-slate-600'
+                                }`}
+                              >
+                                {ad.enabled ? 'ACTIVE' : 'PAUSED'}
+                              </button>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setDraftConfig({
+                                  ...draftConfig,
+                                  bannerAds: (draftConfig.bannerAds || []).filter((_, i) => i !== idx),
+                                })
+                              }
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold text-red-600 hover:bg-red-50"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              Remove
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+                            <div className="md:col-span-5">
+                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">Banner Title</label>
+                              <input
+                                type="text"
+                                value={ad.title}
+                                onChange={(e) => updateAd({ title: e.target.value })}
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold"
+                              />
+                            </div>
+                            <div className="md:col-span-3">
+                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">Badge Tag</label>
+                              <input
+                                type="text"
+                                value={ad.badgeText}
+                                onChange={(e) => updateAd({ badgeText: e.target.value })}
+                                placeholder="Sponsored Highlight"
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs"
+                              />
+                            </div>
+                            <div className="md:col-span-2">
+                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">Placement</label>
+                              <select
+                                value={ad.placement}
+                                onChange={(e) => updateAd({ placement: e.target.value as BannerAdPlacement })}
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs"
+                              >
+                                <option value="coin_page">Coin Page Only</option>
+                                <option value="all_pages">All Pages (Top Strip)</option>
+                              </select>
+                            </div>
+                            <div className="md:col-span-2">
+                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">Theme</label>
+                              <select
+                                value={ad.theme}
+                                onChange={(e) => updateAd({ theme: e.target.value as BannerAdTheme })}
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs"
+                              >
+                                <option value="gold">Gold / Amber</option>
+                                <option value="emerald">Emerald</option>
+                                <option value="sky">Sky / Navy</option>
+                                <option value="crimson">Crimson</option>
+                              </select>
+                            </div>
+                            <div className="md:col-span-12">
+                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">Subtitle / Ad Copy</label>
+                              <input
+                                type="text"
+                                value={ad.subtitle}
+                                onChange={(e) => updateAd({ subtitle: e.target.value })}
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs"
+                              />
+                            </div>
+                            <div className="md:col-span-3">
+                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">Button Label</label>
+                              <input
+                                type="text"
+                                value={ad.ctaText}
+                                onChange={(e) => updateAd({ ctaText: e.target.value })}
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs"
+                              />
+                            </div>
+                            <div className="md:col-span-4">
+                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                Button URL or #coin-mining-desk
+                              </label>
+                              <input
+                                type="text"
+                                value={ad.ctaUrl}
+                                onChange={(e) => updateAd({ ctaUrl: e.target.value })}
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-xs"
+                              />
+                            </div>
+                            <div className="md:col-span-5">
+                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                Optional Banner Image URL (HTTPS)
+                              </label>
+                              <input
+                                type="text"
+                                value={ad.imageUrl}
+                                onChange={(e) => updateAd({ imageUrl: e.target.value })}
+                                placeholder="https://..."
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-xs"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {(draftConfig.bannerAds || []).some((b) => b.enabled) && (
+                  <div className="pt-2 border-t border-slate-200 space-y-2">
+                    <div className="text-xs font-semibold text-slate-600">Live Ad Preview:</div>
+                    <BannerAdSlot bannerAds={draftConfig.bannerAds} placement="coin_page" />
+                    <BannerAdSlot bannerAds={draftConfig.bannerAds} placement="all_pages" compact />
+                  </div>
+                )}
+              </div>
+
+              {/* 2. Free Tap-to-Mine (Hamster Style) + System Toggles */}
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="font-display font-bold text-slate-900 text-base">
+                      Free Tap-to-Mine Controls &amp; Mining Feature Toggles
+                    </h2>
+                    <p className="text-xs text-slate-500">
+                      Control reward per tap, USD conversion value per mined coin, energy bar limits, and daily caps.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setDraftConfig({
+                          ...draftConfig,
+                          coinMiningSettings: {
+                            ...draftConfig.coinMiningSettings,
+                            tapToMineEnabled: !draftConfig.coinMiningSettings.tapToMineEnabled,
+                          },
+                        })
+                      }
+                      className={`px-3 py-1.5 rounded-lg border text-xs font-semibold ${
+                        draftConfig.coinMiningSettings.tapToMineEnabled
+                          ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                          : 'border-slate-200 bg-slate-100 text-slate-600'
+                      }`}
+                    >
+                      Tap-to-Mine: {draftConfig.coinMiningSettings.tapToMineEnabled ? 'ON' : 'OFF'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setDraftConfig({
+                          ...draftConfig,
+                          coinMiningSettings: {
+                            ...draftConfig.coinMiningSettings,
+                            paidMiningEnabled: !draftConfig.coinMiningSettings.paidMiningEnabled,
+                          },
+                        })
+                      }
+                      className={`px-3 py-1.5 rounded-lg border text-xs font-semibold ${
+                        draftConfig.coinMiningSettings.paidMiningEnabled
+                          ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                          : 'border-slate-200 bg-slate-100 text-slate-600'
+                      }`}
+                    >
+                      Paid Mining Rigs: {draftConfig.coinMiningSettings.paidMiningEnabled ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">Coins / Tap</label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      min={0.1}
+                      value={draftConfig.coinMiningSettings.tapRewardCoins}
+                      onChange={(e) =>
+                        setDraftConfig({
+                          ...draftConfig,
+                          coinMiningSettings: {
+                            ...draftConfig.coinMiningSettings,
+                            tapRewardCoins: Math.max(0.1, Number(e.target.value) || 1),
+                          },
+                        })
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">USD / Coin</label>
+                    <input
+                      type="number"
+                      step="0.0001"
+                      min={0}
+                      value={draftConfig.coinMiningSettings.tapUsdPerCoin}
+                      onChange={(e) =>
+                        setDraftConfig({
+                          ...draftConfig,
+                          coinMiningSettings: {
+                            ...draftConfig.coinMiningSettings,
+                            tapUsdPerCoin: Math.max(0, Number(e.target.value) || 0),
+                          },
+                        })
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">Max Energy</label>
+                    <input
+                      type="number"
+                      min={10}
+                      value={draftConfig.coinMiningSettings.maxEnergy}
+                      onChange={(e) =>
+                        setDraftConfig({
+                          ...draftConfig,
+                          coinMiningSettings: {
+                            ...draftConfig.coinMiningSettings,
+                            maxEnergy: Math.max(10, Number(e.target.value) || 500),
+                          },
+                        })
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">Energy / Tap</label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={draftConfig.coinMiningSettings.energyCostPerTap}
+                      onChange={(e) =>
+                        setDraftConfig({
+                          ...draftConfig,
+                          coinMiningSettings: {
+                            ...draftConfig.coinMiningSettings,
+                            energyCostPerTap: Math.max(1, Number(e.target.value) || 1),
+                          },
+                        })
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">Regen / Sec</label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      min={0}
+                      value={draftConfig.coinMiningSettings.energyRegenPerSec}
+                      onChange={(e) =>
+                        setDraftConfig({
+                          ...draftConfig,
+                          coinMiningSettings: {
+                            ...draftConfig.coinMiningSettings,
+                            energyRegenPerSec: Math.max(0, Number(e.target.value) || 0),
+                          },
+                        })
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">Daily Cap (Coins)</label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={draftConfig.coinMiningSettings.dailyTapLimitCoins}
+                      onChange={(e) =>
+                        setDraftConfig({
+                          ...draftConfig,
+                          coinMiningSettings: {
+                            ...draftConfig.coinMiningSettings,
+                            dailyTapLimitCoins: Math.max(1, Number(e.target.value) || 2500),
+                          },
+                        })
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono text-sm"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. Paid Coin Mining Rigs CRUD */}
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="font-display font-bold text-slate-900 text-base flex items-center gap-2">
+                      <Cpu className="w-4 h-4 text-orange-600" />
+                      Paid Coin Mining Rigs (Daily Interest Plans)
+                    </h2>
+                    <p className="text-xs text-slate-500">
+                      Configure USD stake ranges, daily interest rates (%), contract durations, and bonus coins.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newRig: CoinMiningPlan = {
+                          id: `rig_${Date.now().toString(36)}`,
+                          name: `ASIC Cluster Tier ${(draftConfig.coinMiningPlans || []).length + 1}`,
+                          minUsd: 100,
+                          maxUsd: 5000,
+                          dailyInterestPercent: 1.8,
+                          durationDays: 30,
+                          hashRateLabel: '320 TH/s',
+                          coinBonusPerUsd: 30,
+                          enabled: true,
+                        };
+                        setDraftConfig({
+                          ...draftConfig,
+                          coinMiningPlans: [...(draftConfig.coinMiningPlans || []), newRig],
+                        });
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-semibold"
+                    >
+                      <Plus className="w-3.5 h-3.5 text-orange-600" />
+                      Add Mining Rig
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => handleSaveConfig()}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      Save Mining Rigs
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  {(draftConfig.coinMiningPlans || []).map((plan, idx) => {
+                    const updatePlan = (patch: Partial<CoinMiningPlan>) => {
+                      const list = [...(draftConfig.coinMiningPlans || [])];
+                      list[idx] = { ...plan, ...patch };
+                      setDraftConfig({ ...draftConfig, coinMiningPlans: list });
+                    };
+                    return (
+                      <div key={plan.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50/60 space-y-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-xs font-bold text-slate-700">{plan.id}</span>
+                            <button
+                              type="button"
+                              onClick={() => updatePlan({ enabled: !plan.enabled })}
+                              className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
+                                plan.enabled
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-slate-200 text-slate-600'
+                              }`}
+                            >
+                              {plan.enabled ? 'ENABLED' : 'DISABLED'}
+                            </button>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setDraftConfig({
+                                ...draftConfig,
+                                coinMiningPlans: (draftConfig.coinMiningPlans || []).filter((_, i) => i !== idx),
+                              })
+                            }
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold text-red-600 hover:bg-red-50"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            Delete
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-2 md:grid-cols-7 gap-3">
+                          <div className="col-span-2 md:col-span-2">
+                            <label className="block text-[11px] font-semibold text-slate-600 mb-1">Rig Name</label>
+                            <input
+                              type="text"
+                              value={plan.name}
+                              onChange={(e) => updatePlan({ name: e.target.value })}
+                              className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-600 mb-1">Min ($)</label>
+                            <input
+                              type="number"
+                              min={1}
+                              value={plan.minUsd}
+                              onChange={(e) => updatePlan({ minUsd: Math.max(1, Number(e.target.value) || 1) })}
+                              className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-xs"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-600 mb-1">Max ($)</label>
+                            <input
+                              type="number"
+                              min={1}
+                              value={plan.maxUsd}
+                              onChange={(e) => updatePlan({ maxUsd: Math.max(1, Number(e.target.value) || 1) })}
+                              className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-xs"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-600 mb-1">Daily (%)</label>
+                            <input
+                              type="number"
+                              step="0.1"
+                              min={0.1}
+                              max={50}
+                              value={plan.dailyInterestPercent}
+                              onChange={(e) =>
+                                updatePlan({ dailyInterestPercent: Math.max(0.1, Number(e.target.value) || 0.1) })
+                              }
+                              className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-xs"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-600 mb-1">Days</label>
+                            <input
+                              type="number"
+                              min={1}
+                              value={plan.durationDays}
+                              onChange={(e) => updatePlan({ durationDays: Math.max(1, Number(e.target.value) || 1) })}
+                              className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-xs"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-600 mb-1">Bonus ATX/$</label>
+                            <input
+                              type="number"
+                              min={0}
+                              value={plan.coinBonusPerUsd}
+                              onChange={(e) =>
+                                updatePlan({ coinBonusPerUsd: Math.max(0, Number(e.target.value) || 0) })
+                              }
+                              className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-xs"
+                            />
+                          </div>
+                          <div className="col-span-2 md:col-span-7">
+                            <label className="block text-[11px] font-semibold text-slate-600 mb-1">Hashrate Label</label>
+                            <input
+                              type="text"
+                              value={plan.hashRateLabel}
+                              onChange={(e) => updatePlan({ hashRateLabel: e.target.value })}
+                              className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-xs"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* TAB 5: DEPOSIT/WITHDRAW ADDRESSES, PAYMENT CHANNELS & MEME COIN */}
           {tab === 'wallets-meme' && (
             <section className="space-y-6">
               {/* Dynamic Platform Payment Methods Manager */}
@@ -1503,10 +2377,10 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                   <div>
                     <h2 className="font-display font-bold text-slate-900 text-base flex items-center gap-2">
                       <CreditCard className="w-4 h-4 text-orange-600" />
-                      Platform Payment Methods (Deposit &amp; Withdrawal Channels)
+                      Deposit &amp; Withdrawal Addresses / Payment Channels
                     </h2>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      Add, edit, or toggle payment methods stored in Firestore. Active methods appear live in User Deposit &amp; Withdraw forms.
+                      Manually configure both Deposit Receiving Addresses and Withdrawal Payout Source Addresses for every payment channel.
                     </p>
                   </div>
                   <button
@@ -1516,7 +2390,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                     className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold"
                   >
                     <Save className="w-3.5 h-3.5" />
-                    Publish Payment Methods
+                    Publish Addresses
                   </button>
                 </div>
 
@@ -1600,7 +2474,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
-                          <div className="md:col-span-3">
+                          <div className="md:col-span-4">
                             <label className="block text-[11px] font-semibold text-slate-600 mb-1">Display Name</label>
                             <input
                               type="text"
@@ -1609,14 +2483,25 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                               className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold"
                             />
                           </div>
-                          <div className="md:col-span-5">
+                          <div className="md:col-span-4">
                             <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                              Receiving Wallet / Pay ID / Number
+                              Deposit Receiving Address
                             </label>
                             <input
                               type="text"
                               value={pm.receivingAccount}
                               onChange={(e) => updatePm({ receivingAccount: e.target.value })}
+                              className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-xs"
+                            />
+                          </div>
+                          <div className="md:col-span-4">
+                            <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                              Withdrawal Payout Source Address
+                            </label>
+                            <input
+                              type="text"
+                              value={pm.withdrawAddress ?? pm.receivingAccount}
+                              onChange={(e) => updatePm({ withdrawAddress: e.target.value })}
                               className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-xs"
                             />
                           </div>
@@ -1640,9 +2525,9 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                               className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-xs"
                             />
                           </div>
-                          <div className="md:col-span-12">
+                          <div className="md:col-span-8">
                             <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                              Deposit / Payment Instructions for Users
+                              Deposit / Payout Instructions for Users
                             </label>
                             <input
                               type="text"
@@ -1747,44 +2632,56 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                     </div>
                     <div className="md:col-span-5">
                       <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                        Receiving Wallet / Pay ID / Number
+                        Deposit Receiving Address / ID
                       </label>
                       <input
                         type="text"
                         value={newPmAccount}
                         onChange={(e) => setNewPmAccount(e.target.value)}
-                        placeholder="Wallet address, Binance Pay ID, or Mobile/Bank account"
+                        placeholder="Wallet address, Binance Pay ID, or Account"
                         className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-xs"
                       />
                     </div>
-                    <div className="md:col-span-6">
+                    <div className="md:col-span-4">
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                        Withdrawal Source Address (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        value={newPmWithdrawAddress}
+                        onChange={(e) => setNewPmWithdrawAddress(e.target.value)}
+                        placeholder="Defaults to Receiving Address if blank"
+                        className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-xs"
+                      />
+                    </div>
+                    <div className="md:col-span-4">
                       <label className="block text-[11px] font-semibold text-slate-700 mb-1">Instructions</label>
                       <input
                         type="text"
                         value={newPmInstructions}
                         onChange={(e) => setNewPmInstructions(e.target.value)}
-                        placeholder="Instructions shown to users during deposit"
+                        placeholder="Instructions shown to users"
                         className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs"
                       />
                     </div>
-                    <div className="md:col-span-2">
-                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">Min Deposit ($)</label>
+                    <div className="md:col-span-1">
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">Min Dep</label>
                       <input
                         type="number"
                         min={1}
                         value={newPmMinDeposit}
                         onChange={(e) => setNewPmMinDeposit(e.target.value)}
-                        className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-xs"
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-xs"
                       />
                     </div>
-                    <div className="md:col-span-2">
-                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">Min Withdraw ($)</label>
+                    <div className="md:col-span-1">
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">Min Wd</label>
                       <input
                         type="number"
                         min={1}
                         value={newPmMinWithdraw}
                         onChange={(e) => setNewPmMinWithdraw(e.target.value)}
-                        className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-xs"
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-xs"
                       />
                     </div>
                     <div className="md:col-span-2 flex items-end">
@@ -1802,7 +2699,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                           ).slice(0, 64);
                           const cleanAcc = newPmAccount.trim();
                           if (!cleanName || !cleanId || !cleanAcc) {
-                            notify('err', 'Enter Method Name, Method ID, and Receiving Account / Wallet.');
+                            notify('err', 'Enter Method Name, Method ID, and Deposit Receiving Address.');
                             return;
                           }
                           if (draftConfig.paymentMethods.some((m) => m.id === cleanId)) {
@@ -1814,6 +2711,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                             name: cleanName,
                             category: newPmCategory,
                             receivingAccount: cleanAcc,
+                            withdrawAddress: newPmWithdrawAddress.trim() || cleanAcc,
                             instructions:
                               newPmInstructions.trim() ||
                               `Send funds via ${cleanName} and paste your transaction reference ID.`,
@@ -1831,6 +2729,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                           setNewPmName('');
                           setNewPmCode('');
                           setNewPmAccount('');
+                          setNewPmWithdrawAddress('');
                           setNewPmInstructions('');
                           await handleSaveConfig(nextConfig);
                         }}
@@ -1865,7 +2764,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
               <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
                 <div className="flex items-center justify-between">
                   <h2 className="font-display font-bold text-slate-900 text-base">
-                    Legacy Crypto Wallets Quick-Sync &amp; MLM Commission Rates
+                    Legacy Crypto Wallets Quick-Sync &amp; Meme Coin Address
                   </h2>
                   <button
                     type="button"
@@ -1874,7 +2773,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                     className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold"
                   >
                     <Save className="w-3.5 h-3.5" />
-                    Save Wallets &amp; Token
+                    Save Wallets &amp; Meme Coin
                   </button>
                 </div>
 
@@ -1934,63 +2833,32 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                     />
                   </div>
                 </div>
-
-                <div className="grid grid-cols-3 gap-4 pt-2">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">MLM Level 1 (%)</label>
-                    <input
-                      type="number"
-                      step="0.5"
-                      value={draftConfig.mlmRates.level1}
-                      onChange={(e) =>
-                        setDraftConfig({
-                          ...draftConfig,
-                          mlmRates: { ...draftConfig.mlmRates, level1: Number(e.target.value) },
-                        })
-                      }
-                      className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">MLM Level 2 (%)</label>
-                    <input
-                      type="number"
-                      step="0.5"
-                      value={draftConfig.mlmRates.level2}
-                      onChange={(e) =>
-                        setDraftConfig({
-                          ...draftConfig,
-                          mlmRates: { ...draftConfig.mlmRates, level2: Number(e.target.value) },
-                        })
-                      }
-                      className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">MLM Level 3 (%)</label>
-                    <input
-                      type="number"
-                      step="0.5"
-                      value={draftConfig.mlmRates.level3}
-                      onChange={(e) =>
-                        setDraftConfig({
-                          ...draftConfig,
-                          mlmRates: { ...draftConfig.mlmRates, level3: Number(e.target.value) },
-                        })
-                      }
-                      className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono text-sm"
-                    />
-                  </div>
-                </div>
               </div>
 
               <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
-                <h3 className="font-display font-bold text-slate-900 text-base">
-                  Official Pump.fun Meme Coin Configuration
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Token Name</label>
+                    <h3 className="font-display font-bold text-slate-900 text-base">
+                      Manual Meme Coin Contract &amp; Launchpad Configuration
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Set your custom Solana Meme Coin contract mint address, ticker, live price, market cap, and description manually.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => handleSaveConfig()}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    Publish Meme Coin
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+                  <div className="md:col-span-3">
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Coin Name</label>
                     <input
                       type="text"
                       value={draftConfig.pumpFunToken.name}
@@ -2003,7 +2871,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                       className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm"
                     />
                   </div>
-                  <div>
+                  <div className="md:col-span-2">
                     <label className="block text-xs font-semibold text-slate-700 mb-1">Ticker</label>
                     <input
                       type="text"
@@ -2017,23 +2885,65 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                       className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono text-sm"
                     />
                   </div>
-                  <div>
+                  <div className="md:col-span-3">
                     <label className="block text-xs font-semibold text-slate-700 mb-1">Live Price (USD)</label>
                     <input
                       type="number"
                       step="0.000001"
+                      min={0.0000001}
                       value={draftConfig.pumpFunToken.priceUsd}
                       onChange={(e) =>
                         setDraftConfig({
                           ...draftConfig,
-                          pumpFunToken: { ...draftConfig.pumpFunToken, priceUsd: Number(e.target.value) },
+                          pumpFunToken: {
+                            ...draftConfig.pumpFunToken,
+                            priceUsd: Math.max(0.0000001, Number(e.target.value) || 0.0001),
+                          },
                         })
                       }
                       className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono text-sm"
                     />
                   </div>
                   <div className="md:col-span-2">
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Solana Mint Address</label>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Market Cap ($)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={draftConfig.pumpFunToken.marketCapUsd}
+                      onChange={(e) =>
+                        setDraftConfig({
+                          ...draftConfig,
+                          pumpFunToken: {
+                            ...draftConfig.pumpFunToken,
+                            marketCapUsd: Math.max(0, Number(e.target.value) || 0),
+                          },
+                        })
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono text-sm"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">24h Change (%)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={draftConfig.pumpFunToken.change24hPercent}
+                      onChange={(e) =>
+                        setDraftConfig({
+                          ...draftConfig,
+                          pumpFunToken: {
+                            ...draftConfig.pumpFunToken,
+                            change24hPercent: Number(e.target.value) || 0,
+                          },
+                        })
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono text-sm"
+                    />
+                  </div>
+                  <div className="md:col-span-7">
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Manual Meme Coin Contract / Mint Address
+                    </label>
                     <input
                       type="text"
                       value={draftConfig.pumpFunToken.mintAddress}
@@ -2046,8 +2956,8 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                       className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono text-xs"
                     />
                   </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Pump.fun URL</label>
+                  <div className="md:col-span-5">
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Pump.fun / Explorer URL</label>
                     <input
                       type="url"
                       value={draftConfig.pumpFunToken.pumpFunUrl}
@@ -2055,6 +2965,20 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                         setDraftConfig({
                           ...draftConfig,
                           pumpFunToken: { ...draftConfig.pumpFunToken, pumpFunUrl: e.target.value },
+                        })
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 text-xs"
+                    />
+                  </div>
+                  <div className="md:col-span-12">
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Token Description</label>
+                    <textarea
+                      rows={2}
+                      value={draftConfig.pumpFunToken.description}
+                      onChange={(e) =>
+                        setDraftConfig({
+                          ...draftConfig,
+                          pumpFunToken: { ...draftConfig.pumpFunToken, description: e.target.value },
                         })
                       }
                       className="w-full px-3 py-2 rounded-lg border border-slate-200 text-xs"
@@ -2105,9 +3029,17 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
                   <h3 className="font-display font-bold text-slate-900 text-base">
-                    P2P Transfers ({allP2P.length})
+                    P2P Transfers &amp; Coin Mining Stakes ({allP2P.length + allCoinStakes.length})
                   </h3>
                   <div className="space-y-2 max-h-72 overflow-y-auto">
+                    {allCoinStakes.map((s) => (
+                      <div key={s.id} className="p-2.5 rounded-lg border border-amber-200 bg-amber-50/40 text-xs flex justify-between">
+                        <span>
+                          [Mining: {s.planName}] {s.userName} ({s.status})
+                        </span>
+                        <span className="font-mono font-bold tabular-nums">${s.principalUsd.toFixed(2)}</span>
+                      </div>
+                    ))}
                     {allP2P.map((t) => (
                       <div key={t.id} className="p-2.5 rounded-lg border border-slate-200 text-xs flex justify-between">
                         <span>
@@ -2121,7 +3053,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
 
                 <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
                   <h3 className="font-display font-bold text-slate-900 text-base">
-                    Withdrawals &amp; Meme Coin Allocations ({allWithdrawals.length + allMeme.length})
+                    Withdrawals, Meme Allocations &amp; Commissions ({allWithdrawals.length + allMeme.length + allMlm.length})
                   </h3>
                   <div className="space-y-2 max-h-72 overflow-y-auto">
                     {allWithdrawals.map((w) => (
@@ -2143,7 +3075,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                     {allMlm.map((c) => (
                       <div key={c.id} className="p-2.5 rounded-lg border border-slate-200 text-xs flex justify-between">
                         <span>
-                          [MLM L{c.level}] from {c.fromName}
+                          [{c.commissionType === 'mentor' ? 'MENTOR BONUS' : `MLM L${c.level}`}] ({c.ratePercent}%) from {c.fromName}
                         </span>
                         <span className="font-mono font-bold text-emerald-700 tabular-nums">
                           +${c.commissionUsd.toFixed(2)}

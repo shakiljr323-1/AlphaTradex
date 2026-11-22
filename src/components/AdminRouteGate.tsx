@@ -3,6 +3,7 @@ import { ArrowLeft, Lock, ShieldAlert } from 'lucide-react';
 import { SUPER_ADMIN_EMAIL } from '../constants/defaults';
 import { usePlatform } from '../context/PlatformContext';
 import { SuperAdminPanel } from './SuperAdminPanel';
+import { AlphatradexLogo3D } from './AlphatradexLogo3D';
 
 export const AdminRouteGate: React.FC<{ onExitAdmin: () => void }> = ({ onExitAdmin }) => {
   const { authUser, authReady, isAdminUser, signInWithGoogle, signInWithEmail, signOutUser } =
@@ -34,9 +35,7 @@ export const AdminRouteGate: React.FC<{ onExitAdmin: () => void }> = ({ onExitAd
       <div className="max-w-md w-full bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
         <div className="bg-slate-900 px-6 py-5 text-white flex items-center justify-between border-b border-slate-800">
           <div className="flex items-center gap-3">
-            <span className="w-9 h-9 rounded-lg bg-gradient-to-br from-orange-500 to-orange-600 flex items-center justify-center font-display font-extrabold text-white text-lg">
-              A
-            </span>
+            <AlphatradexLogo3D variant="mark" size="md" companyName="Alphatradex" />
             <div>
               <h1 className="font-display font-bold text-base">Super Admin Sign-In Gate</h1>
               <p className="text-[11px] font-mono text-slate-400">Restricted Route · /admin</p>

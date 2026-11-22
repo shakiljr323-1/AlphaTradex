@@ -50,7 +50,22 @@ import {
   isWeekendDate,
 } from '../utils/investmentMath';
 import { CapitalRequestModal } from './CapitalRequestModal';
+import { AlphatradexCoinHub, BannerAdSlot } from './AlphatradexCoinHub';
 import { ForexMarketView } from './ForexMarketView';
+import { AlphatradexLogo3D } from './AlphatradexLogo3D';
+import { ReferralDashboard } from './ReferralDashboard';
+
+function formatVaultError(raw: string): string {
+  if (raw.startsWith('{') && raw.includes('"error"')) {
+    try {
+      const parsed = JSON.parse(raw) as { error?: string };
+      if (parsed?.error) return parsed.error;
+    } catch {
+      // Ignore JSON error
+    }
+  }
+  return raw;
+}
 
 type SidebarSection =
   | 'dashboard'
@@ -72,7 +87,7 @@ type SidebarSection =
   | 'profile-kyc';
 
 interface UserVaultDashboardProps {
-  initialSection?: 'dashboard' | 'forex-market';
+  initialSection?: 'dashboard' | 'forex-market' | 'pump-fun';
   onOpenHomePage?: (section?: NavSection) => void;
 }
 
@@ -92,6 +107,7 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
     mlmCommissions,
     memeCoinInvestments,
     downlineReferrals,
+    referralLinkClicks,
     savedPaymentMethods,
     submitKycUpdate,
     resendVerificationEmail,
@@ -134,6 +150,11 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
 
   // Inline KYC form
   const [kycName, setKycName] = useState(userProfile?.fullName || authUser?.displayName || '');
+  useEffect(() => {
+    if (!kycName && userProfile?.fullName) {
+      setKycName(userProfile.fullName);
+    }
+  }, [kycName, userProfile?.fullName]);
   const [kycIdType, setKycIdType] = useState<IdType>('NID');
   const [kycIdNumber, setKycIdNumber] = useState('');
   const [kycIdPhoto, setKycIdPhoto] = useState('');
@@ -169,6 +190,7 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
   const [memeAmountUsd, setMemeAmountUsd] = useState('50');
   const [memePayMethod, setMemePayMethod] = useState<'USD_VAULT' | 'SOL_WALLET'>('USD_VAULT');
   const [memeSolTx, setMemeSolTx] = useState('');
+  const buyTokenInputRef = useRef<HTMLInputElement | null>(null);
 
   const activeInvestments = useMemo(
     () => investments.filter((inv) => inv.status === 'active' || inv.status === 'capital_requested'),
@@ -231,13 +253,13 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
   const isWeekend = isWeekendDate(new Date());
 
   const copyValue = (label: string, val: string) => {
-    navigator.clipboard.writeText(val);
+    navigator.clipboard?.writeText(val)?.catch(() => {});
     setCopiedText(label);
     setTimeout(() => setCopiedText(''), 1800);
   };
 
   const notify = (type: 'ok' | 'err', text: string) => {
-    setFeedback({ type, text });
+    setFeedback({ type, text: type === 'err' ? formatVaultError(text) : text });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -385,7 +407,7 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
         { id: 'activate-trading', label: 'Activate Trading', Icon: Zap },
         { id: 'my-packages', label: 'My Packages', Icon: Bot },
         { id: 'capital-withdraw', label: 'Capital Withdraw', Icon: Lock },
-        { id: 'pump-fun', label: 'Pump.fun Meme Coin', Icon: Rocket },
+        { id: 'pump-fun', label: `${platformConfig.pumpFunToken.name} Coin`, Icon: Rocket },
         { id: 'forex-market', label: 'Forex Market', Icon: Globe },
       ],
     },
@@ -399,7 +421,7 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
     {
       heading: 'MY TEAM',
       items: [
-        { id: 'referral-network', label: 'Referral Toolkit', Icon: Network },
+        { id: 'referral-network', label: 'Referral Dashboard', Icon: Network },
         { id: 'downline-team', label: 'Downline Team', Icon: Users },
       ],
     },
@@ -774,9 +796,7 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
         {/* Sidebar Brand Header */}
         <div className="h-16 px-4 flex items-center justify-between border-b border-slate-800/80 shrink-0">
           <div className="flex items-center gap-2.5 min-w-0">
-            <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-orange-500 to-orange-600 shadow-[0_0_16px_rgba(249,115,22,0.5)] flex items-center justify-center font-display font-extrabold text-white text-base shrink-0">
-              {platformConfig.companyName.trim().charAt(0).toUpperCase() || 'A'}
-            </span>
+            <AlphatradexLogo3D variant="mark" size="sm" companyName={platformConfig.companyName} />
             <div className="min-w-0">
               <div className="font-display font-bold text-white text-sm truncate">
                 {platformConfig.companyName}
@@ -1021,6 +1041,19 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
             );
           })()}
 
+          <BannerAdSlot
+            bannerAds={platformConfig.bannerAds}
+            placement="all_pages"
+            compact
+            onCtaAction={(url) => {
+              if (url === '#coin-mining-desk') {
+                selectNav('pump-fun');
+              } else if (url.startsWith('#')) {
+                document.getElementById(url.slice(1))?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }
+            }}
+          />
+
           {feedback && (
             <div
               className={`p-3.5 rounded-xl border backdrop-blur-md text-xs sm:text-sm flex items-center justify-between gap-3 ${
@@ -1139,7 +1172,7 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                       onClick={() => selectNav('pump-fun')}
                       className="text-orange-400 font-semibold hover:underline inline-flex items-center gap-1"
                     >
-                      Invest Direct <ArrowRight className="w-3 h-3" />
+                      Mine &amp; Allocate <ArrowRight className="w-3 h-3" />
                     </button>
                     <button
                       type="button"
@@ -1643,7 +1676,7 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                         e.preventDefault();
                         const amt = Number(depAmount);
                         const minReq = selectedDepositMethod?.minDepositUsd || 1;
-                        if (amt < minReq || !depTxId.trim()) {
+                        if (!Number.isFinite(amt) || amt < minReq || !depTxId.trim()) {
                           notify(
                             'err',
                             `Enter at least $${minReq.toFixed(2)} USD and a valid Transaction ID / Reference.`
@@ -1820,10 +1853,15 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                   <form
                     onSubmit={async (e) => {
                       e.preventDefault();
+                      const amt = Number(wdAmount);
+                      if (!Number.isFinite(amt) || amt <= 0) {
+                        notify('err', 'Enter a valid withdrawal USD amount.');
+                        return;
+                      }
                       setBusyAction(true);
                       try {
                         await withdrawInstantProfit({
-                          amountUsd: Number(wdAmount),
+                          amountUsd: amt,
                           network: activeWithdrawNetworkId,
                           destinationAddress: wdAddress,
                           source: wdSource,
@@ -1849,7 +1887,7 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                         }
                         setWdAddress('');
                         setSaveAfterWithdraw(false);
-                        notify('ok', `Instant profit payout of $${Number(wdAmount).toFixed(2)} completed!`);
+                        notify('ok', `Instant profit payout of $${amt.toFixed(2)} completed!`);
                       } catch (err) {
                         notify('err', (err as Error).message);
                       } finally {
@@ -1950,16 +1988,21 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                   <form
                     onSubmit={async (e) => {
                       e.preventDefault();
+                      const amt = Number(p2pAmount);
+                      if (!Number.isFinite(amt) || amt <= 0) {
+                        notify('err', 'Enter a valid USD transfer amount.');
+                        return;
+                      }
                       setBusyAction(true);
                       try {
                         await sendP2PTransfer({
                           recipientQuery: p2pRecipient,
-                          amountUsd: Number(p2pAmount),
+                          amountUsd: amt,
                           note: p2pNote,
                         });
                         setP2pRecipient('');
                         setP2pNote('');
-                        notify('ok', `Sent $${Number(p2pAmount).toFixed(2)} USD via P2P transfer.`);
+                        notify('ok', `Sent $${amt.toFixed(2)} USD via P2P transfer.`);
                       } catch (err) {
                         notify('err', (err as Error).message);
                       } finally {
@@ -2118,10 +2161,21 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
             </section>
           )}
 
-          {/* VIEW: PUMP.FUN MEME COIN */}
+          {/* VIEW: ALPHATRADEX COIN MINING, TAP-TO-MINE, BANNER ADS & PUMP.FUN */}
           {activeNav === 'pump-fun' && (
-            <section className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              <div className="lg:col-span-6 bg-[#0B111E]/78 backdrop-blur-md border border-slate-700/70 rounded-2xl p-6 space-y-5 shadow-xl">
+            <section className="space-y-6">
+              <AlphatradexCoinHub
+                mode="vault"
+                onNotify={notify}
+                onPrimaryHeroAction={() => {
+                  buyTokenInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  buyTokenInputRef.current?.focus();
+                }}
+                primaryHeroLabel={`Allocate $${platformConfig.pumpFunToken.ticker} Now`}
+              />
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <div className="lg:col-span-6 bg-[#0B111E]/78 backdrop-blur-md border border-slate-700/70 rounded-2xl p-6 space-y-5 shadow-xl">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <div className="inline-flex items-center gap-1.5 text-xs font-mono font-semibold text-orange-400">
@@ -2185,7 +2239,10 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                   onSubmit={async (e) => {
                     e.preventDefault();
                     const amt = Number(memeAmountUsd);
-                    if (amt <= 0) return;
+                    if (!Number.isFinite(amt) || amt <= 0) {
+                      notify('err', 'Enter a valid USD allocation amount.');
+                      return;
+                    }
                     if (memePayMethod === 'SOL_WALLET' && !memeSolTx.trim()) {
                       notify('err', 'Paste your Solana wallet transfer signature for SOL Direct allocation.');
                       return;
@@ -2235,6 +2292,7 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                   <div>
                     <label className="block text-xs font-semibold text-slate-300 mb-1">Allocation Amount (USD)</label>
                     <input
+                      ref={buyTokenInputRef}
                       type="number"
                       min={1}
                       step="0.01"
@@ -2259,7 +2317,8 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                       <div className="text-[11px] text-slate-300 bg-slate-900/80 p-2.5 rounded-lg border border-slate-700">
                         Send SOL equivalent to{' '}
                         <span className="font-mono break-all text-white">
-                          {platformConfig.depositWallets.sol}
+                          {platformConfig.paymentMethods.find((m) => m.id === 'SOL')?.receivingAccount ||
+                            platformConfig.depositWallets.sol}
                         </span>{' '}
                         and enter signature below:
                       </div>
@@ -2325,6 +2384,7 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                   </div>
                 )}
               </div>
+              </div>
             </section>
           )}
 
@@ -2341,155 +2401,22 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
             />
           )}
 
-          {/* VIEW: INCOME, ALL-PLAN REFERRAL PROGRAM & DOWNLINE */}
+          {/* VIEW: REFERRAL DASHBOARD, INCOME & DOWNLINE */}
           {(activeNav === 'income-details' ||
             activeNav === 'mlm-commissions' ||
             activeNav === 'referral-network' ||
             activeNav === 'downline-team') && (
-            <section className="space-y-6">
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                <div className="lg:col-span-6 bg-[#0B111E]/78 backdrop-blur-md border border-slate-700/70 rounded-2xl p-6 space-y-4 shadow-xl">
-                  <div className="flex items-center gap-2">
-                    <Users className="w-5 h-5 text-orange-400" />
-                    <h2 className="font-display font-bold text-white text-lg">All-Plan Referral Network</h2>
-                  </div>
-                  <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-700/70 space-y-2">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-slate-400">Your Referral Link (Code: {userProfile.handle})</span>
-                      <button
-                        type="button"
-                        onClick={() => copyValue('reflink', referralLink)}
-                        className="inline-flex items-center gap-1 text-orange-400 font-semibold"
-                      >
-                        {copiedText === 'reflink' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                        {copiedText === 'reflink' ? 'Copied' : 'Copy Link'}
-                      </button>
-                    </div>
-                    <div className="font-mono text-xs text-slate-100 break-all">{referralLink}</div>
-                  </div>
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="p-3 rounded-xl bg-slate-900/70 border border-slate-700/70 text-center">
-                      <div className="text-[11px] text-slate-400">Level 1</div>
-                      <div className="font-mono font-bold text-lg text-white tabular-nums">
-                        {platformConfig.mlmRates.level1}%
-                      </div>
-                    </div>
-                    <div className="p-3 rounded-xl bg-slate-900/70 border border-slate-700/70 text-center">
-                      <div className="text-[11px] text-slate-400">Level 2</div>
-                      <div className="font-mono font-bold text-lg text-white tabular-nums">
-                        {platformConfig.mlmRates.level2}%
-                      </div>
-                    </div>
-                    <div className="p-3 rounded-xl bg-slate-900/70 border border-slate-700/70 text-center">
-                      <div className="text-[11px] text-slate-400">Level 3</div>
-                      <div className="font-mono font-bold text-lg text-white tabular-nums">
-                        {platformConfig.mlmRates.level3}%
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* All-Plan Commission Matrix (Replaces Mentor Card) */}
-                <div className="lg:col-span-6 bg-[#0B111E]/78 backdrop-blur-md border border-slate-700/70 rounded-2xl p-6 space-y-4 shadow-xl">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Award className="w-5 h-5 text-emerald-400" />
-                      <h2 className="font-display font-bold text-white text-lg">
-                        Referral Payouts Across All Plans
-                      </h2>
-                    </div>
-                    <span className="px-2.5 py-1 rounded text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                      Instant Credit
-                    </span>
-                  </div>
-
-                  <p className="text-xs text-slate-300 leading-relaxed">
-                    Every investment tier qualifies for automated 3-level referral commissions credited straight
-                    to your Income Wallet whenever your network activates a package:
-                  </p>
-
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
-                    {platformConfig.packages.map((pkg) => {
-                      const l1Usd = (pkg.capital * platformConfig.mlmRates.level1) / 100;
-                      const l2Usd = (pkg.capital * platformConfig.mlmRates.level2) / 100;
-                      return (
-                        <div
-                          key={pkg.id}
-                          className="p-3 rounded-xl bg-slate-900/75 border border-slate-700/70 space-y-1"
-                        >
-                          <div className="font-semibold text-white">{pkg.name}</div>
-                          <div className="font-mono text-slate-400 text-[11px]">${pkg.capital}</div>
-                          <div className="font-mono font-bold text-emerald-400 tabular-nums">
-                            L1: +${l1Usd.toFixed(0)}
-                          </div>
-                          <div className="font-mono text-sky-400 text-[11px] tabular-nums">
-                            L2: +${l2Usd.toFixed(0)}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-[#0B111E]/78 backdrop-blur-md border border-slate-700/70 rounded-2xl p-5 space-y-3 shadow-xl">
-                  <h3 className="font-display font-bold text-white text-base">
-                    Downline Network ({downlineReferrals.length})
-                  </h3>
-                  {downlineReferrals.length === 0 ? (
-                    <p className="text-xs text-slate-400 py-6 text-center">No referred users yet.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {downlineReferrals.map((r) => (
-                        <div
-                          key={r.id}
-                          className="p-3 rounded-xl border border-slate-700/70 bg-slate-900/60 flex items-center justify-between text-xs"
-                        >
-                          <div>
-                            <div className="font-semibold text-white">
-                              {r.refereeName} ({r.refereeHandle})
-                            </div>
-                            <div className="text-slate-400">Level {r.level} Referral</div>
-                          </div>
-                          <div className="font-mono font-bold text-emerald-400 tabular-nums">
-                            ${(r.totalInvestedUsd || 0).toFixed(2)} vol
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div className="bg-[#0B111E]/78 backdrop-blur-md border border-slate-700/70 rounded-2xl p-5 space-y-3 shadow-xl">
-                  <h3 className="font-display font-bold text-white text-base">All-Plan Commission Ledger</h3>
-                  {mlmCommissions.length === 0 ? (
-                    <p className="text-xs text-slate-400 py-6 text-center">No commissions earned yet.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {mlmCommissions.map((c) => (
-                        <div
-                          key={c.id}
-                          className="p-3 rounded-xl border border-slate-700/70 bg-slate-900/60 flex items-center justify-between text-xs"
-                        >
-                          <div>
-                            <div className="font-semibold text-white">
-                              Level {c.level} ({c.ratePercent}%) from {c.fromName}
-                            </div>
-                            <div className="text-slate-400 font-mono">
-                              On ${c.investmentAmount.toFixed(2)} investment
-                            </div>
-                          </div>
-                          <div className="font-mono font-bold text-emerald-400 tabular-nums">
-                            +${c.commissionUsd.toFixed(2)}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </section>
+            <ReferralDashboard
+              userProfile={userProfile}
+              platformConfig={platformConfig}
+              referralLink={referralLink}
+              referralLinkClicks={referralLinkClicks}
+              downlineReferrals={downlineReferrals}
+              mlmCommissions={mlmCommissions}
+              copiedText={copiedText}
+              onCopyValue={copyValue}
+              onOpenWithdraw={() => selectNav('withdraw')}
+            />
           )}
 
           {/* VIEW: PAYMENT METHODS MANAGER (USER SAVED PAYOUTS + PLATFORM CHANNELS) */}
@@ -2748,6 +2675,11 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                           </span>
                         </div>
                         <div className="text-slate-400">{m.instructions}</div>
+                        {m.withdrawAddress && (
+                          <div className="text-[11px] font-mono text-slate-400 truncate">
+                            Payout Source: {m.withdrawAddress}
+                          </div>
+                        )}
                         <div className="flex items-center justify-between pt-1 font-mono text-[11px] text-slate-300">
                           <span>{m.allowDeposit ? `Dep Min $${m.minDepositUsd}` : 'Deposit Off'}</span>
                           <span>{m.allowWithdrawal ? `Wd Min $${m.minWithdrawalUsd}` : 'Withdraw Off'}</span>

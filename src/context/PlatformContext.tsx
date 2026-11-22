@@ -30,6 +30,10 @@ import {
 } from '../constants/defaults';
 import { auth, db, googleProvider, handleFirestoreError, OperationType } from '../lib/firebase';
 import {
+  BannerAdConfig,
+  CoinMiningPlan,
+  CoinMiningStake,
+  CoinTapAccount,
   CryptoDeposit,
   CryptoNetwork,
   IdType,
@@ -38,8 +42,10 @@ import {
   MemeCoinInvestment,
   MlmCommission,
   P2PTransfer,
+  PaymentMethodConfig,
   PlatformConfig,
   ReferralLinkRecord,
+  ReferralStats,
   UserPaymentMethod,
   UserProfile,
   Withdrawal,
@@ -73,7 +79,10 @@ interface PlatformContextValue {
   p2pTransfers: P2PTransfer[];
   mlmCommissions: MlmCommission[];
   memeCoinInvestments: MemeCoinInvestment[];
+  coinMiningStakes: CoinMiningStake[];
+  coinTapAccount: CoinTapAccount | null;
   downlineReferrals: ReferralLinkRecord[];
+  referralLinkClicks: number;
   savedPaymentMethods: UserPaymentMethod[];
   // Auth & KYC
   signInWithGoogle: (referralCode?: string) => Promise<void>;
@@ -127,6 +136,15 @@ interface PlatformContextValue {
     paymentMethod: 'USD_VAULT' | 'SOL_WALLET';
     txSignature?: string;
   }) => Promise<void>;
+  // Paid Coin Mining & Free Tap-to-Mine Operations
+  startCoinMiningStake: (plan: CoinMiningPlan, amountUsd: number) => Promise<void>;
+  claimCoinMiningInterest: (stake: CoinMiningStake) => Promise<{ claimedUsd: number; claimedCoins: number }>;
+  syncTapMiningProgress: (params: {
+    addedCoins: number;
+    energy: number;
+    dayKey: string;
+  }) => Promise<void>;
+  claimTapMiningRewards: (pendingLocalCoins?: number) => Promise<{ claimedCoins: number; creditedUsd: number }>;
   // User Saved Payment Methods
   addUserPaymentMethod: (params: {
     label: string;
@@ -161,6 +179,22 @@ function makeId(prefix: string): string {
   return `${prefix}_${Date.now()}_${rand}`;
 }
 
+function sanitizeRuleId(raw: string, fallback = 'CUSTOM'): string {
+  const cleaned = String(raw || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, '_')
+    .slice(0, 64);
+  return cleaned || fallback;
+}
+
+function createdAtSeconds(val: unknown): number {
+  return (val as { seconds?: number } | undefined)?.seconds || 0;
+}
+
+export function getTodayDayKey(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
@@ -175,7 +209,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [p2pTransfers, setP2pTransfers] = useState<P2PTransfer[]>([]);
   const [mlmCommissions, setMlmCommissions] = useState<MlmCommission[]>([]);
   const [memeCoinInvestments, setMemeCoinInvestments] = useState<MemeCoinInvestment[]>([]);
+  const [coinMiningStakes, setCoinMiningStakes] = useState<CoinMiningStake[]>([]);
+  const [coinTapAccount, setCoinTapAccount] = useState<CoinTapAccount | null>(null);
   const [downlineReferrals, setDownlineReferrals] = useState<ReferralLinkRecord[]>([]);
+  const [referralLinkClicks, setReferralLinkClicks] = useState<number>(0);
   const [savedPaymentMethods, setSavedPaymentMethods] = useState<UserPaymentMethod[]>([]);
 
   const isAdminUser = Boolean(
@@ -198,13 +235,17 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           };
           const resolvedMethods =
             Array.isArray(data.paymentMethods) && data.paymentMethods.length > 0
-              ? data.paymentMethods
+              ? data.paymentMethods.map((m) => ({
+                  ...m,
+                  withdrawAddress: m.withdrawAddress ?? m.receivingAccount,
+                }))
               : buildDefaultPaymentMethods(mergedWallets);
 
           setPlatformConfig({
             ...DEFAULT_PLATFORM_CONFIG,
             ...data,
             mlmRates: { ...DEFAULT_PLATFORM_CONFIG.mlmRates, ...(data.mlmRates || {}) },
+            mentorConfig: { ...DEFAULT_PLATFORM_CONFIG.mentorConfig, ...(data.mentorConfig || {}) },
             depositWallets: mergedWallets,
             paymentMethods: resolvedMethods,
             pumpFunToken: { ...DEFAULT_PLATFORM_CONFIG.pumpFunToken, ...(data.pumpFunToken || {}) },
@@ -212,9 +253,20 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               ...DEFAULT_PLATFORM_CONFIG.dashboardAnnouncement,
               ...(data.dashboardAnnouncement || {}),
             },
-            packages: Array.isArray(data.packages) && data.packages.length > 0
-              ? data.packages
-              : DEFAULT_PLATFORM_CONFIG.packages,
+            bannerAds: Array.isArray(data.bannerAds)
+              ? data.bannerAds
+              : DEFAULT_PLATFORM_CONFIG.bannerAds,
+            coinMiningSettings: {
+              ...DEFAULT_PLATFORM_CONFIG.coinMiningSettings,
+              ...(data.coinMiningSettings || {}),
+            },
+            coinMiningPlans: Array.isArray(data.coinMiningPlans)
+              ? data.coinMiningPlans
+              : DEFAULT_PLATFORM_CONFIG.coinMiningPlans,
+            packages:
+              Array.isArray(data.packages) && data.packages.length > 0
+                ? data.packages
+                : DEFAULT_PLATFORM_CONFIG.packages,
           });
         }
       },
@@ -223,6 +275,59 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
     );
     return () => unsub();
+  }, []);
+
+  // Track referral link visits (?ref=HANDLE) once per browser session
+  useEffect(() => {
+    let rawRef = '';
+    try {
+      rawRef = new URLSearchParams(window.location.search).get('ref') || '';
+    } catch {
+      return;
+    }
+    const cleanHandle = rawRef
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9_-]/g, '')
+      .slice(0, 32);
+    if (!cleanHandle) return;
+
+    try {
+      localStorage.setItem('vtv_pending_ref', cleanHandle);
+    } catch {
+      // Ignore storage access errors in restricted contexts
+    }
+
+    const sessionKey = `vtv_ref_clicked_${cleanHandle}`;
+    try {
+      if (sessionStorage.getItem(sessionKey)) return;
+      sessionStorage.setItem(sessionKey, '1');
+    } catch {
+      // Proceed even if sessionStorage is unavailable
+    }
+
+    const statRef = doc(db, 'referralStats', cleanHandle);
+    runTransaction(db, async (tx) => {
+      const snap = await tx.get(statRef);
+      if (!snap.exists()) {
+        tx.set(statRef, {
+          handle: cleanHandle,
+          clicks: 1,
+          lastClickedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        const currentClicks = Number((snap.data() as ReferralStats).clicks || 0);
+        tx.update(statRef, {
+          handle: cleanHandle,
+          clicks: currentClicks + 1,
+          lastClickedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+    }).catch((err) => {
+      console.warn('Referral click tracking skipped:', err instanceof Error ? err.message : String(err));
+    });
   }, []);
 
   const ensureUserProvisioned = useCallback(async (user: User, draft?: KycDraft | null) => {
@@ -359,7 +464,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setP2pTransfers([]);
         setMlmCommissions([]);
         setMemeCoinInvestments([]);
+        setCoinMiningStakes([]);
+        setCoinTapAccount(null);
         setDownlineReferrals([]);
+        setReferralLinkClicks(0);
         setSavedPaymentMethods([]);
         return;
       }
@@ -415,20 +523,32 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     );
 
     const unsubInv = onSnapshot(
-      query(collection(db, 'investments'), where('uid', '==', uid), orderBy('startedAtMs', 'desc')),
-      (snap) => setInvestments(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Investment, 'id'>) }))),
+      query(collection(db, 'investments'), where('uid', '==', uid)),
+      (snap) => {
+        const list = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Investment, 'id'>) }));
+        list.sort((a, b) => (b.startedAtMs || 0) - (a.startedAtMs || 0));
+        setInvestments(list);
+      },
       (err) => handleFirestoreError(err, OperationType.LIST, 'investments')
     );
 
     const unsubDep = onSnapshot(
-      query(collection(db, 'cryptoDeposits'), where('uid', '==', uid), orderBy('createdAt', 'desc')),
-      (snap) => setDeposits(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<CryptoDeposit, 'id'>) }))),
+      query(collection(db, 'cryptoDeposits'), where('uid', '==', uid)),
+      (snap) => {
+        const list = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<CryptoDeposit, 'id'>) }));
+        list.sort((a, b) => createdAtSeconds(b.createdAt) - createdAtSeconds(a.createdAt));
+        setDeposits(list);
+      },
       (err) => handleFirestoreError(err, OperationType.LIST, 'cryptoDeposits')
     );
 
     const unsubWith = onSnapshot(
-      query(collection(db, 'withdrawals'), where('uid', '==', uid), orderBy('createdAt', 'desc')),
-      (snap) => setWithdrawals(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Withdrawal, 'id'>) }))),
+      query(collection(db, 'withdrawals'), where('uid', '==', uid)),
+      (snap) => {
+        const list = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Withdrawal, 'id'>) }));
+        list.sort((a, b) => createdAtSeconds(b.createdAt) - createdAtSeconds(a.createdAt));
+        setWithdrawals(list);
+      },
       (err) => handleFirestoreError(err, OperationType.LIST, 'withdrawals')
     );
 
@@ -436,11 +556,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     let recvList: P2PTransfer[] = [];
     const mergeP2P = () => {
       const merged = [...sentList, ...recvList];
-      merged.sort((a, b) => {
-        const ta = (a.createdAt as { seconds?: number })?.seconds || 0;
-        const tb = (b.createdAt as { seconds?: number })?.seconds || 0;
-        return tb - ta;
-      });
+      merged.sort((a, b) => createdAtSeconds(b.createdAt) - createdAtSeconds(a.createdAt));
       setP2pTransfers(merged);
     };
 
@@ -463,16 +579,45 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     );
 
     const unsubMlm = onSnapshot(
-      query(collection(db, 'mlmCommissions'), where('beneficiaryUid', '==', uid), orderBy('createdAt', 'desc')),
-      (snap) => setMlmCommissions(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<MlmCommission, 'id'>) }))),
+      query(collection(db, 'mlmCommissions'), where('beneficiaryUid', '==', uid)),
+      (snap) => {
+        const list = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<MlmCommission, 'id'>) }));
+        list.sort((a, b) => createdAtSeconds(b.createdAt) - createdAtSeconds(a.createdAt));
+        setMlmCommissions(list);
+      },
       (err) => handleFirestoreError(err, OperationType.LIST, 'mlmCommissions')
     );
 
     const unsubMeme = onSnapshot(
-      query(collection(db, 'memeCoinInvestments'), where('uid', '==', uid), orderBy('createdAt', 'desc')),
-      (snap) =>
-        setMemeCoinInvestments(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<MemeCoinInvestment, 'id'>) }))),
+      query(collection(db, 'memeCoinInvestments'), where('uid', '==', uid)),
+      (snap) => {
+        const list = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<MemeCoinInvestment, 'id'>) }));
+        list.sort((a, b) => createdAtSeconds(b.createdAt) - createdAtSeconds(a.createdAt));
+        setMemeCoinInvestments(list);
+      },
       (err) => handleFirestoreError(err, OperationType.LIST, 'memeCoinInvestments')
+    );
+
+    const unsubCoinStakes = onSnapshot(
+      query(collection(db, 'coinMiningStakes'), where('uid', '==', uid)),
+      (snap) => {
+        const list = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<CoinMiningStake, 'id'>) }));
+        list.sort((a, b) => (b.startedAtMs || 0) - (a.startedAtMs || 0));
+        setCoinMiningStakes(list);
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'coinMiningStakes')
+    );
+
+    const unsubCoinTap = onSnapshot(
+      doc(db, 'coinTapAccounts', uid),
+      (snap) => {
+        if (snap.exists()) {
+          setCoinTapAccount(snap.data() as CoinTapAccount);
+        } else {
+          setCoinTapAccount(null);
+        }
+      },
+      (err) => handleFirestoreError(err, OperationType.GET, `coinTapAccounts/${uid}`)
     );
 
     const unsubRefs = onSnapshot(
@@ -488,9 +633,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const list = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<UserPaymentMethod, 'id'>) }));
         list.sort((a, b) => {
           if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
-          const ta = (a.createdAt as { seconds?: number })?.seconds || 0;
-          const tb = (b.createdAt as { seconds?: number })?.seconds || 0;
-          return tb - ta;
+          return createdAtSeconds(b.createdAt) - createdAtSeconds(a.createdAt);
         });
         setSavedPaymentMethods(list);
       },
@@ -506,10 +649,41 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       unsubP2PRecv();
       unsubMlm();
       unsubMeme();
+      unsubCoinStakes();
+      unsubCoinTap();
       unsubRefs();
       unsubPaymentMethods();
     };
   }, [authUser]);
+
+  // Subscribe to live referral link click stats for the authenticated user's handle
+  useEffect(() => {
+    const handle = userProfile?.handle;
+    if (!handle || !authUser?.emailVerified) {
+      setReferralLinkClicks(0);
+      return;
+    }
+    const cleanHandle = sanitizeRuleId(handle.toUpperCase(), '').slice(0, 32);
+    if (!cleanHandle) {
+      setReferralLinkClicks(0);
+      return;
+    }
+    const unsub = onSnapshot(
+      doc(db, 'referralStats', cleanHandle),
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as ReferralStats;
+          setReferralLinkClicks(Number(data.clicks || 0));
+        } else {
+          setReferralLinkClicks(0);
+        }
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.GET, `referralStats/${cleanHandle}`);
+      }
+    );
+    return () => unsub();
+  }, [authUser?.emailVerified, userProfile?.handle]);
 
   const signInWithGoogle = async (referralCode?: string) => {
     if (referralCode) {
@@ -610,14 +784,21 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     txId: string;
   }) => {
     if (!authUser || !userProfile) throw new Error('User vault profile required.');
-    const methodId = params.network.trim().slice(0, 64);
+    const methodId = sanitizeRuleId(params.network, 'USDT_TRC20');
+    const amount = Number(params.amountUsd);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error('Enter a valid deposit USD amount.');
+    }
     const configuredMethod = platformConfig.paymentMethods.find((m) => m.id === methodId);
     if (configuredMethod && (!configuredMethod.enabled || !configuredMethod.allowDeposit)) {
       throw new Error(`${configuredMethod.name} deposits are currently disabled.`);
     }
     const minDeposit = configuredMethod?.minDepositUsd || 1;
-    if (Number(params.amountUsd) < minDeposit) {
+    if (amount < minDeposit) {
       throw new Error(`Minimum deposit for ${configuredMethod?.name || methodId} is $${minDeposit.toFixed(2)}.`);
+    }
+    if (!params.txId.trim()) {
+      throw new Error('Transaction ID / reference hash is required.');
     }
 
     const fallbackWallet =
@@ -636,7 +817,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         userName: userProfile.fullName,
         network: methodId,
         walletAddress,
-        amountUsd: Number(params.amountUsd),
+        amountUsd: Number(amount.toFixed(2)),
         txId: params.txId.trim().slice(0, 160),
         status: 'pending',
         adminNote: '',
@@ -800,31 +981,62 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           updatedAt: serverTimestamp(),
         });
 
-        // Pay MLM commissions & track Mentor 4x brought volume on Level 1
+        // Pay MLM commissions & Mentor Commission override + track Mentor Volume on Level 1
+        const mentorCfg = platformConfig.mentorConfig || DEFAULT_PLATFORM_CONFIG.mentorConfig;
+
         for (const u of uplines) {
-          const commissionUsd = Number(((pkg.capital * u.rate) / 100).toFixed(2));
-          if (commissionUsd <= 0) continue;
+          const refCommUsd = Number(((pkg.capital * u.rate) / 100).toFixed(2));
+          const isLevel1Mentor =
+            u.level === 1 &&
+            Boolean(u.snapData.isMentor) &&
+            Boolean(mentorCfg.enabled) &&
+            Number(mentorCfg.mentorCommissionPercent) > 0;
+          const mentorBonusUsd = isLevel1Mentor
+            ? Number(((pkg.capital * mentorCfg.mentorCommissionPercent) / 100).toFixed(2))
+            : 0;
+          const totalCredit = Number((refCommUsd + mentorBonusUsd).toFixed(2));
           const addedVolume = u.level === 1 ? pkg.capital : 0;
-          const nextProfit = Number((u.snapData.profitBalance + commissionUsd).toFixed(2));
-          const nextBrought = Number(((u.snapData.mentorBroughtVolume || 0) + addedVolume).toFixed(2));
 
-          tx.update(doc(db, 'users', u.uid), {
-            profitBalance: nextProfit,
-            mentorBroughtVolume: nextBrought,
-            updatedAt: serverTimestamp(),
-          });
+          if (totalCredit > 0 || addedVolume > 0) {
+            const nextProfit = Number((u.snapData.profitBalance + totalCredit).toFixed(2));
+            const nextBrought = Number(((u.snapData.mentorBroughtVolume || 0) + addedVolume).toFixed(2));
 
-          const commId = makeId(`mlmL${u.level}`);
-          tx.set(doc(db, 'mlmCommissions', commId), {
-            beneficiaryUid: u.uid,
-            fromUid: authUser.uid,
-            fromName: current.fullName,
-            level: u.level,
-            investmentAmount: pkg.capital,
-            ratePercent: u.rate,
-            commissionUsd,
-            createdAt: serverTimestamp(),
-          });
+            tx.update(doc(db, 'users', u.uid), {
+              profitBalance: nextProfit,
+              mentorBroughtVolume: nextBrought,
+              updatedAt: serverTimestamp(),
+            });
+          }
+
+          if (refCommUsd > 0) {
+            const commId = makeId(`mlmL${u.level}`);
+            tx.set(doc(db, 'mlmCommissions', commId), {
+              beneficiaryUid: u.uid,
+              fromUid: authUser.uid,
+              fromName: current.fullName,
+              level: u.level,
+              commissionType: 'referral',
+              investmentAmount: pkg.capital,
+              ratePercent: u.rate,
+              commissionUsd: refCommUsd,
+              createdAt: serverTimestamp(),
+            });
+          }
+
+          if (mentorBonusUsd > 0) {
+            const mentorCommId = makeId('mentorC');
+            tx.set(doc(db, 'mlmCommissions', mentorCommId), {
+              beneficiaryUid: u.uid,
+              fromUid: authUser.uid,
+              fromName: current.fullName,
+              level: 1,
+              commissionType: 'mentor',
+              investmentAmount: pkg.capital,
+              ratePercent: mentorCfg.mentorCommissionPercent,
+              commissionUsd: mentorBonusUsd,
+              createdAt: serverTimestamp(),
+            });
+          }
         }
 
         for (const r of refSnapshots) {
@@ -889,7 +1101,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }) => {
     if (!authUser || !userProfile) throw new Error('Authentication required.');
     const amount = Number(params.amountUsd);
-    const activeMethod = (platformConfig.paymentMethods || []).find((m) => m.id === params.network);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error('Enter a valid withdrawal USD amount.');
+    }
+    const cleanNetwork = sanitizeRuleId(params.network, 'USDT_TRC20');
+    const activeMethod = (platformConfig.paymentMethods || []).find((m) => m.id === cleanNetwork);
     if (activeMethod && (!activeMethod.enabled || !activeMethod.allowWithdrawal)) {
       throw new Error(`Withdrawals are currently disabled for ${activeMethod.name}.`);
     }
@@ -912,7 +1128,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     ) {
       const remaining = (userProfile.mentorRequiredVolume - userProfile.mentorBroughtVolume).toFixed(2);
       throw new Error(
-        `Mentor 4x Volume Rule Active: Bring $${remaining} more in referred investment volume ($${userProfile.mentorBroughtVolume.toFixed(
+        `Mentor Volume Rule Active: Bring $${remaining} more in referred investment volume ($${userProfile.mentorBroughtVolume.toFixed(
           2
         )} / $${userProfile.mentorRequiredVolume.toFixed(2)}) to unlock instant profit withdrawals.`
       );
@@ -947,11 +1163,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           investmentDate: '',
           principalCapital: 0,
           totalProfitGenerated: 0,
-          amountUsd: amount,
-          network: params.network,
-          destinationAddress: params.destinationAddress.trim(),
+          amountUsd: Number(amount.toFixed(2)),
+          network: cleanNetwork,
+          destinationAddress: params.destinationAddress.trim().slice(0, 160),
           status: 'completed',
-          adminNote: 'Instant automated profit settlement',
+          adminNote: '',
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
@@ -977,8 +1193,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (inv.status === 'capital_requested' || inv.status === 'capital_withdrawn') {
       throw new Error('Capital withdrawal already submitted for this package.');
     }
+    if (!params.destinationAddress.trim()) {
+      throw new Error('Destination payout address is required.');
+    }
 
     const withId = makeId('wdc');
+    const cleanNetwork = sanitizeRuleId(params.network, 'USDT_TRC20');
     const wdDoc: Omit<Withdrawal, 'id' | 'createdAt'> = {
       uid: authUser.uid,
       userEmail: userProfile.email,
@@ -991,8 +1211,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       principalCapital: inv.capital,
       totalProfitGenerated: metrics.totalProfitGenerated,
       amountUsd: inv.capital,
-      network: params.network,
-      destinationAddress: params.destinationAddress.trim(),
+      network: cleanNetwork,
+      destinationAddress: params.destinationAddress.trim().slice(0, 160),
       status: 'pending',
       adminNote: '',
     };
@@ -1025,7 +1245,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }) => {
     if (!authUser || !userProfile) throw new Error('Authentication required.');
     const amount = Number(params.amountUsd);
-    if (amount <= 0) throw new Error('Transfer amount must be greater than $0.');
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error('Transfer amount must be greater than $0.');
+    }
     if (amount > userProfile.usdBalance) throw new Error('Insufficient USD Vault balance.');
 
     const clean = params.recipientQuery.trim();
@@ -1106,7 +1328,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }) => {
     if (!authUser || !userProfile) throw new Error('Authentication required.');
     const amount = Number(params.amountUsd);
-    if (amount <= 0) throw new Error('Allocation amount must be greater than $0.');
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error('Allocation amount must be greater than $0.');
+    }
 
     const token = platformConfig.pumpFunToken;
     const tokenQuantity = Number((amount / Math.max(0.0000001, token.priceUsd)).toFixed(2));
@@ -1149,6 +1373,259 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
+  const startCoinMiningStake = async (plan: CoinMiningPlan, amountUsd: number) => {
+    if (!authUser || !userProfile) throw new Error('Authentication required.');
+    if (!platformConfig.coinMiningSettings.paidMiningEnabled) {
+      throw new Error('Coin mining allocations are temporarily paused by administration.');
+    }
+    if (!plan.enabled) {
+      throw new Error(`${plan.name} is currently disabled.`);
+    }
+    const amount = Number(amountUsd);
+    if (!Number.isFinite(amount) || amount < plan.minUsd || amount > plan.maxUsd) {
+      throw new Error(`Enter an amount between $${plan.minUsd} and $${plan.maxUsd} for ${plan.name}.`);
+    }
+    if (userProfile.usdBalance < amount) {
+      throw new Error(`Insufficient Deposit Wallet balance. Need $${(amount - userProfile.usdBalance).toFixed(2)} more.`);
+    }
+
+    const stakeId = makeId('mine');
+    const cleanPlanId = sanitizeRuleId(plan.id, 'asic_plan');
+    const nowMs = Date.now();
+
+    try {
+      await runTransaction(db, async (tx) => {
+        const userRef = doc(db, 'users', authUser.uid);
+        const userSnap = await tx.get(userRef);
+        if (!userSnap.exists()) throw new Error('Profile missing.');
+        const cur = userSnap.data() as UserProfile;
+        if (cur.usdBalance < amount) throw new Error('Insufficient USD Vault balance.');
+
+        tx.update(userRef, {
+          usdBalance: Number((cur.usdBalance - amount).toFixed(2)),
+          totalInvested: Number((cur.totalInvested + amount).toFixed(2)),
+          updatedAt: serverTimestamp(),
+        });
+
+        tx.set(doc(db, 'coinMiningStakes', stakeId), {
+          uid: authUser.uid,
+          userName: cur.fullName,
+          planId: cleanPlanId,
+          planName: plan.name.trim().slice(0, 80),
+          principalUsd: Number(amount.toFixed(2)),
+          dailyInterestPercent: Number(plan.dailyInterestPercent),
+          durationDays: Math.max(1, Math.round(plan.durationDays)),
+          coinBonusPerUsd: Math.max(0, Number(plan.coinBonusPerUsd)),
+          claimedUsd: 0,
+          claimedCoins: 0,
+          startedAtMs: nowMs,
+          lastClaimAtMs: nowMs,
+          status: 'active',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `coinMiningStakes/${stakeId}`);
+    }
+  };
+
+  const claimCoinMiningInterest = async (
+    stake: CoinMiningStake
+  ): Promise<{ claimedUsd: number; claimedCoins: number }> => {
+    if (!authUser || !userProfile) throw new Error('Authentication required.');
+    if (stake.status !== 'active') throw new Error('This mining rig has completed its full term.');
+
+    const MS_PER_DAY = 86_400_000;
+    const nowMs = Date.now();
+    const maxEndMs = stake.startedAtMs + stake.durationDays * MS_PER_DAY;
+    const effectiveNowMs = Math.min(nowMs, maxEndMs);
+    const totalElapsedDays = Math.floor((effectiveNowMs - stake.startedAtMs) / MS_PER_DAY);
+    const alreadyClaimedDays = Math.floor((stake.lastClaimAtMs - stake.startedAtMs) / MS_PER_DAY);
+    const claimableDays = Math.max(0, totalElapsedDays - alreadyClaimedDays);
+
+    if (claimableDays <= 0) {
+      throw new Error('Daily mining interest unlocks every 24 hours. Check countdown for next claim.');
+    }
+
+    const dailyUsd = (stake.principalUsd * stake.dailyInterestPercent) / 100;
+    const claimUsd = Number((dailyUsd * claimableDays).toFixed(2));
+    const claimCoins = Number(((stake.principalUsd * stake.coinBonusPerUsd) / stake.durationDays * claimableDays).toFixed(2));
+    const nextLastClaimMs = stake.startedAtMs + totalElapsedDays * MS_PER_DAY;
+    const nextStatus = totalElapsedDays >= stake.durationDays ? 'completed' : 'active';
+
+    try {
+      await runTransaction(db, async (tx) => {
+        const stakeRef = doc(db, 'coinMiningStakes', stake.id);
+        const userRef = doc(db, 'users', authUser.uid);
+        const stakeSnap = await tx.get(stakeRef);
+        const userSnap = await tx.get(userRef);
+        if (!stakeSnap.exists() || !userSnap.exists()) throw new Error('Mining stake missing.');
+
+        const curStake = stakeSnap.data() as CoinMiningStake;
+        if (curStake.status !== 'active') throw new Error('Mining stake already completed.');
+        const curUser = userSnap.data() as UserProfile;
+
+        tx.update(stakeRef, {
+          claimedUsd: Number(((curStake.claimedUsd || 0) + claimUsd).toFixed(2)),
+          claimedCoins: Number(((curStake.claimedCoins || 0) + claimCoins).toFixed(2)),
+          lastClaimAtMs: nextLastClaimMs,
+          status: nextStatus,
+          updatedAt: serverTimestamp(),
+        });
+
+        tx.update(userRef, {
+          profitBalance: Number((curUser.profitBalance + claimUsd).toFixed(2)),
+          updatedAt: serverTimestamp(),
+        });
+      });
+
+      return { claimedUsd: claimUsd, claimedCoins: claimCoins };
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `coinMiningStakes/${stake.id}`);
+    }
+  };
+
+  const syncTapMiningProgress = async (params: {
+    addedCoins: number;
+    energy: number;
+    dayKey: string;
+  }) => {
+    if (!authUser) return;
+    const added = Math.max(0, Number(params.addedCoins) || 0);
+    if (added <= 0) return;
+
+    const tapRef = doc(db, 'coinTapAccounts', authUser.uid);
+    const maxCap = platformConfig.coinMiningSettings.dailyTapLimitCoins;
+    const maxEnergy = platformConfig.coinMiningSettings.maxEnergy;
+    const safeEnergy = Math.max(0, Math.min(maxEnergy, Math.round(params.energy)));
+    const nowMs = Date.now();
+
+    try {
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(tapRef);
+        if (!snap.exists()) {
+          const cappedAdded = Math.min(added, maxCap);
+          tx.set(tapRef, {
+            uid: authUser.uid,
+            totalTappedCoins: cappedAdded,
+            unclaimedTapCoins: cappedAdded,
+            dailyTappedCoins: cappedAdded,
+            lastTapDayKey: params.dayKey,
+            totalClaimedUsdFromTap: 0,
+            totalClaimedCoins: 0,
+            energy: safeEnergy,
+            lastEnergySyncMs: nowMs,
+            updatedAt: serverTimestamp(),
+          });
+          return;
+        }
+        const cur = snap.data() as CoinTapAccount;
+        const baseDaily = cur.lastTapDayKey === params.dayKey ? cur.dailyTappedCoins || 0 : 0;
+        const allowedAdd = Math.max(0, Math.min(added, maxCap - baseDaily));
+        if (allowedAdd <= 0) return;
+
+        tx.update(tapRef, {
+          totalTappedCoins: Number(((cur.totalTappedCoins || 0) + allowedAdd).toFixed(2)),
+          unclaimedTapCoins: Number(((cur.unclaimedTapCoins || 0) + allowedAdd).toFixed(2)),
+          dailyTappedCoins: Number((baseDaily + allowedAdd).toFixed(2)),
+          lastTapDayKey: params.dayKey,
+          energy: safeEnergy,
+          lastEnergySyncMs: nowMs,
+          updatedAt: serverTimestamp(),
+        });
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `coinTapAccounts/${authUser.uid}`);
+    }
+  };
+
+  const claimTapMiningRewards = async (
+    pendingLocalCoins = 0
+  ): Promise<{ claimedCoins: number; creditedUsd: number }> => {
+    if (!authUser || !userProfile) throw new Error('Authentication required.');
+    const settings = platformConfig.coinMiningSettings;
+    if (!settings.tapToMineEnabled) throw new Error('Free tap-to-mine is currently disabled.');
+
+    const tapRef = doc(db, 'coinTapAccounts', authUser.uid);
+    const userRef = doc(db, 'users', authUser.uid);
+    const todayKey = getTodayDayKey();
+    const nowMs = Date.now();
+
+    try {
+      let localCoinsToProcess = Math.max(0, Number(pendingLocalCoins) || 0);
+      const initialCheckSnap = await getDoc(tapRef);
+      if (!initialCheckSnap.exists() && localCoinsToProcess > 0) {
+        await syncTapMiningProgress({
+          addedCoins: localCoinsToProcess,
+          energy: Math.max(0, settings.maxEnergy - settings.energyCostPerTap),
+          dayKey: todayKey,
+        });
+        localCoinsToProcess = 0;
+      }
+
+      let result = { claimedCoins: 0, creditedUsd: 0 };
+      await runTransaction(db, async (tx) => {
+        const tapSnap = await tx.get(tapRef);
+        const userSnap = await tx.get(userRef);
+        if (!userSnap.exists()) throw new Error('Profile missing.');
+        const curUser = userSnap.data() as UserProfile;
+
+        const existingTap = tapSnap.exists() ? (tapSnap.data() as CoinTapAccount) : null;
+        const baseDaily =
+          existingTap && existingTap.lastTapDayKey === todayKey ? existingTap.dailyTappedCoins || 0 : 0;
+        const extraLocal = Math.max(
+          0,
+          Math.min(localCoinsToProcess, settings.dailyTapLimitCoins - baseDaily)
+        );
+        const totalClaimableCoins = Number(
+          (((existingTap?.unclaimedTapCoins || 0) + extraLocal)).toFixed(2)
+        );
+
+        if (totalClaimableCoins <= 0) {
+          throw new Error('Tap the $ATX coin to mine free rewards before claiming.');
+        }
+
+        const creditedUsd = Number((totalClaimableCoins * settings.tapUsdPerCoin).toFixed(4));
+        const creditRoundedUsd = Number(creditedUsd.toFixed(2));
+
+        if (!tapSnap.exists() || !existingTap) {
+          throw new Error('Tap the $ATX coin to mine free rewards before claiming.');
+        }
+        if (settings.tapUsdPerCoin > 0 && creditRoundedUsd <= 0) {
+          throw new Error('Mine a few more taps to reach at least $0.01 USD before claiming.');
+        }
+
+        tx.update(tapRef, {
+          totalTappedCoins: Number(((existingTap.totalTappedCoins || 0) + extraLocal).toFixed(2)),
+          unclaimedTapCoins: 0,
+          dailyTappedCoins: Number((baseDaily + extraLocal).toFixed(2)),
+          lastTapDayKey: todayKey,
+          totalClaimedUsdFromTap: Number(
+            ((existingTap.totalClaimedUsdFromTap || 0) + creditedUsd).toFixed(4)
+          ),
+          totalClaimedCoins: Number(
+            ((existingTap.totalClaimedCoins || 0) + totalClaimableCoins).toFixed(2)
+          ),
+          lastEnergySyncMs: nowMs,
+          updatedAt: serverTimestamp(),
+        });
+
+        if (creditRoundedUsd > 0) {
+          tx.update(userRef, {
+            profitBalance: Number((curUser.profitBalance + creditRoundedUsd).toFixed(2)),
+            updatedAt: serverTimestamp(),
+          });
+        }
+
+        result = { claimedCoins: totalClaimableCoins, creditedUsd: creditRoundedUsd };
+      });
+      return result;
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `coinTapAccounts/${authUser.uid}`);
+    }
+  };
+
   // =========================================================================
   // Super Admin Actions (Invoked strictly inside /admin)
   // =========================================================================
@@ -1164,10 +1641,161 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       message: String(rawAnn.message || '').trim().slice(0, 500),
       updatedBy: String(rawAnn.updatedBy || authUser?.email || 'Super Admin').trim().slice(0, 120),
     };
+
+    const rawMentor = next.mentorConfig || DEFAULT_PLATFORM_CONFIG.mentorConfig;
+    const safeMentorConfig = {
+      enabled: Boolean(rawMentor.enabled),
+      mentorCommissionPercent: Math.max(0, Math.min(50, Number(rawMentor.mentorCommissionPercent) || 0)),
+      volumeMultiplier: Math.max(1, Math.min(20, Number(rawMentor.volumeMultiplier) || 4)),
+      defaultGiftCapital: Math.max(1, Number(rawMentor.defaultGiftCapital) || 500),
+      defaultDailyPercent: Math.max(0.1, Math.min(50, Number(rawMentor.defaultDailyPercent) || 2.0)),
+    };
+
+    const rawTap = next.coinMiningSettings || DEFAULT_PLATFORM_CONFIG.coinMiningSettings;
+    const safeCoinMiningSettings = {
+      paidMiningEnabled: Boolean(rawTap.paidMiningEnabled),
+      tapToMineEnabled: Boolean(rawTap.tapToMineEnabled),
+      tapRewardCoins: Math.max(0.1, Number(rawTap.tapRewardCoins) || 5),
+      tapUsdPerCoin: Math.max(0, Number(rawTap.tapUsdPerCoin) || 0),
+      maxEnergy: Math.max(10, Math.round(Number(rawTap.maxEnergy) || 500)),
+      energyCostPerTap: Math.max(1, Math.round(Number(rawTap.energyCostPerTap) || 1)),
+      energyRegenPerSec: Math.max(0, Number(rawTap.energyRegenPerSec) || 2),
+      dailyTapLimitCoins: Math.max(1, Math.round(Number(rawTap.dailyTapLimitCoins) || 2500)),
+    };
+
+    const safePackages = (Array.isArray(next.packages) && next.packages.length > 0
+      ? next.packages
+      : DEFAULT_PLATFORM_CONFIG.packages
+    )
+      .slice(0, 25)
+      .map((p, idx) => ({
+        id: sanitizeRuleId(p.id || `pkg_${idx + 1}`, `pkg_${idx + 1}`),
+        name: String(p.name || `Tier ${idx + 1}`).trim().slice(0, 80),
+        capital: Math.max(1, Number(p.capital) || 100),
+        dailyPercent: Math.max(0.1, Math.min(50, Number(p.dailyPercent) || 1)),
+        aiMode: String(p.aiMode || 'AI Execution Engine').trim().slice(0, 100),
+        profitDays: Math.max(1, Math.round(Number(p.profitDays) || 200)),
+        capitalLockDays: Math.max(0, Math.round(Number(p.capitalLockDays) || 200)),
+        description: String(p.description || '').trim().slice(0, 300),
+      }));
+
+    const safePaymentMethods: PaymentMethodConfig[] = (
+      Array.isArray(next.paymentMethods) && next.paymentMethods.length > 0
+        ? next.paymentMethods
+        : DEFAULT_PLATFORM_CONFIG.paymentMethods
+    )
+      .slice(0, 25)
+      .map((pm, idx) => ({
+        ...pm,
+        id: sanitizeRuleId(pm.id || `PM_${idx + 1}`, `PM_${idx + 1}`),
+        name: String(pm.name || `Channel ${idx + 1}`).trim().slice(0, 80),
+        receivingAccount: String(pm.receivingAccount || '').trim().slice(0, 160),
+        withdrawAddress: String(pm.withdrawAddress ?? pm.receivingAccount ?? '').trim().slice(0, 160),
+        instructions: String(pm.instructions || '').trim().slice(0, 300),
+        minDepositUsd: Math.max(1, Number(pm.minDepositUsd) || 10),
+        minWithdrawalUsd: Math.max(1, Number(pm.minWithdrawalUsd) || 10),
+      }));
+
+    const safeBannerAds: BannerAdConfig[] = (Array.isArray(next.bannerAds) ? next.bannerAds : [])
+      .slice(0, 15)
+      .map((ad, idx) => ({
+        id: sanitizeRuleId(ad.id || `ad_${idx + 1}`, `ad_${idx + 1}`),
+        enabled: Boolean(ad.enabled),
+        title: String(ad.title || '').trim().slice(0, 120),
+        subtitle: String(ad.subtitle || '').trim().slice(0, 300),
+        badgeText: String(ad.badgeText || '').trim().slice(0, 40),
+        ctaText: String(ad.ctaText || 'Learn More').trim().slice(0, 40),
+        ctaUrl: String(ad.ctaUrl || '#coin-mining-desk').trim().slice(0, 300),
+        imageUrl: String(ad.imageUrl || '').trim().slice(0, 500),
+        placement: ad.placement === 'all_pages' ? 'all_pages' : 'coin_page',
+        theme: (['gold', 'emerald', 'sky', 'crimson'].includes(ad.theme)
+          ? ad.theme
+          : 'gold') as BannerAdConfig['theme'],
+      }));
+
+    const safeMiningPlans: CoinMiningPlan[] = (Array.isArray(next.coinMiningPlans)
+      ? next.coinMiningPlans
+      : []
+    )
+      .slice(0, 20)
+      .map((plan, idx) => {
+        const minUsd = Math.max(1, Number(plan.minUsd) || 25);
+        const maxUsd = Math.max(minUsd, Number(plan.maxUsd) || minUsd * 10);
+        return {
+          id: sanitizeRuleId(plan.id || `rig_${idx + 1}`, `rig_${idx + 1}`),
+          name: String(plan.name || `Mining Rig ${idx + 1}`).trim().slice(0, 80),
+          minUsd,
+          maxUsd,
+          dailyInterestPercent: Math.max(0.1, Math.min(50, Number(plan.dailyInterestPercent) || 1.5)),
+          durationDays: Math.max(1, Math.min(1000, Math.round(Number(plan.durationDays) || 30))),
+          hashRateLabel: String(plan.hashRateLabel || '100 TH/s').trim().slice(0, 40),
+          coinBonusPerUsd: Math.max(0, Number(plan.coinBonusPerUsd) || 0),
+          enabled: Boolean(plan.enabled),
+        };
+      });
+
+    const clampScore = (val: unknown, fallback: number) => {
+      const n = Number(val);
+      return Number.isFinite(n) ? Math.max(0, Math.min(5, Number(n.toFixed(1)))) : fallback;
+    };
+
+    const safeMlmRates = {
+      level1: Math.max(0, Math.min(50, Number(next.mlmRates?.level1) || 0)),
+      level2: Math.max(0, Math.min(50, Number(next.mlmRates?.level2) || 0)),
+      level3: Math.max(0, Math.min(50, Number(next.mlmRates?.level3) || 0)),
+    };
+
+    const rawToken = next.pumpFunToken || DEFAULT_PLATFORM_CONFIG.pumpFunToken;
+    const safePumpFunToken = {
+      name: String(rawToken.name || 'Alphatradex').trim().slice(0, 80) || 'Alphatradex',
+      ticker: String(rawToken.ticker || 'ATX').trim().slice(0, 20) || 'ATX',
+      mintAddress: String(rawToken.mintAddress || DEFAULT_PLATFORM_CONFIG.pumpFunToken.mintAddress)
+        .trim()
+        .slice(0, 160),
+      pumpFunUrl: String(rawToken.pumpFunUrl || 'https://pump.fun').trim().slice(0, 300),
+      priceUsd: Math.max(0.000001, Number(rawToken.priceUsd) || 0.0042),
+      marketCapUsd: Math.max(0, Number(rawToken.marketCapUsd) || 0),
+      change24hPercent: Number.isFinite(Number(rawToken.change24hPercent))
+        ? Number(rawToken.change24hPercent)
+        : 0,
+      description: String(rawToken.description || '').trim().slice(0, 600),
+    };
+
+    const safeDepositWallets = {
+      usdtTrc20: String(next.depositWallets?.usdtTrc20 || '').trim().slice(0, 160),
+      usdtErc20: String(next.depositWallets?.usdtErc20 || '').trim().slice(0, 160),
+      sol: String(next.depositWallets?.sol || '').trim().slice(0, 160),
+    };
+
     try {
       await setDoc(doc(db, 'config', 'platform'), {
         ...next,
+        companyName:
+          String(next.companyName || DEFAULT_PLATFORM_CONFIG.companyName).trim().slice(0, 120) ||
+          'Alphatradex',
+        companyTagline: String(next.companyTagline || '').trim().slice(0, 200),
+        companyDescription: String(next.companyDescription || '').trim().slice(0, 1500),
+        companyGoal: String(next.companyGoal || '').trim().slice(0, 1500),
+        riskDisclosure: String(next.riskDisclosure || '').trim().slice(0, 1500),
+        trustpilotScore: clampScore(next.trustpilotScore, 4.9),
+        trustpilotReviews: Math.max(0, Math.round(Number(next.trustpilotReviews) || 0)),
+        nortonScore: clampScore(next.nortonScore, 4.9),
+        isoScore: clampScore(next.isoScore, 5.0),
+        certikScore: clampScore(next.certikScore, 4.9),
+        minWithdrawalUsd: Math.max(1, Number(next.minWithdrawalUsd) || 10),
+        eliteCapitalLockDays: Math.max(1, Math.round(Number(next.eliteCapitalLockDays) || 70)),
+        totalProfitDays: Math.max(1, Math.round(Number(next.totalProfitDays) || 200)),
+        globalPaused: Boolean(next.globalPaused),
+        mlmRates: safeMlmRates,
+        depositWallets: safeDepositWallets,
+        pumpFunToken: safePumpFunToken,
+        packages: safePackages,
+        mentorConfig: safeMentorConfig,
+        paymentMethods: safePaymentMethods,
         dashboardAnnouncement: safeAnnouncement,
+        bannerAds: safeBannerAds,
+        coinMiningSettings: safeCoinMiningSettings,
+        coinMiningPlans: safeMiningPlans,
         updatedAt: serverTimestamp(),
       });
     } catch (err) {
@@ -1329,8 +1957,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         if (!userSnap.exists()) throw new Error('Target user not found.');
         const cur = userSnap.data() as UserProfile;
 
+        const multiplier = Math.max(1, Number(platformConfig.mentorConfig?.volumeMultiplier) || 4);
         const nextGifted = Number(((cur.mentorGiftedCapital || 0) + giftAmount).toFixed(2));
-        const nextRequired = Number((nextGifted * 4).toFixed(2));
+        const nextRequired = Number((nextGifted * multiplier).toFixed(2));
 
         tx.update(userRef, {
           isMentor: true,
@@ -1377,7 +2006,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         p2pTransfers,
         mlmCommissions,
         memeCoinInvestments,
+        coinMiningStakes,
+        coinTapAccount,
         downlineReferrals,
+        referralLinkClicks,
         savedPaymentMethods,
         signInWithGoogle,
         signInWithEmail,
@@ -1393,6 +2025,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         requestManualCapitalWithdrawal,
         sendP2PTransfer,
         investPumpFunMemeCoin,
+        startCoinMiningStake,
+        claimCoinMiningInterest,
+        syncTapMiningProgress,
+        claimTapMiningRewards,
         addUserPaymentMethod,
         setDefaultUserPaymentMethod,
         deleteUserPaymentMethod,

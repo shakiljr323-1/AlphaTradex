@@ -66,8 +66,9 @@ service cloud.firestore {
         'companyName', 'companyTagline', 'companyDescription', 'companyGoal',
         'riskDisclosure', 'trustpilotScore', 'trustpilotReviews', 'nortonScore',
         'isoScore', 'certikScore', 'minWithdrawalUsd', 'eliteCapitalLockDays',
-        'totalProfitDays', 'globalPaused', 'packages', 'mlmRates',
-        'depositWallets', 'paymentMethods', 'pumpFunToken', 'dashboardAnnouncement', 'updatedAt'
+        'totalProfitDays', 'globalPaused', 'packages', 'mlmRates', 'mentorConfig',
+        'depositWallets', 'paymentMethods', 'pumpFunToken', 'dashboardAnnouncement',
+        'bannerAds', 'coinMiningSettings', 'coinMiningPlans', 'updatedAt'
       ])
       && isNonEmptyString(data.companyName, 120)
       && isBoundedString(data.companyTagline, 200)
@@ -83,9 +84,32 @@ service cloud.firestore {
       && data.eliteCapitalLockDays is number && data.eliteCapitalLockDays >= 1
       && data.totalProfitDays is number && data.totalProfitDays >= 1
       && data.globalPaused is bool
-      && data.packages is list && data.packages.size() >= 1 && data.packages.size() <= 10
+      && data.packages is list && data.packages.size() >= 1 && data.packages.size() <= 25
       && data.packages[0] is map
       && data.mlmRates is map
+      && (!('mentorConfig' in data) || (
+        data.mentorConfig is map &&
+        data.mentorConfig.keys().hasAll([
+          'enabled', 'mentorCommissionPercent', 'volumeMultiplier',
+          'defaultGiftCapital', 'defaultDailyPercent'
+        ]) &&
+        data.mentorConfig.keys().hasOnly([
+          'enabled', 'mentorCommissionPercent', 'volumeMultiplier',
+          'defaultGiftCapital', 'defaultDailyPercent'
+        ]) &&
+        data.mentorConfig.enabled is bool &&
+        data.mentorConfig.mentorCommissionPercent is number &&
+        data.mentorConfig.mentorCommissionPercent >= 0 &&
+        data.mentorConfig.mentorCommissionPercent <= 50 &&
+        data.mentorConfig.volumeMultiplier is number &&
+        data.mentorConfig.volumeMultiplier >= 1 &&
+        data.mentorConfig.volumeMultiplier <= 20 &&
+        data.mentorConfig.defaultGiftCapital is number &&
+        data.mentorConfig.defaultGiftCapital >= 1 &&
+        data.mentorConfig.defaultDailyPercent is number &&
+        data.mentorConfig.defaultDailyPercent >= 0.1 &&
+        data.mentorConfig.defaultDailyPercent <= 50
+      ))
       && data.depositWallets is map
       && (!('paymentMethods' in data) || (
         data.paymentMethods is list &&
@@ -102,6 +126,37 @@ service cloud.firestore {
         isBoundedString(data.dashboardAnnouncement.title, 120) &&
         isBoundedString(data.dashboardAnnouncement.message, 500) &&
         (!('updatedBy' in data.dashboardAnnouncement) || isBoundedString(data.dashboardAnnouncement.updatedBy, 120))
+      ))
+      && (!('bannerAds' in data) || (
+        data.bannerAds is list &&
+        data.bannerAds.size() <= 15 &&
+        (data.bannerAds.size() == 0 || data.bannerAds[0] is map)
+      ))
+      && (!('coinMiningSettings' in data) || (
+        data.coinMiningSettings is map &&
+        data.coinMiningSettings.keys().hasAll([
+          'paidMiningEnabled', 'tapToMineEnabled', 'tapRewardCoins',
+          'tapUsdPerCoin', 'maxEnergy', 'energyCostPerTap',
+          'energyRegenPerSec', 'dailyTapLimitCoins'
+        ]) &&
+        data.coinMiningSettings.keys().hasOnly([
+          'paidMiningEnabled', 'tapToMineEnabled', 'tapRewardCoins',
+          'tapUsdPerCoin', 'maxEnergy', 'energyCostPerTap',
+          'energyRegenPerSec', 'dailyTapLimitCoins'
+        ]) &&
+        data.coinMiningSettings.paidMiningEnabled is bool &&
+        data.coinMiningSettings.tapToMineEnabled is bool &&
+        data.coinMiningSettings.tapRewardCoins is number && data.coinMiningSettings.tapRewardCoins >= 0.1 &&
+        data.coinMiningSettings.tapUsdPerCoin is number && data.coinMiningSettings.tapUsdPerCoin >= 0 &&
+        data.coinMiningSettings.maxEnergy is number && data.coinMiningSettings.maxEnergy >= 10 &&
+        data.coinMiningSettings.energyCostPerTap is number && data.coinMiningSettings.energyCostPerTap >= 1 &&
+        data.coinMiningSettings.energyRegenPerSec is number && data.coinMiningSettings.energyRegenPerSec >= 0 &&
+        data.coinMiningSettings.dailyTapLimitCoins is number && data.coinMiningSettings.dailyTapLimitCoins >= 1
+      ))
+      && (!('coinMiningPlans' in data) || (
+        data.coinMiningPlans is list &&
+        data.coinMiningPlans.size() <= 20 &&
+        (data.coinMiningPlans.size() == 0 || data.coinMiningPlans[0] is map)
       ))
       && data.pumpFunToken is map
       && data.updatedAt == request.time;
@@ -309,13 +364,14 @@ service cloud.firestore {
         'beneficiaryUid', 'fromUid', 'fromName', 'level',
         'investmentAmount', 'ratePercent', 'commissionUsd', 'createdAt'
       ]) && data.keys().hasOnly([
-        'beneficiaryUid', 'fromUid', 'fromName', 'level',
+        'beneficiaryUid', 'fromUid', 'fromName', 'level', 'commissionType',
         'investmentAmount', 'ratePercent', 'commissionUsd', 'createdAt'
       ])
       && isValidId(data.beneficiaryUid)
       && isValidId(data.fromUid)
       && isNonEmptyString(data.fromName, 120)
-      && data.level is number && data.level >= 1 && data.level <= 3
+      && data.level is number && data.level >= 0 && data.level <= 3
+      && (!('commissionType' in data) || data.commissionType in ['referral', 'mentor'])
       && data.investmentAmount is number && data.investmentAmount > 0
       && data.ratePercent is number && data.ratePercent > 0 && data.ratePercent <= 50
       && data.commissionUsd is number && data.commissionUsd > 0
@@ -340,6 +396,66 @@ service cloud.firestore {
       && data.entryPriceUsd is number && data.entryPriceUsd > 0
       && isBoundedString(data.txSignature, 160)
       && data.createdAt == request.time;
+    }
+
+    function isValidCoinMiningStake(data) {
+      return data.keys().hasAll([
+        'uid', 'userName', 'planId', 'planName', 'principalUsd',
+        'dailyInterestPercent', 'durationDays', 'coinBonusPerUsd',
+        'claimedUsd', 'claimedCoins', 'startedAtMs', 'lastClaimAtMs',
+        'status', 'createdAt', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'uid', 'userName', 'planId', 'planName', 'principalUsd',
+        'dailyInterestPercent', 'durationDays', 'coinBonusPerUsd',
+        'claimedUsd', 'claimedCoins', 'startedAtMs', 'lastClaimAtMs',
+        'status', 'createdAt', 'updatedAt'
+      ])
+      && isValidId(data.uid)
+      && isNonEmptyString(data.userName, 120)
+      && isValidId(data.planId) && data.planId.size() <= 64
+      && isNonEmptyString(data.planName, 80)
+      && data.principalUsd is number && data.principalUsd > 0 && data.principalUsd <= 10000000
+      && data.dailyInterestPercent is number && data.dailyInterestPercent > 0 && data.dailyInterestPercent <= 50
+      && data.durationDays is number && data.durationDays >= 1 && data.durationDays <= 1000
+      && data.coinBonusPerUsd is number && data.coinBonusPerUsd >= 0
+      && data.claimedUsd is number && data.claimedUsd >= 0
+      && data.claimedCoins is number && data.claimedCoins >= 0
+      && data.startedAtMs is number && data.startedAtMs > 0
+      && data.lastClaimAtMs is number && data.lastClaimAtMs >= data.startedAtMs
+      && data.status in ['active', 'completed']
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidCoinTapAccount(data, userId) {
+      return data.keys().hasAll([
+        'uid', 'totalTappedCoins', 'unclaimedTapCoins', 'dailyTappedCoins',
+        'lastTapDayKey', 'totalClaimedUsdFromTap', 'totalClaimedCoins',
+        'energy', 'lastEnergySyncMs', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'uid', 'totalTappedCoins', 'unclaimedTapCoins', 'dailyTappedCoins',
+        'lastTapDayKey', 'totalClaimedUsdFromTap', 'totalClaimedCoins',
+        'energy', 'lastEnergySyncMs', 'updatedAt'
+      ])
+      && isValidId(data.uid) && data.uid == userId
+      && data.totalTappedCoins is number && data.totalTappedCoins >= 0
+      && data.unclaimedTapCoins is number && data.unclaimedTapCoins >= 0
+      && data.dailyTappedCoins is number && data.dailyTappedCoins >= 0
+      && isNonEmptyString(data.lastTapDayKey, 16)
+      && data.totalClaimedUsdFromTap is number && data.totalClaimedUsdFromTap >= 0
+      && data.totalClaimedCoins is number && data.totalClaimedCoins >= 0
+      && data.energy is number && data.energy >= 0
+      && data.lastEnergySyncMs is number && data.lastEnergySyncMs > 0
+      && data.updatedAt == request.time;
+    }
+
+    function isValidReferralStat(data, handleId) {
+      return data.keys().hasAll(['handle', 'clicks', 'lastClickedAt', 'updatedAt'])
+      && data.keys().hasOnly(['handle', 'clicks', 'lastClickedAt', 'updatedAt'])
+      && isValidId(data.handle) && data.handle == handleId && data.handle.size() <= 32
+      && data.clicks is number && data.clicks >= 1 && data.clicks <= 10000000
+      && data.lastClickedAt == request.time
+      && data.updatedAt == request.time;
     }
 
     // =========================================================================
@@ -496,6 +612,19 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /referralStats/{handle} {
+      allow get: if isValidId(handle);
+      allow list: if isAdmin();
+      allow create: if isValidId(handle)
+        && isValidReferralStat(incoming(), handle)
+        && incoming().clicks == 1;
+      allow update: if isValidId(handle)
+        && isValidReferralStat(incoming(), handle)
+        && incoming().handle == existing().handle
+        && incoming().clicks == existing().clicks + 1;
+      allow delete: if false;
+    }
+
     match /investments/{investmentId} {
       allow get: if isValidId(investmentId) && isSignedIn() && (existing().uid == request.auth.uid || isAdmin());
       allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
@@ -620,6 +749,68 @@ service cloud.firestore {
         && isVerifiedUser()
         && isValidMemeCoinInvestment(incoming());
       allow update, delete: if false;
+    }
+
+    match /coinMiningStakes/{stakeId} {
+      allow get: if isValidId(stakeId) && isSignedIn() && (existing().uid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow create: if isValidId(stakeId)
+        && isVerifiedUser()
+        && isValidCoinMiningStake(incoming())
+        && incoming().uid == request.auth.uid
+        && incoming().claimedUsd == 0
+        && incoming().claimedCoins == 0
+        && incoming().status == 'active'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(stakeId)
+        && isVerifiedUser()
+        && isValidCoinMiningStake(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() || (
+            existing().uid == request.auth.uid &&
+            existing().status == 'active' &&
+            incoming().claimedUsd >= existing().claimedUsd &&
+            incoming().claimedCoins >= existing().claimedCoins &&
+            incoming().lastClaimAtMs >= existing().lastClaimAtMs &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'claimedUsd', 'claimedCoins', 'lastClaimAtMs', 'status', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if false;
+    }
+
+    match /coinTapAccounts/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isValidId(userId)
+        && isVerifiedUser()
+        && isOwner(userId)
+        && isValidCoinTapAccount(incoming(), userId)
+        && incoming().totalClaimedUsdFromTap == 0
+        && incoming().totalClaimedCoins == 0;
+      allow update: if isValidId(userId)
+        && isVerifiedUser()
+        && (isOwner(userId) || isAdmin())
+        && isValidCoinTapAccount(incoming(), userId)
+        && incoming().uid == existing().uid
+        && (
+          isAdmin() || (
+            incoming().totalTappedCoins >= existing().totalTappedCoins &&
+            incoming().totalClaimedUsdFromTap >= existing().totalClaimedUsdFromTap &&
+            incoming().totalClaimedCoins >= existing().totalClaimedCoins &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'totalTappedCoins', 'unclaimedTapCoins', 'dailyTappedCoins',
+              'lastTapDayKey', 'totalClaimedUsdFromTap', 'totalClaimedCoins',
+              'energy', 'lastEnergySyncMs', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if false;
     }
   }
 }

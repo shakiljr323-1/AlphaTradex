@@ -1,11 +1,13 @@
 import React from 'react';
 import { ShieldCheck } from 'lucide-react';
 import { NavSection } from '../types/platform';
+import { AlphatradexLogo3D } from './AlphatradexLogo3D';
 
 interface NavbarProps {
   companyName: string;
   coinName: string;
   activeSection: NavSection;
+  authMode?: 'signin' | 'signup';
   onSelectSection: (section: NavSection) => void;
   onOpenSignIn: () => void;
   onOpenRegister: () => void;
@@ -18,6 +20,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   companyName,
   coinName,
   activeSection,
+  authMode = 'signin',
   onSelectSection,
   onOpenSignIn,
   onOpenRegister,
@@ -33,7 +36,9 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: 'pump-fun', label: `${coinName} Coin` },
     { id: 'mentor-referral', label: 'Referrals' },
   ];
-  const monogram = companyName.trim().charAt(0).toUpperCase() || 'A';
+  const isSignInActive = activeSection === 'auth' && authMode === 'signin';
+  const isRegisterActive = activeSection === 'auth' && authMode === 'signup';
+
   return (
     <header className="sticky top-0 z-40 bg-[#0B111E]/85 backdrop-blur-xl border-b border-slate-800/80 text-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
@@ -43,9 +48,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           onClick={() => onSelectSection('home')}
           className="flex items-center gap-3 whitespace-nowrap shrink-0 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 rounded-lg"
         >
-          <span className="w-9 h-9 rounded-lg bg-gradient-to-br from-orange-500 to-orange-600 shadow-[0_0_18px_rgba(249,115,22,0.55)] flex items-center justify-center font-display font-extrabold text-white text-lg">
-            {monogram}
-          </span>
+          <AlphatradexLogo3D variant="mark" size="md" companyName={companyName} />
           <span className="font-display font-bold text-base sm:text-lg tracking-tight text-white">
             {companyName}
           </span>
@@ -98,7 +101,11 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 type="button"
                 onClick={onOpenSignIn}
-                className="px-3.5 py-2 rounded-lg text-sm font-medium text-slate-200 border border-slate-700 hover:bg-slate-800 hover:text-white transition-colors whitespace-nowrap shrink-0"
+                className={`px-3.5 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap shrink-0 border ${
+                  isSignInActive
+                    ? 'bg-slate-800 text-white border-orange-500'
+                    : 'text-slate-200 border-slate-700 hover:bg-slate-800 hover:text-white'
+                }`}
               >
                 Sign In
               </button>
@@ -106,7 +113,11 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 type="button"
                 onClick={onOpenRegister}
-                className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-orange-600 hover:bg-orange-500 transition-colors shadow-sm whitespace-nowrap shrink-0"
+                className={`px-4 py-2 rounded-lg text-sm font-semibold text-white transition-colors shadow-sm whitespace-nowrap shrink-0 ${
+                  isRegisterActive
+                    ? 'bg-orange-500 ring-2 ring-orange-400/50'
+                    : 'bg-orange-600 hover:bg-orange-500'
+                }`}
               >
                 Register (KYC)
               </button>

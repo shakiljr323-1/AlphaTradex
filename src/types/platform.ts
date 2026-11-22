@@ -17,6 +17,7 @@ export interface PaymentMethodConfig {
   name: string;
   category: PaymentMethodCategory;
   receivingAccount: string;
+  withdrawAddress?: string;
   instructions: string;
   minDepositUsd: number;
   minWithdrawalUsd: number;
@@ -55,6 +56,53 @@ export interface MlmRates {
   level3: number;
 }
 
+export interface MentorConfig {
+  enabled: boolean;
+  mentorCommissionPercent: number;
+  volumeMultiplier: number;
+  defaultGiftCapital: number;
+  defaultDailyPercent: number;
+}
+
+export type BannerAdPlacement = 'coin_page' | 'all_pages';
+export type BannerAdTheme = 'gold' | 'emerald' | 'sky' | 'crimson';
+
+export interface BannerAdConfig {
+  id: string;
+  enabled: boolean;
+  title: string;
+  subtitle: string;
+  badgeText: string;
+  ctaText: string;
+  ctaUrl: string;
+  imageUrl: string;
+  placement: BannerAdPlacement;
+  theme: BannerAdTheme;
+}
+
+export interface CoinMiningPlan {
+  id: string;
+  name: string;
+  minUsd: number;
+  maxUsd: number;
+  dailyInterestPercent: number;
+  durationDays: number;
+  hashRateLabel: string;
+  coinBonusPerUsd: number;
+  enabled: boolean;
+}
+
+export interface CoinMiningSettings {
+  paidMiningEnabled: boolean;
+  tapToMineEnabled: boolean;
+  tapRewardCoins: number;
+  tapUsdPerCoin: number;
+  maxEnergy: number;
+  energyCostPerTap: number;
+  energyRegenPerSec: number;
+  dailyTapLimitCoins: number;
+}
+
 export interface DepositWallets {
   usdtTrc20: string;
   usdtErc20: string;
@@ -89,10 +137,14 @@ export interface PlatformConfig {
   globalPaused: boolean;
   packages: InvestmentPackage[];
   mlmRates: MlmRates;
+  mentorConfig: MentorConfig;
   depositWallets: DepositWallets;
   paymentMethods: PaymentMethodConfig[];
   pumpFunToken: PumpFunTokenConfig;
   dashboardAnnouncement: DashboardAnnouncement;
+  bannerAds: BannerAdConfig[];
+  coinMiningSettings: CoinMiningSettings;
+  coinMiningPlans: CoinMiningPlan[];
   updatedAt?: unknown;
 }
 
@@ -196,6 +248,7 @@ export interface MlmCommission {
   fromUid: string;
   fromName: string;
   level: number;
+  commissionType?: 'referral' | 'mentor';
   investmentAmount: number;
   ratePercent: number;
   commissionUsd: number;
@@ -216,6 +269,38 @@ export interface MemeCoinInvestment {
   createdAt?: unknown;
 }
 
+export interface CoinMiningStake {
+  id: string;
+  uid: string;
+  userName: string;
+  planId: string;
+  planName: string;
+  principalUsd: number;
+  dailyInterestPercent: number;
+  durationDays: number;
+  coinBonusPerUsd: number;
+  claimedUsd: number;
+  claimedCoins: number;
+  startedAtMs: number;
+  lastClaimAtMs: number;
+  status: 'active' | 'completed';
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
+export interface CoinTapAccount {
+  uid: string;
+  totalTappedCoins: number;
+  unclaimedTapCoins: number;
+  dailyTappedCoins: number;
+  lastTapDayKey: string;
+  totalClaimedUsdFromTap: number;
+  totalClaimedCoins: number;
+  energy: number;
+  lastEnergySyncMs: number;
+  updatedAt?: unknown;
+}
+
 export interface ReferralLinkRecord {
   id: string;
   referrerUid: string;
@@ -228,10 +313,18 @@ export interface ReferralLinkRecord {
   updatedAt?: unknown;
 }
 
+export interface ReferralStats {
+  handle: string;
+  clicks: number;
+  lastClickedAt?: unknown;
+  updatedAt?: unknown;
+}
+
 export type NavSection =
   | 'home'
   | 'plans'
   | 'ai-trading'
   | 'forex'
   | 'pump-fun'
-  | 'mentor-referral';
+  | 'mentor-referral'
+  | 'auth';

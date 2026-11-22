@@ -21,10 +21,14 @@
         "globalPaused": { "type": "boolean" },
         "packages": { "type": "array" },
         "mlmRates": { "type": "object" },
+        "mentorConfig": { "type": "object" },
         "depositWallets": { "type": "object" },
         "paymentMethods": { "type": "array" },
         "pumpFunToken": { "type": "object" },
         "dashboardAnnouncement": { "type": "object" },
+        "bannerAds": { "type": "array" },
+        "coinMiningSettings": { "type": "object" },
+        "coinMiningPlans": { "type": "array" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": [
@@ -254,6 +258,7 @@
         "fromUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "fromName": { "type": "string", "maxLength": 120 },
         "level": { "type": "number" },
+        "commissionType": { "type": "string", "enum": ["referral", "mentor"] },
         "investmentAmount": { "type": "number" },
         "ratePercent": { "type": "number" },
         "commissionUsd": { "type": "number" },
@@ -325,6 +330,74 @@
         "updatedAt"
       ]
     },
+    "CoinMiningStake": {
+      "title": "CoinMiningStake",
+      "description": "Paid Alphatradex coin mining stake with daily interest claim tracking.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userName": { "type": "string", "maxLength": 120 },
+        "planId": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "planName": { "type": "string", "maxLength": 80 },
+        "principalUsd": { "type": "number" },
+        "dailyInterestPercent": { "type": "number" },
+        "durationDays": { "type": "number" },
+        "coinBonusPerUsd": { "type": "number" },
+        "claimedUsd": { "type": "number" },
+        "claimedCoins": { "type": "number" },
+        "startedAtMs": { "type": "number" },
+        "lastClaimAtMs": { "type": "number" },
+        "status": { "type": "string", "enum": ["active", "completed"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid",
+        "userName",
+        "planId",
+        "planName",
+        "principalUsd",
+        "dailyInterestPercent",
+        "durationDays",
+        "coinBonusPerUsd",
+        "claimedUsd",
+        "claimedCoins",
+        "startedAtMs",
+        "lastClaimAtMs",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CoinTapAccount": {
+      "title": "CoinTapAccount",
+      "description": "Free Hamster-style tap-to-mine coin account for Alphatradex ($ATX) rewards.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "totalTappedCoins": { "type": "number" },
+        "unclaimedTapCoins": { "type": "number" },
+        "dailyTappedCoins": { "type": "number" },
+        "lastTapDayKey": { "type": "string", "maxLength": 16 },
+        "totalClaimedUsdFromTap": { "type": "number" },
+        "totalClaimedCoins": { "type": "number" },
+        "energy": { "type": "number" },
+        "lastEnergySyncMs": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid",
+        "totalTappedCoins",
+        "unclaimedTapCoins",
+        "dailyTappedCoins",
+        "lastTapDayKey",
+        "totalClaimedUsdFromTap",
+        "totalClaimedCoins",
+        "energy",
+        "lastEnergySyncMs",
+        "updatedAt"
+      ]
+    },
     "AdminDoc": {
       "title": "AdminDoc",
       "description": "Authorized Super Admin role marker.",
@@ -335,12 +408,24 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["uid", "email", "createdAt"]
+    },
+    "ReferralStats": {
+      "title": "ReferralStats",
+      "description": "Per-handle referral link click counter updated via ?ref= visits.",
+      "type": "object",
+      "properties": {
+        "handle": { "type": "string", "maxLength": 32, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "clicks": { "type": "number" },
+        "lastClickedAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["handle", "clicks", "lastClickedAt", "updatedAt"]
     }
   },
   "firestore": {
     "/config/{docId}": {
       "schema": { "$ref": "#/entities/PlatformConfig" },
-      "description": "Global platform rules, company info, packages, wallets, paymentMethods, and Pump.fun token config."
+      "description": "Global platform rules, packages, referral & mentor rates, wallets, paymentMethods, bannerAds, coinMining, and Pump.fun token config."
     },
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/UserProfile" },
@@ -357,6 +442,10 @@
     "/emailHashes/{emailHash}": {
       "schema": { "$ref": "#/entities/EmailLookup" },
       "description": "Hashed email lookup for P2P transfers without exposing emails."
+    },
+    "/referralStats/{handle}": {
+      "schema": { "$ref": "#/entities/ReferralStats" },
+      "description": "Referral link click counter keyed by referrer handle."
     },
     "/investments/{investmentId}": {
       "schema": { "$ref": "#/entities/Investment" },
@@ -376,11 +465,19 @@
     },
     "/mlmCommissions/{commissionId}": {
       "schema": { "$ref": "#/entities/MlmCommission" },
-      "description": "Multi-level referral commission records."
+      "description": "Multi-level referral and mentor commission records."
     },
     "/memeCoinInvestments/{allocationId}": {
       "schema": { "$ref": "#/entities/MemeCoinInvestment" },
       "description": "Direct Pump.fun meme coin allocation records."
+    },
+    "/coinMiningStakes/{stakeId}": {
+      "schema": { "$ref": "#/entities/CoinMiningStake" },
+      "description": "Paid coin mining stakes with daily USD interest + ATX bonus claims."
+    },
+    "/coinTapAccounts/{userId}": {
+      "schema": { "$ref": "#/entities/CoinTapAccount" },
+      "description": "Free Hamster-style tap-to-mine ATX energy and rewards state per user."
     },
     "/admins/{userId}": {
       "schema": { "$ref": "#/entities/AdminDoc" },
