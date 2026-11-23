@@ -1289,7 +1289,7 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                     className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-slate-700 bg-slate-900/90 hover:border-orange-500/70 text-slate-100 text-xs font-semibold transition-colors whitespace-nowrap shrink-0"
                   >
                     <Globe className="w-4 h-4 text-orange-400" />
-                    Forex Market Charts (Upcoming Trade)
+                    Forex WebTerminal &amp; Copy Trade
                   </button>
                   <button
                     type="button"
@@ -2469,16 +2469,12 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
             </section>
           )}
 
-          {/* VIEW: FOREX MARKET & UPCOMING DESK */}
+          {/* VIEW: FOREX MARKET WEBTERMINAL & COPY TRADE */}
           {activeNav === 'forex-market' && (
             <ForexMarketView
               vaultBalanceUsd={userProfile.usdBalance}
-              onEarlyAccessRequested={(pair) =>
-                notify(
-                  'ok',
-                  `Early access confirmed for Forex Execution Desk (${pair}). You will be notified as soon as live trading opens.`
-                )
-              }
+              mode="vault"
+              onNotify={notify}
             />
           )}
 

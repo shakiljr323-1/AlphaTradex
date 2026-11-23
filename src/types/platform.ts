@@ -120,6 +120,46 @@ export interface PumpFunTokenConfig {
   description: string;
 }
 
+export type ForexAccountTierId = 'standard' | 'pro' | 'raw_spread';
+
+export interface ForexAccountTierConfig {
+  id: ForexAccountTierId;
+  name: string;
+  tagline: string;
+  commissionPerLot: number;
+  spreadMultiplier: number;
+  minDepositUsd: number;
+  maxLeverage: number;
+  executionType: string;
+  enabled: boolean;
+}
+
+export interface CopyTraderProfile {
+  id: string;
+  name: string;
+  handle: string;
+  strategy: string;
+  pairs: string;
+  riskLevel: 'Low' | 'Moderate' | 'Dynamic';
+  monthlyRoiPercent: number;
+  winRatePercent: number;
+  maxDrawdownPercent: number;
+  profitFactor: number;
+  performanceFeePercent: number;
+  dailyTargetPercent: number;
+  minCopyUsd: number;
+  recommendedTierId: ForexAccountTierId;
+  followersCount: number;
+  enabled: boolean;
+}
+
+export interface ForexPlatformConfig {
+  tradingEnabled: boolean;
+  copyTradingEnabled: boolean;
+  accountTiers: ForexAccountTierConfig[];
+  copyTraders: CopyTraderProfile[];
+}
+
 export interface PlatformConfig {
   companyName: string;
   companyTagline: string;
@@ -145,6 +185,7 @@ export interface PlatformConfig {
   bannerAds: BannerAdConfig[];
   coinMiningSettings: CoinMiningSettings;
   coinMiningPlans: CoinMiningPlan[];
+  forexConfig?: ForexPlatformConfig;
   updatedAt?: unknown;
 }
 
@@ -317,6 +358,51 @@ export interface ReferralStats {
   handle: string;
   clicks: number;
   lastClickedAt?: unknown;
+  updatedAt?: unknown;
+}
+
+export interface ForexTrade {
+  id: string;
+  uid: string;
+  userName: string;
+  symbol: string;
+  direction: 'BUY' | 'SELL';
+  accountTierId: ForexAccountTierId;
+  accountTierName: string;
+  lots: number;
+  leverage: number;
+  entryPrice: number;
+  closePrice: number;
+  slPrice: number;
+  tpPrice: number;
+  marginUsd: number;
+  commissionUsd: number;
+  realizedPnlUsd: number;
+  status: 'open' | 'closed';
+  openedAtMs: number;
+  closedAtMs: number;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
+export interface CopyTradeSubscription {
+  id: string;
+  uid: string;
+  userName: string;
+  traderId: string;
+  traderName: string;
+  traderHandle: string;
+  accountTierId: ForexAccountTierId;
+  allocatedUsd: number;
+  riskMultiplier: number;
+  stopLossPercent: number;
+  performanceFeePercent: number;
+  dailyTargetPercent: number;
+  claimedProfitUsd: number;
+  startedAtMs: number;
+  lastSyncedAtMs: number;
+  status: 'active' | 'stopped';
+  createdAt?: unknown;
   updatedAt?: unknown;
 }
 

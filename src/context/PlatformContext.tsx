@@ -34,8 +34,14 @@ import {
   CoinMiningPlan,
   CoinMiningStake,
   CoinTapAccount,
+  CopyTraderProfile,
+  CopyTradeSubscription,
   CryptoDeposit,
   CryptoNetwork,
+  ForexAccountTierConfig,
+  ForexAccountTierId,
+  ForexPlatformConfig,
+  ForexTrade,
   IdType,
   Investment,
   InvestmentPackage,
@@ -86,6 +92,8 @@ interface PlatformContextValue {
   downlineReferrals: ReferralLinkRecord[];
   referralLinkClicks: number;
   savedPaymentMethods: UserPaymentMethod[];
+  forexTrades: ForexTrade[];
+  copyTradeSubscriptions: CopyTradeSubscription[];
   // Auth & KYC
   signInWithGoogle: (
     referralCode?: string,
@@ -161,6 +169,35 @@ interface PlatformContextValue {
   }) => Promise<void>;
   setDefaultUserPaymentMethod: (methodDocId: string) => Promise<void>;
   deleteUserPaymentMethod: (methodDocId: string) => Promise<void>;
+  // Forex WebTerminal & Copy Trade
+  openForexTrade: (params: {
+    symbol: string;
+    direction: 'BUY' | 'SELL';
+    tier: ForexAccountTierConfig;
+    lots: number;
+    leverage: number;
+    entryPrice: number;
+    slPrice: number;
+    tpPrice: number;
+    marginUsd: number;
+    commissionUsd: number;
+  }) => Promise<void>;
+  closeForexTrade: (
+    trade: ForexTrade,
+    closePrice: number,
+    realizedPnlUsd: number
+  ) => Promise<void>;
+  startCopyTrade: (params: {
+    trader: CopyTraderProfile;
+    accountTierId: ForexAccountTierId;
+    allocatedUsd: number;
+    riskMultiplier: number;
+    stopLossPercent: number;
+  }) => Promise<void>;
+  claimCopyTradeProfit: (sub: CopyTradeSubscription) => Promise<number>;
+  stopCopyTrade: (
+    sub: CopyTradeSubscription
+  ) => Promise<{ returnedCapitalUsd: number; claimedProfitUsd: number }>;
   // Super Admin Actions
   updatePlatformConfig: (next: PlatformConfig) => Promise<void>;
   approveCryptoDeposit: (deposit: CryptoDeposit, adminNote?: string) => Promise<void>;
@@ -222,6 +259,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [downlineReferrals, setDownlineReferrals] = useState<ReferralLinkRecord[]>([]);
   const [referralLinkClicks, setReferralLinkClicks] = useState<number>(0);
   const [savedPaymentMethods, setSavedPaymentMethods] = useState<UserPaymentMethod[]>([]);
+  const [forexTrades, setForexTrades] = useState<ForexTrade[]>([]);
+  const [copyTradeSubscriptions, setCopyTradeSubscriptions] = useState<CopyTradeSubscription[]>([]);
 
   const isAdminUser = Boolean(
     authUser &&
@@ -271,6 +310,22 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             coinMiningPlans: Array.isArray(data.coinMiningPlans)
               ? data.coinMiningPlans
               : DEFAULT_PLATFORM_CONFIG.coinMiningPlans,
+            forexConfig: {
+              tradingEnabled:
+                data.forexConfig?.tradingEnabled ??
+                DEFAULT_PLATFORM_CONFIG.forexConfig!.tradingEnabled,
+              copyTradingEnabled:
+                data.forexConfig?.copyTradingEnabled ??
+                DEFAULT_PLATFORM_CONFIG.forexConfig!.copyTradingEnabled,
+              accountTiers:
+                Array.isArray(data.forexConfig?.accountTiers) &&
+                data.forexConfig.accountTiers.length > 0
+                  ? data.forexConfig.accountTiers
+                  : DEFAULT_PLATFORM_CONFIG.forexConfig!.accountTiers,
+              copyTraders: Array.isArray(data.forexConfig?.copyTraders)
+                ? data.forexConfig.copyTraders
+                : DEFAULT_PLATFORM_CONFIG.forexConfig!.copyTraders,
+            },
             packages:
               Array.isArray(data.packages) && data.packages.length > 0
                 ? data.packages
@@ -557,6 +612,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setDownlineReferrals([]);
         setReferralLinkClicks(0);
         setSavedPaymentMethods([]);
+        setForexTrades([]);
+        setCopyTradeSubscriptions([]);
         return;
       }
 
@@ -736,6 +793,29 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       (err) => handleFirestoreError(err, OperationType.LIST, `users/${uid}/paymentMethods`)
     );
 
+    const unsubForexTrades = onSnapshot(
+      query(collection(db, 'forexTrades'), where('uid', '==', uid)),
+      (snap) => {
+        const list = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ForexTrade, 'id'>) }));
+        list.sort((a, b) => (b.openedAtMs || 0) - (a.openedAtMs || 0));
+        setForexTrades(list);
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'forexTrades')
+    );
+
+    const unsubCopySubs = onSnapshot(
+      query(collection(db, 'copyTradeSubscriptions'), where('uid', '==', uid)),
+      (snap) => {
+        const list = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<CopyTradeSubscription, 'id'>),
+        }));
+        list.sort((a, b) => (b.startedAtMs || 0) - (a.startedAtMs || 0));
+        setCopyTradeSubscriptions(list);
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'copyTradeSubscriptions')
+    );
+
     return () => {
       unsubUser();
       unsubInv();
@@ -749,6 +829,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       unsubCoinTap();
       unsubRefs();
       unsubPaymentMethods();
+      unsubForexTrades();
+      unsubCopySubs();
     };
   }, [authUser, authSyncTick]);
 
@@ -1794,6 +1876,344 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   // =========================================================================
+  // Forex WebTerminal & Copy Trade Operations
+  // =========================================================================
+
+  const openForexTrade = async (params: {
+    symbol: string;
+    direction: 'BUY' | 'SELL';
+    tier: ForexAccountTierConfig;
+    lots: number;
+    leverage: number;
+    entryPrice: number;
+    slPrice: number;
+    tpPrice: number;
+    marginUsd: number;
+    commissionUsd: number;
+  }) => {
+    if (!authUser || !userProfile) throw new Error('Authentication required to place Forex orders.');
+    if (platformConfig.globalPaused) {
+      throw new Error('Platform trading is temporarily paused by administration.');
+    }
+    if (platformConfig.forexConfig?.tradingEnabled === false) {
+      throw new Error('Forex WebTerminal execution is temporarily disabled by administration.');
+    }
+    if (!params.tier.enabled) {
+      throw new Error(`${params.tier.name} account tier is currently disabled.`);
+    }
+
+    const lots = Number(params.lots);
+    const leverage = Math.round(Number(params.leverage));
+    const entryPrice = Number(params.entryPrice);
+    const slPrice = Math.max(0, Number(params.slPrice) || 0);
+    const tpPrice = Math.max(0, Number(params.tpPrice) || 0);
+    const marginUsd = Number(Number(params.marginUsd).toFixed(2));
+    const commissionUsd = Number(Math.max(0, Number(params.commissionUsd) || 0).toFixed(2));
+    const totalOutlayUsd = Number((marginUsd + commissionUsd).toFixed(2));
+
+    if (!Number.isFinite(lots) || lots < 0.01 || lots > 100) {
+      throw new Error('Lot size must be between 0.01 and 100 lots.');
+    }
+    if (!Number.isFinite(leverage) || leverage < 1 || leverage > params.tier.maxLeverage) {
+      throw new Error(`Leverage for ${params.tier.name} cannot exceed 1:${params.tier.maxLeverage}.`);
+    }
+    if (!Number.isFinite(entryPrice) || entryPrice <= 0 || marginUsd <= 0) {
+      throw new Error('Live quote unavailable. Wait a moment for price sync.');
+    }
+    if (userProfile.usdBalance < params.tier.minDepositUsd) {
+      throw new Error(
+        `${params.tier.name} account requires at least $${params.tier.minDepositUsd.toFixed(2)} in your Deposit Wallet.`
+      );
+    }
+    if (userProfile.usdBalance < totalOutlayUsd) {
+      throw new Error(
+        `Insufficient Deposit Wallet balance. Need $${totalOutlayUsd.toFixed(2)} (Margin $${marginUsd.toFixed(
+          2
+        )} + Fee $${commissionUsd.toFixed(2)}).`
+      );
+    }
+
+    const tradeId = makeId('fx');
+    const nowMs = Date.now();
+
+    try {
+      await runTransaction(db, async (tx) => {
+        const userRef = doc(db, 'users', authUser.uid);
+        const userSnap = await tx.get(userRef);
+        if (!userSnap.exists()) throw new Error('User vault profile missing.');
+        const cur = userSnap.data() as UserProfile;
+
+        if (cur.usdBalance < params.tier.minDepositUsd) {
+          throw new Error(
+            `${params.tier.name} requires $${params.tier.minDepositUsd.toFixed(2)} minimum balance.`
+          );
+        }
+        if (cur.usdBalance < totalOutlayUsd) {
+          throw new Error('Insufficient USD Vault balance for margin + commission.');
+        }
+
+        tx.update(userRef, {
+          usdBalance: Number((cur.usdBalance - totalOutlayUsd).toFixed(2)),
+          updatedAt: serverTimestamp(),
+        });
+
+        tx.set(doc(db, 'forexTrades', tradeId), {
+          uid: authUser.uid,
+          userName: cur.fullName.trim().slice(0, 120) || 'Vault Trader',
+          symbol: params.symbol.trim().slice(0, 16),
+          direction: params.direction,
+          accountTierId: params.tier.id,
+          accountTierName: params.tier.name.trim().slice(0, 40),
+          lots: Number(lots.toFixed(2)),
+          leverage,
+          entryPrice,
+          closePrice: 0,
+          slPrice,
+          tpPrice,
+          marginUsd,
+          commissionUsd,
+          realizedPnlUsd: 0,
+          status: 'open',
+          openedAtMs: nowMs,
+          closedAtMs: 0,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `forexTrades/${tradeId}`);
+    }
+  };
+
+  const closeForexTrade = async (
+    trade: ForexTrade,
+    closePrice: number,
+    realizedPnlUsd: number
+  ) => {
+    if (!authUser || !userProfile) throw new Error('Authentication required.');
+    if (trade.status !== 'open') throw new Error('Position is already closed.');
+
+    const safeClosePrice = Number(closePrice);
+    if (!Number.isFinite(safeClosePrice) || safeClosePrice <= 0) {
+      throw new Error('Valid market closing quote required.');
+    }
+
+    // Cap realized loss at -marginUsd so negative balance protection holds
+    const boundedPnl = Number(Math.max(-trade.marginUsd, Number(realizedPnlUsd) || 0).toFixed(2));
+    const closedAtMs = Math.max(trade.openedAtMs, Date.now());
+
+    try {
+      await runTransaction(db, async (tx) => {
+        const tradeRef = doc(db, 'forexTrades', trade.id);
+        const userRef = doc(db, 'users', authUser.uid);
+        const tradeSnap = await tx.get(tradeRef);
+        const userSnap = await tx.get(userRef);
+        if (!tradeSnap.exists() || !userSnap.exists()) throw new Error('Trade record missing.');
+
+        const curTrade = tradeSnap.data() as ForexTrade;
+        if (curTrade.status !== 'open') throw new Error('Trade already closed.');
+        const curUser = userSnap.data() as UserProfile;
+
+        const returnedMarginUsd =
+          boundedPnl >= 0
+            ? curTrade.marginUsd
+            : Math.max(0, Number((curTrade.marginUsd + boundedPnl).toFixed(2)));
+        const addedProfitUsd = boundedPnl > 0 ? boundedPnl : 0;
+
+        tx.update(tradeRef, {
+          closePrice: safeClosePrice,
+          realizedPnlUsd: boundedPnl,
+          status: 'closed',
+          closedAtMs,
+          updatedAt: serverTimestamp(),
+        });
+
+        tx.update(userRef, {
+          usdBalance: Number((curUser.usdBalance + returnedMarginUsd).toFixed(2)),
+          profitBalance: Number((curUser.profitBalance + addedProfitUsd).toFixed(2)),
+          updatedAt: serverTimestamp(),
+        });
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `forexTrades/${trade.id}`);
+    }
+  };
+
+  const startCopyTrade = async (params: {
+    trader: CopyTraderProfile;
+    accountTierId: ForexAccountTierId;
+    allocatedUsd: number;
+    riskMultiplier: number;
+    stopLossPercent: number;
+  }) => {
+    if (!authUser || !userProfile) throw new Error('Authentication required to start Copy Trading.');
+    if (platformConfig.globalPaused) {
+      throw new Error('Platform allocations are temporarily paused by administration.');
+    }
+    if (platformConfig.forexConfig?.copyTradingEnabled === false) {
+      throw new Error('Copy Trading is temporarily disabled by administration.');
+    }
+    if (!params.trader.enabled) {
+      throw new Error(`${params.trader.name} is not accepting new copiers right now.`);
+    }
+
+    const allocatedUsd = Number(Number(params.allocatedUsd).toFixed(2));
+    const riskMultiplier = Math.max(0.25, Math.min(5, Number(params.riskMultiplier) || 1));
+    const stopLossPercent = Math.max(5, Math.min(95, Number(params.stopLossPercent) || 25));
+
+    if (!Number.isFinite(allocatedUsd) || allocatedUsd < params.trader.minCopyUsd) {
+      throw new Error(
+        `Minimum copy allocation for ${params.trader.name} is $${params.trader.minCopyUsd.toFixed(2)}.`
+      );
+    }
+    if (userProfile.usdBalance < allocatedUsd) {
+      throw new Error(
+        `Insufficient Deposit Wallet balance. Need $${(allocatedUsd - userProfile.usdBalance).toFixed(2)} more.`
+      );
+    }
+
+    const subId = makeId('copy');
+    const cleanTraderId = sanitizeRuleId(params.trader.id, 'master');
+    const nowMs = Date.now();
+
+    try {
+      await runTransaction(db, async (tx) => {
+        const userRef = doc(db, 'users', authUser.uid);
+        const userSnap = await tx.get(userRef);
+        if (!userSnap.exists()) throw new Error('Profile missing.');
+        const cur = userSnap.data() as UserProfile;
+        if (cur.usdBalance < allocatedUsd) {
+          throw new Error('Insufficient Deposit Wallet balance.');
+        }
+
+        tx.update(userRef, {
+          usdBalance: Number((cur.usdBalance - allocatedUsd).toFixed(2)),
+          updatedAt: serverTimestamp(),
+        });
+
+        tx.set(doc(db, 'copyTradeSubscriptions', subId), {
+          uid: authUser.uid,
+          userName: cur.fullName.trim().slice(0, 120) || 'Vault Copier',
+          traderId: cleanTraderId,
+          traderName: params.trader.name.trim().slice(0, 80),
+          traderHandle: params.trader.handle.trim().slice(0, 32),
+          accountTierId: params.accountTierId,
+          allocatedUsd,
+          riskMultiplier,
+          stopLossPercent,
+          performanceFeePercent: Math.max(0, Math.min(50, Number(params.trader.performanceFeePercent) || 20)),
+          dailyTargetPercent: Math.max(0, Math.min(50, Number(params.trader.dailyTargetPercent) || 1)),
+          claimedProfitUsd: 0,
+          startedAtMs: nowMs,
+          lastSyncedAtMs: nowMs,
+          status: 'active',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `copyTradeSubscriptions/${subId}`);
+    }
+  };
+
+  const computeAccruedCopyNetUsd = (sub: CopyTradeSubscription, nowMs: number): number => {
+    const elapsedMs = Math.max(0, nowMs - (sub.lastSyncedAtMs || sub.startedAtMs));
+    const daysElapsed = elapsedMs / 86_400_000;
+    const grossUsd =
+      sub.allocatedUsd * (sub.dailyTargetPercent / 100) * sub.riskMultiplier * daysElapsed;
+    const netFactor = 1 - Math.max(0, Math.min(50, sub.performanceFeePercent)) / 100;
+    return Number((grossUsd * netFactor).toFixed(2));
+  };
+
+  const claimCopyTradeProfit = async (sub: CopyTradeSubscription): Promise<number> => {
+    if (!authUser || !userProfile) throw new Error('Authentication required.');
+    if (sub.status !== 'active') throw new Error('Copy subscription is already stopped.');
+
+    const nowMs = Date.now();
+    const pendingNetUsd = computeAccruedCopyNetUsd(sub, nowMs);
+    if (pendingNetUsd < 0.01) {
+      throw new Error(
+        'Accrued net copy profit has not reached $0.01 yet. Mirrored strategy profits accrue continuously.'
+      );
+    }
+
+    try {
+      await runTransaction(db, async (tx) => {
+        const subRef = doc(db, 'copyTradeSubscriptions', sub.id);
+        const userRef = doc(db, 'users', authUser.uid);
+        const subSnap = await tx.get(subRef);
+        const userSnap = await tx.get(userRef);
+        if (!subSnap.exists() || !userSnap.exists()) throw new Error('Subscription record missing.');
+
+        const curSub = subSnap.data() as CopyTradeSubscription;
+        if (curSub.status !== 'active') throw new Error('Copy subscription is stopped.');
+        const curUser = userSnap.data() as UserProfile;
+
+        const safeClaim = computeAccruedCopyNetUsd(curSub, nowMs);
+        if (safeClaim < 0.01) throw new Error('Accrued copy profit is under $0.01.');
+
+        tx.update(subRef, {
+          claimedProfitUsd: Number(((curSub.claimedProfitUsd || 0) + safeClaim).toFixed(2)),
+          lastSyncedAtMs: nowMs,
+          updatedAt: serverTimestamp(),
+        });
+
+        tx.update(userRef, {
+          profitBalance: Number((curUser.profitBalance + safeClaim).toFixed(2)),
+          updatedAt: serverTimestamp(),
+        });
+      });
+      return pendingNetUsd;
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `copyTradeSubscriptions/${sub.id}`);
+    }
+  };
+
+  const stopCopyTrade = async (
+    sub: CopyTradeSubscription
+  ): Promise<{ returnedCapitalUsd: number; claimedProfitUsd: number }> => {
+    if (!authUser || !userProfile) throw new Error('Authentication required.');
+    if (sub.status !== 'active') throw new Error('Copy subscription is already stopped.');
+
+    const nowMs = Date.now();
+    let finalClaimed = 0;
+
+    try {
+      await runTransaction(db, async (tx) => {
+        const subRef = doc(db, 'copyTradeSubscriptions', sub.id);
+        const userRef = doc(db, 'users', authUser.uid);
+        const subSnap = await tx.get(subRef);
+        const userSnap = await tx.get(userRef);
+        if (!subSnap.exists() || !userSnap.exists()) throw new Error('Subscription record missing.');
+
+        const curSub = subSnap.data() as CopyTradeSubscription;
+        if (curSub.status !== 'active') throw new Error('Copy subscription already stopped.');
+        const curUser = userSnap.data() as UserProfile;
+
+        finalClaimed = computeAccruedCopyNetUsd(curSub, nowMs);
+        const addProfit = finalClaimed >= 0.01 ? finalClaimed : 0;
+
+        tx.update(subRef, {
+          claimedProfitUsd: Number(((curSub.claimedProfitUsd || 0) + addProfit).toFixed(2)),
+          lastSyncedAtMs: Math.max(curSub.lastSyncedAtMs, nowMs),
+          status: 'stopped',
+          updatedAt: serverTimestamp(),
+        });
+
+        tx.update(userRef, {
+          usdBalance: Number((curUser.usdBalance + curSub.allocatedUsd).toFixed(2)),
+          profitBalance: Number((curUser.profitBalance + addProfit).toFixed(2)),
+          updatedAt: serverTimestamp(),
+        });
+      });
+
+      return { returnedCapitalUsd: sub.allocatedUsd, claimedProfitUsd: finalClaimed };
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `copyTradeSubscriptions/${sub.id}`);
+    }
+  };
+
+  // =========================================================================
   // Super Admin Actions (Invoked strictly inside /admin)
   // =========================================================================
 
@@ -1934,6 +2354,61 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       sol: String(next.depositWallets?.sol || '').trim().slice(0, 160),
     };
 
+    const defaultFx = DEFAULT_PLATFORM_CONFIG.forexConfig!;
+    const rawFx = next.forexConfig || defaultFx;
+    const validTierIds: ForexAccountTierId[] = ['standard', 'pro', 'raw_spread'];
+    const safeAccountTiers: ForexAccountTierConfig[] = (
+      Array.isArray(rawFx.accountTiers) && rawFx.accountTiers.length > 0
+        ? rawFx.accountTiers
+        : defaultFx.accountTiers
+    )
+      .slice(0, 6)
+      .map((tier, idx) => ({
+        id: validTierIds.includes(tier.id) ? tier.id : validTierIds[idx % 3],
+        name: String(tier.name || `Tier ${idx + 1}`).trim().slice(0, 40) || `Tier ${idx + 1}`,
+        tagline: String(tier.tagline || '').trim().slice(0, 160),
+        commissionPerLot: Math.max(0, Math.min(100, Number(tier.commissionPerLot) || 0)),
+        spreadMultiplier: Math.max(0.05, Math.min(5, Number(tier.spreadMultiplier) || 1)),
+        minDepositUsd: Math.max(1, Number(tier.minDepositUsd) || 10),
+        maxLeverage: Math.max(10, Math.min(2000, Math.round(Number(tier.maxLeverage) || 500))),
+        executionType: String(tier.executionType || 'Market Execution').trim().slice(0, 60),
+        enabled: Boolean(tier.enabled),
+      }));
+
+    const safeCopyTraders: CopyTraderProfile[] = (
+      Array.isArray(rawFx.copyTraders) ? rawFx.copyTraders : []
+    )
+      .slice(0, 20)
+      .map((ct, idx) => ({
+        id: sanitizeRuleId(ct.id || `trader_${idx + 1}`, `trader_${idx + 1}`).slice(0, 64),
+        name: String(ct.name || `Master Trader ${idx + 1}`).trim().slice(0, 80),
+        handle: String(ct.handle || `@MASTER${idx + 1}`).trim().slice(0, 32),
+        strategy: String(ct.strategy || '').trim().slice(0, 300),
+        pairs: String(ct.pairs || 'EUR/USD · XAU/USD').trim().slice(0, 80),
+        riskLevel: (['Low', 'Moderate', 'Dynamic'].includes(ct.riskLevel)
+          ? ct.riskLevel
+          : 'Moderate') as CopyTraderProfile['riskLevel'],
+        monthlyRoiPercent: Math.max(-50, Math.min(500, Number(ct.monthlyRoiPercent) || 0)),
+        winRatePercent: Math.max(1, Math.min(100, Number(ct.winRatePercent) || 70)),
+        maxDrawdownPercent: Math.max(0.5, Math.min(99, Number(ct.maxDrawdownPercent) || 10)),
+        profitFactor: Math.max(0.1, Math.min(20, Number(ct.profitFactor) || 1.5)),
+        performanceFeePercent: Math.max(0, Math.min(50, Number(ct.performanceFeePercent) || 20)),
+        dailyTargetPercent: Math.max(0, Math.min(50, Number(ct.dailyTargetPercent) || 1.0)),
+        minCopyUsd: Math.max(1, Number(ct.minCopyUsd) || 25),
+        recommendedTierId: validTierIds.includes(ct.recommendedTierId)
+          ? ct.recommendedTierId
+          : 'standard',
+        followersCount: Math.max(0, Math.round(Number(ct.followersCount) || 0)),
+        enabled: Boolean(ct.enabled),
+      }));
+
+    const safeForexConfig: ForexPlatformConfig = {
+      tradingEnabled: rawFx.tradingEnabled !== false,
+      copyTradingEnabled: rawFx.copyTradingEnabled !== false,
+      accountTiers: safeAccountTiers,
+      copyTraders: safeCopyTraders,
+    };
+
     try {
       await setDoc(doc(db, 'config', 'platform'), {
         ...next,
@@ -1963,6 +2438,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         bannerAds: safeBannerAds,
         coinMiningSettings: safeCoinMiningSettings,
         coinMiningPlans: safeMiningPlans,
+        forexConfig: safeForexConfig,
         updatedAt: serverTimestamp(),
       });
     } catch (err) {
@@ -2180,6 +2656,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         downlineReferrals,
         referralLinkClicks,
         savedPaymentMethods,
+        forexTrades,
+        copyTradeSubscriptions,
         signInWithGoogle,
         signInWithEmail,
         signUpWithKyc,
@@ -2201,6 +2679,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         addUserPaymentMethod,
         setDefaultUserPaymentMethod,
         deleteUserPaymentMethod,
+        openForexTrade,
+        closeForexTrade,
+        startCopyTrade,
+        claimCopyTradeProfit,
+        stopCopyTrade,
         updatePlatformConfig,
         approveCryptoDeposit,
         rejectCryptoDeposit,

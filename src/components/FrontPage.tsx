@@ -28,7 +28,7 @@ import { usePlatform } from '../context/PlatformContext';
 import { IdType, NavSection } from '../types/platform';
 import { compressImageToDataUrl, isWeekendDate } from '../utils/investmentMath';
 import { AlphatradexCoinHub, BannerAdSlot } from './AlphatradexCoinHub';
-import { AlphatradexLiveChart, AlphatradexTickerTape } from './TradingViewChart';
+import { ForexMarketView } from './ForexMarketView';
 import { AlphatradexLogo3D } from './AlphatradexLogo3D';
 
 interface FrontPageProps {
@@ -39,15 +39,6 @@ interface FrontPageProps {
   onOpenAuth: (mode: 'signin' | 'signup') => void;
   onOpenDashboard?: (targetNav?: 'dashboard' | 'forex-market' | 'pump-fun') => void;
 }
-
-const HOME_FX_PAIRS = [
-  { label: 'EUR/USD', tv: 'FX:EURUSD', name: 'Euro / US Dollar' },
-  { label: 'GBP/USD', tv: 'FX:GBPUSD', name: 'British Pound / USD' },
-  { label: 'USD/JPY', tv: 'FX:USDJPY', name: 'US Dollar / Japanese Yen' },
-  { label: 'XAU/USD', tv: 'OANDA:XAUUSD', name: 'Gold Spot / USD' },
-  { label: 'AUD/USD', tv: 'FX:AUDUSD', name: 'Australian Dollar / USD' },
-  { label: 'USD/CHF', tv: 'FX:USDCHF', name: 'US Dollar / Swiss Franc' },
-];
 
 export const FrontPage: React.FC<FrontPageProps> = ({
   activeSection,
@@ -85,10 +76,6 @@ export const FrontPage: React.FC<FrontPageProps> = ({
   // Dedicated Page interactive states
   const [copiedMint, setCopiedMint] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState<string>('pro');
-  const [selectedHomeFxSymbol, setSelectedHomeFxSymbol] = useState<string>('FX:EURUSD');
-  const [fxInterval, setFxInterval] = useState<'15' | '60' | '240' | 'D'>('60');
-  const [fxChartStyle, setFxChartStyle] = useState<'1' | '3'>('1');
-  const [fxShowEma, setFxShowEma] = useState<boolean>(true);
   const [simL1Volume, setSimL1Volume] = useState<string>('2500');
   const [simL2Volume, setSimL2Volume] = useState<string>('4000');
   const [simL3Volume, setSimL3Volume] = useState<string>('6500');
@@ -350,7 +337,7 @@ export const FrontPage: React.FC<FrontPageProps> = ({
                   className="w-full py-2.5 px-4 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-sm font-semibold transition-colors inline-flex items-center justify-center gap-2"
                 >
                   <Globe className="w-4 h-4 text-orange-600" />
-                  <span>Open Forex Market Charts</span>
+                  <span>Open Forex WebTerminal &amp; Copy Trade</span>
                 </button>
               </div>
             </div>
@@ -764,7 +751,7 @@ export const FrontPage: React.FC<FrontPageProps> = ({
                     className="px-4 py-2.5 rounded-lg border border-slate-700 bg-slate-900/80 hover:border-slate-500 text-slate-200 hover:text-white text-sm font-semibold transition-colors inline-flex items-center gap-2"
                   >
                     <Globe className="w-4 h-4 text-orange-400" />
-                    <span>Live Forex Charts</span>
+                    <span>Forex WebTerminal &amp; Copy Trade</span>
                   </button>
                 </div>
               </div>
@@ -1139,17 +1126,17 @@ export const FrontPage: React.FC<FrontPageProps> = ({
         </div>
       )}
 
-      {/* 4. DEDICATED ALPHATRADEX PROPRIETARY FOREX MARKET PAGE */}
+      {/* 4. DEDICATED ALPHATRADEX PROPRIETARY FOREX WEBTERMINAL & COPY TRADE PAGE */}
       {activeSection === 'forex' && (
         <div className="space-y-5">
           <div className="bg-[#0B111E]/85 backdrop-blur-md border border-slate-700/70 rounded-2xl p-5 sm:p-6 shadow-xl flex flex-wrap items-center justify-between gap-4">
             <div className="space-y-1">
               <div className="inline-flex items-center gap-2 text-xs font-mono text-orange-400 font-semibold">
                 <Globe className="w-4 h-4" />
-                ALPHATRADEX PROPRIETARY LIVE TERMINAL · DIRECT ORDERS UPCOMING
+                ALPHATRADEX LIVE WEBTERMINAL · 3 ACCOUNT CATEGORIES · COPY TRADE
               </div>
               <h1 className="font-display font-extrabold text-white text-2xl sm:text-3xl tracking-tight">
-                {platformConfig.companyName} Live Forex &amp; Gold (XAU/USD) Charts
+                {platformConfig.companyName} Forex WebTerminal &amp; Copy Trading
               </h1>
             </div>
             <button
@@ -1157,121 +1144,15 @@ export const FrontPage: React.FC<FrontPageProps> = ({
               onClick={() => openPortalOrAuth('forex-market', 'signin')}
               className="px-4 py-2.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs sm:text-sm font-semibold inline-flex items-center gap-2 transition-colors shrink-0"
             >
-              <span>{authUser ? 'Open Full Desk in Vault' : 'Sign In for Execution Calculator'}</span>
+              <span>{authUser ? 'Trade Inside Vault' : 'Sign In to Trade Live'}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
 
-          <div className="bg-[#0B111E]/90 backdrop-blur-md border border-slate-700/70 rounded-2xl px-2 py-1 shadow-xl overflow-hidden">
-            <AlphatradexTickerTape
-              onSelectSymbol={(symLabel) => {
-                const match = HOME_FX_PAIRS.find((p) => p.label === symLabel);
-                if (match) setSelectedHomeFxSymbol(match.tv);
-              }}
-            />
-          </div>
-
-          <div className="bg-[#0B111E]/85 backdrop-blur-md border border-slate-700/70 rounded-2xl p-5 space-y-4 shadow-xl">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-2">
-                {HOME_FX_PAIRS.map((pair) => {
-                  const active = selectedHomeFxSymbol === pair.tv;
-                  return (
-                    <button
-                      key={pair.tv}
-                      type="button"
-                      onClick={() => setSelectedHomeFxSymbol(pair.tv)}
-                      className={`px-3.5 py-2 rounded-xl border text-left transition-colors ${
-                        active
-                          ? 'bg-slate-800 border-orange-500 text-white'
-                          : 'bg-slate-900/70 border-slate-800 text-slate-300 hover:border-slate-600 hover:text-white'
-                      }`}
-                    >
-                      <div className="font-display font-bold text-xs">{pair.label}</div>
-                      <div className="text-[10px] text-slate-400">{pair.name}</div>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-900 border border-slate-800">
-                  {(
-                    [
-                      { id: '15', label: '15M' },
-                      { id: '60', label: '1H' },
-                      { id: '240', label: '4H' },
-                      { id: 'D', label: '1D' },
-                    ] as const
-                  ).map((tf) => (
-                    <button
-                      key={tf.id}
-                      type="button"
-                      onClick={() => setFxInterval(tf.id)}
-                      className={`px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold transition-colors ${
-                        fxInterval === tf.id
-                          ? 'bg-orange-600 text-white'
-                          : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      {tf.label}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-900 border border-slate-800">
-                  <button
-                    type="button"
-                    onClick={() => setFxChartStyle('1')}
-                    className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${
-                      fxChartStyle === '1'
-                        ? 'bg-slate-700 text-white'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    Candles
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFxChartStyle('3')}
-                    className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${
-                      fxChartStyle === '3'
-                        ? 'bg-slate-700 text-white'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    Area
-                  </button>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setFxShowEma((v) => !v)}
-                  className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-mono font-semibold transition-colors ${
-                    fxShowEma
-                      ? 'border-orange-500/60 bg-orange-500/15 text-orange-300'
-                      : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  EMA
-                </button>
-              </div>
-            </div>
-
-            <AlphatradexLiveChart
-              symbol={selectedHomeFxSymbol}
-              interval={fxInterval}
-              chartStyle={fxChartStyle}
-              showEma={fxShowEma}
-            />
-
-            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400 pt-1">
-              <span className="inline-flex items-center gap-1.5">
-                <Layers className="w-3.5 h-3.5 text-orange-400" />
-                Live {platformConfig.companyName} proprietary candlestick &amp; area market charts active now. Direct USD Vault Forex Buy/Sell execution launches in the next release.
-              </span>
-            </div>
-          </div>
+          <ForexMarketView
+            mode="preview"
+            onRequireAuth={() => openPortalOrAuth('forex-market', 'signin')}
+          />
         </div>
       )}
 

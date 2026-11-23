@@ -68,7 +68,7 @@ service cloud.firestore {
         'isoScore', 'certikScore', 'minWithdrawalUsd', 'eliteCapitalLockDays',
         'totalProfitDays', 'globalPaused', 'packages', 'mlmRates', 'mentorConfig',
         'depositWallets', 'paymentMethods', 'pumpFunToken', 'dashboardAnnouncement',
-        'bannerAds', 'coinMiningSettings', 'coinMiningPlans', 'updatedAt'
+        'bannerAds', 'coinMiningSettings', 'coinMiningPlans', 'forexConfig', 'updatedAt'
       ])
       && isNonEmptyString(data.companyName, 120)
       && isBoundedString(data.companyTagline, 200)
@@ -157,6 +157,20 @@ service cloud.firestore {
         data.coinMiningPlans is list &&
         data.coinMiningPlans.size() <= 20 &&
         (data.coinMiningPlans.size() == 0 || data.coinMiningPlans[0] is map)
+      ))
+      && (!('forexConfig' in data) || (
+        data.forexConfig is map &&
+        data.forexConfig.keys().hasAll(['tradingEnabled', 'copyTradingEnabled', 'accountTiers', 'copyTraders']) &&
+        data.forexConfig.keys().hasOnly(['tradingEnabled', 'copyTradingEnabled', 'accountTiers', 'copyTraders']) &&
+        data.forexConfig.tradingEnabled is bool &&
+        data.forexConfig.copyTradingEnabled is bool &&
+        data.forexConfig.accountTiers is list &&
+        data.forexConfig.accountTiers.size() >= 1 &&
+        data.forexConfig.accountTiers.size() <= 6 &&
+        data.forexConfig.accountTiers[0] is map &&
+        data.forexConfig.copyTraders is list &&
+        data.forexConfig.copyTraders.size() <= 20 &&
+        (data.forexConfig.copyTraders.size() == 0 || data.forexConfig.copyTraders[0] is map)
       ))
       && data.pumpFunToken is map
       && data.updatedAt == request.time;
@@ -456,6 +470,71 @@ service cloud.firestore {
       && data.clicks is number && data.clicks >= 1 && data.clicks <= 10000000
       && data.lastClickedAt == request.time
       && data.updatedAt == request.time;
+    }
+
+    function isValidForexTrade(data) {
+      return data.keys().hasAll([
+        'uid', 'userName', 'symbol', 'direction', 'accountTierId', 'accountTierName',
+        'lots', 'leverage', 'entryPrice', 'closePrice', 'slPrice', 'tpPrice',
+        'marginUsd', 'commissionUsd', 'realizedPnlUsd', 'status',
+        'openedAtMs', 'closedAtMs', 'createdAt', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'uid', 'userName', 'symbol', 'direction', 'accountTierId', 'accountTierName',
+        'lots', 'leverage', 'entryPrice', 'closePrice', 'slPrice', 'tpPrice',
+        'marginUsd', 'commissionUsd', 'realizedPnlUsd', 'status',
+        'openedAtMs', 'closedAtMs', 'createdAt', 'updatedAt'
+      ])
+      && isValidId(data.uid)
+      && isNonEmptyString(data.userName, 120)
+      && isNonEmptyString(data.symbol, 16)
+      && data.direction in ['BUY', 'SELL']
+      && data.accountTierId in ['standard', 'pro', 'raw_spread']
+      && isNonEmptyString(data.accountTierName, 40)
+      && data.lots is number && data.lots >= 0.01 && data.lots <= 100
+      && data.leverage is number && data.leverage >= 1 && data.leverage <= 1000
+      && data.entryPrice is number && data.entryPrice > 0
+      && data.closePrice is number && data.closePrice >= 0
+      && data.slPrice is number && data.slPrice >= 0
+      && data.tpPrice is number && data.tpPrice >= 0
+      && data.marginUsd is number && data.marginUsd > 0 && data.marginUsd <= 10000000
+      && data.commissionUsd is number && data.commissionUsd >= 0 && data.commissionUsd <= 100000
+      && data.realizedPnlUsd is number
+      && data.status in ['open', 'closed']
+      && data.openedAtMs is number && data.openedAtMs > 0
+      && data.closedAtMs is number && data.closedAtMs >= 0
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidCopyTradeSubscription(data) {
+      return data.keys().hasAll([
+        'uid', 'userName', 'traderId', 'traderName', 'traderHandle', 'accountTierId',
+        'allocatedUsd', 'riskMultiplier', 'stopLossPercent', 'performanceFeePercent',
+        'dailyTargetPercent', 'claimedProfitUsd', 'startedAtMs', 'lastSyncedAtMs',
+        'status', 'createdAt', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'uid', 'userName', 'traderId', 'traderName', 'traderHandle', 'accountTierId',
+        'allocatedUsd', 'riskMultiplier', 'stopLossPercent', 'performanceFeePercent',
+        'dailyTargetPercent', 'claimedProfitUsd', 'startedAtMs', 'lastSyncedAtMs',
+        'status', 'createdAt', 'updatedAt'
+      ])
+      && isValidId(data.uid)
+      && isNonEmptyString(data.userName, 120)
+      && isValidId(data.traderId) && data.traderId.size() <= 64
+      && isNonEmptyString(data.traderName, 80)
+      && isNonEmptyString(data.traderHandle, 32)
+      && data.accountTierId in ['standard', 'pro', 'raw_spread']
+      && data.allocatedUsd is number && data.allocatedUsd >= 1 && data.allocatedUsd <= 10000000
+      && data.riskMultiplier is number && data.riskMultiplier >= 0.25 && data.riskMultiplier <= 5
+      && data.stopLossPercent is number && data.stopLossPercent >= 5 && data.stopLossPercent <= 95
+      && data.performanceFeePercent is number && data.performanceFeePercent >= 0 && data.performanceFeePercent <= 50
+      && data.dailyTargetPercent is number && data.dailyTargetPercent >= 0 && data.dailyTargetPercent <= 50
+      && data.claimedProfitUsd is number && data.claimedProfitUsd >= 0
+      && data.startedAtMs is number && data.startedAtMs > 0
+      && data.lastSyncedAtMs is number && data.lastSyncedAtMs >= data.startedAtMs
+      && data.status in ['active', 'stopped']
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
     }
 
     // =========================================================================
@@ -807,6 +886,70 @@ service cloud.firestore {
               'totalTappedCoins', 'unclaimedTapCoins', 'dailyTappedCoins',
               'lastTapDayKey', 'totalClaimedUsdFromTap', 'totalClaimedCoins',
               'energy', 'lastEnergySyncMs', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if false;
+    }
+
+    match /forexTrades/{tradeId} {
+      allow get: if isValidId(tradeId) && isSignedIn() && (existing().uid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow create: if isValidId(tradeId)
+        && isVerifiedUser()
+        && isValidForexTrade(incoming())
+        && incoming().uid == request.auth.uid
+        && incoming().status == 'open'
+        && incoming().closePrice == 0
+        && incoming().realizedPnlUsd == 0
+        && incoming().closedAtMs == 0
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(tradeId)
+        && isVerifiedUser()
+        && isValidForexTrade(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() || (
+            existing().uid == request.auth.uid &&
+            existing().status == 'open' &&
+            incoming().status == 'closed' &&
+            incoming().closedAtMs >= existing().openedAtMs &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'closePrice', 'realizedPnlUsd', 'status', 'closedAtMs', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if false;
+    }
+
+    match /copyTradeSubscriptions/{subId} {
+      allow get: if isValidId(subId) && isSignedIn() && (existing().uid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow create: if isValidId(subId)
+        && isVerifiedUser()
+        && isValidCopyTradeSubscription(incoming())
+        && incoming().uid == request.auth.uid
+        && incoming().status == 'active'
+        && incoming().claimedProfitUsd == 0
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(subId)
+        && isVerifiedUser()
+        && isValidCopyTradeSubscription(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() || (
+            existing().uid == request.auth.uid &&
+            existing().status == 'active' &&
+            incoming().claimedProfitUsd >= existing().claimedProfitUsd &&
+            incoming().lastSyncedAtMs >= existing().lastSyncedAtMs &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'claimedProfitUsd', 'lastSyncedAtMs', 'status', 'updatedAt'
             ])
           )
         );

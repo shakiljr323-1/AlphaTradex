@@ -11,6 +11,15 @@ export interface CandlePoint {
   volume: number;
 }
 
+export interface ChartPositionOverlay {
+  id: string;
+  direction: 'BUY' | 'SELL';
+  entryPrice: number;
+  slPrice?: number;
+  tpPrice?: number;
+  lots: number;
+}
+
 interface PairMeta {
   key: string;
   label: string;
@@ -340,7 +349,10 @@ interface AlphatradexChartProps {
   liveSpotPrice?: number;
   decimals?: number;
   spreadPips?: number;
+  spreadMultiplier?: number;
   pipSize?: number;
+  activePositions?: ChartPositionOverlay[];
+  onLiveTick?: (bidPrice: number, askPrice: number) => void;
 }
 
 export const AlphatradexLiveChart: React.FC<AlphatradexChartProps> = ({
@@ -351,12 +363,20 @@ export const AlphatradexLiveChart: React.FC<AlphatradexChartProps> = ({
   liveSpotPrice,
   decimals,
   spreadPips,
+  spreadMultiplier = 1,
   pipSize,
+  activePositions = [],
+  onLiveTick,
 }) => {
   const meta = useMemo(() => resolvePairMeta(symbol), [symbol]);
   const priceDecimals = decimals ?? meta.decimals;
   const activeSpreadPips = spreadPips ?? meta.spreadPips;
+  const effectiveSpreadPips = Number(
+    Math.max(0, activeSpreadPips * Math.max(0.05, spreadMultiplier)).toFixed(2)
+  );
   const activePipSize = pipSize ?? meta.pipSize;
+  const onLiveTickRef = useRef(onLiveTick);
+  onLiveTickRef.current = onLiveTick;
 
   const [candles, setCandles] = useState<CandlePoint[]>(() =>
     buildAnchoredSeries(meta, interval, liveSpotPrice ?? meta.fallbackSpot)
@@ -566,9 +586,15 @@ export const AlphatradexLiveChart: React.FC<AlphatradexChartProps> = ({
   const activeCandle =
     hoverIdx !== null && visibleCandles[hoverIdx] ? visibleCandles[hoverIdx] : latestCandle;
   const liveBid = latestCandle ? latestCandle.close : spotPrice;
-  const liveAsk = Number((liveBid + activeSpreadPips * activePipSize).toFixed(priceDecimals));
+  const liveAsk = Number((liveBid + effectiveSpreadPips * activePipSize).toFixed(priceDecimals));
   const sessionStart = visibleCandles[0]?.open || liveBid;
   const visibleChangePct = sessionStart ? ((liveBid - sessionStart) / sessionStart) * 100 : 0;
+
+  useEffect(() => {
+    if (liveBid > 0 && liveAsk > 0) {
+      onLiveTickRef.current?.(liveBid, liveAsk);
+    }
+  }, [liveBid, liveAsk]);
 
   // High-DPI Interactive HTML5 Canvas Rendering
   const drawChart = useCallback(() => {
@@ -783,7 +809,69 @@ export const AlphatradexLiveChart: React.FC<AlphatradexChartProps> = ({
       drawEmaLine(ema50All, '#FBBF24');
     }
 
-    // 6. Live Bid & Ask Dotted Spread Lines + Glowing Y-Axis Price Pill
+    // 6. Active WebTerminal Positions (Entry, SL, TP Overlays)
+    if (activePositions.length > 0) {
+      ctx.save();
+      ctx.font = '700 9px "JetBrains Mono", monospace';
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'left';
+
+      activePositions.forEach((pos) => {
+        const yEntry = priceToY(pos.entryPrice);
+        if (yEntry >= padTop && yEntry <= padTop + priceH) {
+          const isBuy = pos.direction === 'BUY';
+          ctx.setLineDash([]);
+          ctx.strokeStyle = isBuy ? '#10B981' : '#F43F5E';
+          ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          ctx.moveTo(padLeft, yEntry);
+          ctx.lineTo(padLeft + plotW, yEntry);
+          ctx.stroke();
+
+          const badgeText = `${pos.direction} ${pos.lots.toFixed(2)} @ ${pos.entryPrice.toFixed(priceDecimals)}`;
+          const badgeW = badgeText.length * 5.8 + 12;
+          ctx.fillStyle = isBuy ? 'rgba(6, 78, 59, 0.92)' : 'rgba(136, 19, 55, 0.92)';
+          ctx.beginPath();
+          traceRoundRect(ctx, padLeft + 6, yEntry - 8, badgeW, 16, 3);
+          ctx.fill();
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillText(badgeText, padLeft + 12, yEntry);
+        }
+
+        if (pos.tpPrice && pos.tpPrice > 0) {
+          const yTp = priceToY(pos.tpPrice);
+          if (yTp >= padTop && yTp <= padTop + priceH) {
+            ctx.setLineDash([4, 3]);
+            ctx.strokeStyle = 'rgba(16, 185, 129, 0.7)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(padLeft, yTp);
+            ctx.lineTo(padLeft + plotW, yTp);
+            ctx.stroke();
+            ctx.fillStyle = '#34D399';
+            ctx.fillText(`TP ${pos.tpPrice.toFixed(priceDecimals)}`, padLeft + 6, yTp - 7);
+          }
+        }
+
+        if (pos.slPrice && pos.slPrice > 0) {
+          const ySl = priceToY(pos.slPrice);
+          if (ySl >= padTop && ySl <= padTop + priceH) {
+            ctx.setLineDash([4, 3]);
+            ctx.strokeStyle = 'rgba(239, 68, 68, 0.7)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(padLeft, ySl);
+            ctx.lineTo(padLeft + plotW, ySl);
+            ctx.stroke();
+            ctx.fillStyle = '#F87171';
+            ctx.fillText(`SL ${pos.slPrice.toFixed(priceDecimals)}`, padLeft + 6, ySl + 8);
+          }
+        }
+      });
+      ctx.restore();
+    }
+
+    // 7. Live Bid & Ask Dotted Spread Lines + Glowing Y-Axis Price Pill
     const yBid = priceToY(liveBid);
     const yAsk = priceToY(liveAsk);
 
@@ -819,7 +907,7 @@ export const AlphatradexLiveChart: React.FC<AlphatradexChartProps> = ({
     ctx.textBaseline = 'middle';
     ctx.fillText(liveBid.toFixed(priceDecimals), padLeft + plotW + padRight / 2, clampedBidY);
 
-    // 7. Interactive Hover Crosshair + Axis Labels
+    // 8. Interactive Hover Crosshair + Axis Labels
     if (hoverIdx !== null && visibleCandles[hoverIdx]) {
       const hx = idxToX(hoverIdx);
       const hy =
@@ -891,6 +979,7 @@ export const AlphatradexLiveChart: React.FC<AlphatradexChartProps> = ({
     meta.label,
     hoverIdx,
     hoverYPrice,
+    activePositions,
   ]);
 
   useEffect(() => {
@@ -1077,7 +1166,7 @@ export const AlphatradexLiveChart: React.FC<AlphatradexChartProps> = ({
           <span className="text-amber-400 font-semibold">
             ASK {liveAsk.toFixed(priceDecimals)}
           </span>
-          <span>Spread {activeSpreadPips}p</span>
+          <span>Spread {effectiveSpreadPips}p</span>
         </div>
         <span className="text-slate-400">{feedSource} · Drag to pan · Scroll to zoom</span>
       </div>

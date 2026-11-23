@@ -29,6 +29,7 @@
         "bannerAds": { "type": "array" },
         "coinMiningSettings": { "type": "object" },
         "coinMiningPlans": { "type": "array" },
+        "forexConfig": { "type": "object" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": [
@@ -420,12 +421,104 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["handle", "clicks", "lastClickedAt", "updatedAt"]
+    },
+    "ForexTrade": {
+      "title": "ForexTrade",
+      "description": "Client self-executed Forex/Gold WebTerminal position with Exness-style account tier commission.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userName": { "type": "string", "maxLength": 120 },
+        "symbol": { "type": "string", "maxLength": 16 },
+        "direction": { "type": "string", "enum": ["BUY", "SELL"] },
+        "accountTierId": { "type": "string", "enum": ["standard", "pro", "raw_spread"] },
+        "accountTierName": { "type": "string", "maxLength": 40 },
+        "lots": { "type": "number" },
+        "leverage": { "type": "number" },
+        "entryPrice": { "type": "number" },
+        "closePrice": { "type": "number" },
+        "slPrice": { "type": "number" },
+        "tpPrice": { "type": "number" },
+        "marginUsd": { "type": "number" },
+        "commissionUsd": { "type": "number" },
+        "realizedPnlUsd": { "type": "number" },
+        "status": { "type": "string", "enum": ["open", "closed"] },
+        "openedAtMs": { "type": "number" },
+        "closedAtMs": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid",
+        "userName",
+        "symbol",
+        "direction",
+        "accountTierId",
+        "accountTierName",
+        "lots",
+        "leverage",
+        "entryPrice",
+        "closePrice",
+        "slPrice",
+        "tpPrice",
+        "marginUsd",
+        "commissionUsd",
+        "realizedPnlUsd",
+        "status",
+        "openedAtMs",
+        "closedAtMs",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CopyTradeSubscription": {
+      "title": "CopyTradeSubscription",
+      "description": "Active or settled Forex Copy Trade allocation mirroring a Master Strategy Provider.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userName": { "type": "string", "maxLength": 120 },
+        "traderId": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "traderName": { "type": "string", "maxLength": 80 },
+        "traderHandle": { "type": "string", "maxLength": 32 },
+        "accountTierId": { "type": "string", "enum": ["standard", "pro", "raw_spread"] },
+        "allocatedUsd": { "type": "number" },
+        "riskMultiplier": { "type": "number" },
+        "stopLossPercent": { "type": "number" },
+        "performanceFeePercent": { "type": "number" },
+        "dailyTargetPercent": { "type": "number" },
+        "claimedProfitUsd": { "type": "number" },
+        "startedAtMs": { "type": "number" },
+        "lastSyncedAtMs": { "type": "number" },
+        "status": { "type": "string", "enum": ["active", "stopped"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid",
+        "userName",
+        "traderId",
+        "traderName",
+        "traderHandle",
+        "accountTierId",
+        "allocatedUsd",
+        "riskMultiplier",
+        "stopLossPercent",
+        "performanceFeePercent",
+        "dailyTargetPercent",
+        "claimedProfitUsd",
+        "startedAtMs",
+        "lastSyncedAtMs",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
     "/config/{docId}": {
       "schema": { "$ref": "#/entities/PlatformConfig" },
-      "description": "Global platform rules, packages, referral & mentor rates, wallets, paymentMethods, bannerAds, coinMining, and Pump.fun token config."
+      "description": "Global platform rules, packages, referral & mentor rates, wallets, paymentMethods, bannerAds, coinMining, forexConfig, and Pump.fun token config."
     },
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/UserProfile" },
@@ -478,6 +571,14 @@
     "/coinTapAccounts/{userId}": {
       "schema": { "$ref": "#/entities/CoinTapAccount" },
       "description": "Free Hamster-style tap-to-mine ATX energy and rewards state per user."
+    },
+    "/forexTrades/{tradeId}": {
+      "schema": { "$ref": "#/entities/ForexTrade" },
+      "description": "Client self-traded Forex & Gold WebTerminal orders and closed PnL records."
+    },
+    "/copyTradeSubscriptions/{subId}": {
+      "schema": { "$ref": "#/entities/CopyTradeSubscription" },
+      "description": "Client Copy Trade allocations following Master Strategy Providers."
     },
     "/admins/{userId}": {
       "schema": { "$ref": "#/entities/AdminDoc" },

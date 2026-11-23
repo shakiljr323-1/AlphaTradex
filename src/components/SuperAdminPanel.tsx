@@ -6,10 +6,12 @@ import {
   Bell,
   CheckCircle2,
   Coins,
+  Copy,
   Cpu,
   CreditCard,
   Download,
   Gift,
+  Globe,
   LogOut,
   Megaphone,
   Menu,
@@ -23,10 +25,12 @@ import {
   ShieldCheck,
   Sparkles,
   Trash2,
+  TrendingUp,
   Users,
   X,
 } from 'lucide-react';
 import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
+import { DEFAULT_PLATFORM_CONFIG } from '../constants/defaults';
 import { usePlatform } from '../context/PlatformContext';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import {
@@ -36,7 +40,13 @@ import {
   BannerAdTheme,
   CoinMiningPlan,
   CoinMiningStake,
+  CopyTraderProfile,
+  CopyTradeSubscription,
   CryptoDeposit,
+  ForexAccountTierConfig,
+  ForexAccountTierId,
+  ForexPlatformConfig,
+  ForexTrade,
   Investment,
   MemeCoinInvestment,
   MlmCommission,
@@ -69,6 +79,7 @@ type AdminTab =
   | 'clients'
   | 'mentors'
   | 'packages'
+  | 'forex-copy'
   | 'announcements'
   | 'coin-ads-mining'
   | 'company'
@@ -106,6 +117,8 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
   const [allMlm, setAllMlm] = useState<MlmCommission[]>([]);
   const [allMeme, setAllMeme] = useState<MemeCoinInvestment[]>([]);
   const [allCoinStakes, setAllCoinStakes] = useState<CoinMiningStake[]>([]);
+  const [allForexTrades, setAllForexTrades] = useState<ForexTrade[]>([]);
+  const [allCopySubs, setAllCopySubs] = useState<CopyTradeSubscription[]>([]);
 
   const [clientSearch, setClientSearch] = useState('');
   const [clientKycFilter, setClientKycFilter] = useState<'all' | 'pending' | 'approved' | 'unsubmitted' | 'rejected'>('all');
@@ -175,6 +188,19 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
       (snap) => setAllCoinStakes(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<CoinMiningStake, 'id'>) }))),
       (err) => handleFirestoreError(err, OperationType.LIST, 'coinMiningStakes')
     );
+    const u9 = onSnapshot(
+      query(collection(db, 'forexTrades'), orderBy('openedAtMs', 'desc')),
+      (snap) => setAllForexTrades(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ForexTrade, 'id'>) }))),
+      (err) => handleFirestoreError(err, OperationType.LIST, 'forexTrades')
+    );
+    const u10 = onSnapshot(
+      query(collection(db, 'copyTradeSubscriptions'), orderBy('startedAtMs', 'desc')),
+      (snap) =>
+        setAllCopySubs(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<CopyTradeSubscription, 'id'>) }))
+        ),
+      (err) => handleFirestoreError(err, OperationType.LIST, 'copyTradeSubscriptions')
+    );
 
     return () => {
       u1();
@@ -185,6 +211,8 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
       u6();
       u7();
       u8();
+      u9();
+      u10();
     };
   }, []);
 
@@ -292,6 +320,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
       items: [
         { id: 'announcements', label: 'Dashboard Notice Bar', Icon: Megaphone },
         { id: 'packages', label: 'Packages & Commissions', Icon: Settings },
+        { id: 'forex-copy', label: 'Forex Tiers & Copy Trade', Icon: Globe },
         { id: 'coin-ads-mining', label: 'Banner Ads & Coin Mining', Icon: Sparkles },
         { id: 'wallets-meme', label: 'Addresses & Meme Coin', Icon: Coins },
         { id: 'company', label: 'Company & Trust Ratings', Icon: Shield },
@@ -742,10 +771,12 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-9 gap-2.5 text-center">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-11 gap-2.5 text-center">
                 {[
                   { label: 'users', count: allUsers.length },
                   { label: 'investments', count: allInvestments.length },
+                  { label: 'forexTrades', count: allForexTrades.length },
+                  { label: 'copySubs', count: allCopySubs.length },
                   { label: 'coinStakes', count: allCoinStakes.length },
                   { label: 'cryptoDeposits', count: allDeposits.length },
                   { label: 'withdrawals', count: allWithdrawals.length },
@@ -2367,6 +2398,567 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
               </div>
             </section>
           )}
+
+          {/* TAB: FOREX WEBTERMINAL, 3 EXNESS ACCOUNT TIERS & COPY TRADE PROVIDERS */}
+          {tab === 'forex-copy' && (() => {
+            const fxCfg: ForexPlatformConfig =
+              draftConfig.forexConfig || DEFAULT_PLATFORM_CONFIG.forexConfig!;
+            const setFxCfg = (patch: Partial<ForexPlatformConfig>) =>
+              setDraftConfig({
+                ...draftConfig,
+                forexConfig: { ...fxCfg, ...patch },
+              });
+
+            return (
+              <section className="space-y-6">
+                {/* 1. Feature Toggles & 3 Exness Account Categories */}
+                <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h2 className="font-display font-bold text-slate-900 text-lg flex items-center gap-2">
+                        <Globe className="w-5 h-5 text-orange-600" />
+                        Forex WebTerminal &amp; 3 Exness-Style Account Categories
+                      </h2>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Configure per-lot commissions, spread multipliers, minimum vault deposits, and leverage for Standard, Pro, and Raw Spread accounts.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setFxCfg({ tradingEnabled: !fxCfg.tradingEnabled })}
+                        className={`px-3 py-1.5 rounded-lg border text-xs font-semibold ${
+                          fxCfg.tradingEnabled
+                            ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                            : 'border-slate-200 bg-slate-100 text-slate-600'
+                        }`}
+                      >
+                        WebTerminal: {fxCfg.tradingEnabled ? 'ON' : 'OFF'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFxCfg({ copyTradingEnabled: !fxCfg.copyTradingEnabled })}
+                        className={`px-3 py-1.5 rounded-lg border text-xs font-semibold ${
+                          fxCfg.copyTradingEnabled
+                            ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                            : 'border-slate-200 bg-slate-100 text-slate-600'
+                        }`}
+                      >
+                        Copy Trade: {fxCfg.copyTradingEnabled ? 'ON' : 'OFF'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => handleSaveConfig()}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold"
+                      >
+                        <Save className="w-3.5 h-3.5" />
+                        Publish Forex &amp; Copy Config
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    {fxCfg.accountTiers.map((tier, idx) => {
+                      const updateTier = (patch: Partial<ForexAccountTierConfig>) => {
+                        const list = [...fxCfg.accountTiers];
+                        list[idx] = { ...tier, ...patch };
+                        setFxCfg({ accountTiers: list });
+                      };
+                      return (
+                        <div
+                          key={tier.id}
+                          className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 space-y-3"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-xs font-bold uppercase text-slate-700">
+                                {tier.id}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => updateTier({ enabled: !tier.enabled })}
+                                className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
+                                  tier.enabled
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-slate-200 text-slate-600'
+                                }`}
+                              >
+                                {tier.enabled ? 'ENABLED' : 'DISABLED'}
+                              </button>
+                            </div>
+                            <span className="font-mono text-xs text-slate-500">
+                              Commission: ${tier.commissionPerLot.toFixed(2)}/lot · Spread {tier.spreadMultiplier}x
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                Tier Name
+                              </label>
+                              <input
+                                type="text"
+                                value={tier.name}
+                                onChange={(e) => updateTier({ name: e.target.value })}
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                Comm / Lot ($)
+                              </label>
+                              <input
+                                type="number"
+                                step="0.5"
+                                min={0}
+                                value={tier.commissionPerLot}
+                                onChange={(e) =>
+                                  updateTier({
+                                    commissionPerLot: Math.max(0, Number(e.target.value) || 0),
+                                  })
+                                }
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-xs"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                Spread Mult (×)
+                              </label>
+                              <input
+                                type="number"
+                                step="0.05"
+                                min={0.05}
+                                max={5}
+                                value={tier.spreadMultiplier}
+                                onChange={(e) =>
+                                  updateTier({
+                                    spreadMultiplier: Math.max(0.05, Number(e.target.value) || 0.1),
+                                  })
+                                }
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-xs"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                Min Vault ($)
+                              </label>
+                              <input
+                                type="number"
+                                min={1}
+                                value={tier.minDepositUsd}
+                                onChange={(e) =>
+                                  updateTier({
+                                    minDepositUsd: Math.max(1, Number(e.target.value) || 1),
+                                  })
+                                }
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-xs"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                Max Leverage
+                              </label>
+                              <input
+                                type="number"
+                                min={10}
+                                max={2000}
+                                value={tier.maxLeverage}
+                                onChange={(e) =>
+                                  updateTier({
+                                    maxLeverage: Math.max(10, Number(e.target.value) || 100),
+                                  })
+                                }
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-xs"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                Execution Type
+                              </label>
+                              <input
+                                type="text"
+                                value={tier.executionType}
+                                onChange={(e) => updateTier({ executionType: e.target.value })}
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs"
+                              />
+                            </div>
+                            <div className="col-span-2 md:col-span-6">
+                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                Account Tagline
+                              </label>
+                              <input
+                                type="text"
+                                value={tier.tagline}
+                                onChange={(e) => updateTier({ tagline: e.target.value })}
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 2. Copy Trade Master Strategy Providers CRUD */}
+                <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h2 className="font-display font-bold text-slate-900 text-base flex items-center gap-2">
+                        <Copy className="w-4 h-4 text-orange-600" />
+                        Copy Trade Master Strategy Providers ({fxCfg.copyTraders.length})
+                      </h2>
+                      <p className="text-xs text-slate-500">
+                        Manage Master Traders visible in the Forex Copy Trade marketplace, including ROI, performance fee %, daily target %, and minimum copy amount.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const newTrader: CopyTraderProfile = {
+                            id: `master_${Date.now().toString(36)}`,
+                            name: `Master FX Desk ${fxCfg.copyTraders.length + 1}`,
+                            handle: `@MASTER${fxCfg.copyTraders.length + 1}`,
+                            strategy: 'Institutional multi-session price action and liquidity sweep model.',
+                            pairs: 'EUR/USD · XAU/USD',
+                            riskLevel: 'Moderate',
+                            monthlyRoiPercent: 34.5,
+                            winRatePercent: 76,
+                            maxDrawdownPercent: 9.5,
+                            profitFactor: 1.9,
+                            performanceFeePercent: 20,
+                            dailyTargetPercent: 1.35,
+                            minCopyUsd: 50,
+                            recommendedTierId: 'pro',
+                            followersCount: 120,
+                            enabled: true,
+                          };
+                          setFxCfg({ copyTraders: [...fxCfg.copyTraders, newTrader] });
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-semibold"
+                      >
+                        <Plus className="w-3.5 h-3.5 text-orange-600" />
+                        Add Master Trader
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => handleSaveConfig()}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold"
+                      >
+                        <Save className="w-3.5 h-3.5" />
+                        Save Copy Traders
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    {fxCfg.copyTraders.map((tr, idx) => {
+                      const updateTr = (patch: Partial<CopyTraderProfile>) => {
+                        const list = [...fxCfg.copyTraders];
+                        list[idx] = { ...tr, ...patch };
+                        setFxCfg({ copyTraders: list });
+                      };
+                      return (
+                        <div
+                          key={tr.id}
+                          className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 space-y-3"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-xs font-bold text-slate-700">{tr.id}</span>
+                              <button
+                                type="button"
+                                onClick={() => updateTr({ enabled: !tr.enabled })}
+                                className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
+                                  tr.enabled
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-slate-200 text-slate-600'
+                                }`}
+                              >
+                                {tr.enabled ? 'ACTIVE' : 'PAUSED'}
+                              </button>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setFxCfg({
+                                  copyTraders: fxCfg.copyTraders.filter((_, i) => i !== idx),
+                                })
+                              }
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold text-red-600 hover:bg-red-50"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              Remove
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+                            <div className="col-span-2">
+                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                Trader Name
+                              </label>
+                              <input
+                                type="text"
+                                value={tr.name}
+                                onChange={(e) => updateTr({ name: e.target.value })}
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                Handle
+                              </label>
+                              <input
+                                type="text"
+                                value={tr.handle}
+                                onChange={(e) => updateTr({ handle: e.target.value.toUpperCase() })}
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-xs"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                Pairs
+                              </label>
+                              <input
+                                type="text"
+                                value={tr.pairs}
+                                onChange={(e) => updateTr({ pairs: e.target.value })}
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                Risk Level
+                              </label>
+                              <select
+                                value={tr.riskLevel}
+                                onChange={(e) =>
+                                  updateTr({
+                                    riskLevel: e.target.value as CopyTraderProfile['riskLevel'],
+                                  })
+                                }
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs"
+                              >
+                                <option value="Low">Low</option>
+                                <option value="Moderate">Moderate</option>
+                                <option value="Dynamic">Dynamic</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                Rec. Tier
+                              </label>
+                              <select
+                                value={tr.recommendedTierId}
+                                onChange={(e) =>
+                                  updateTr({
+                                    recommendedTierId: e.target.value as ForexAccountTierId,
+                                  })
+                                }
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs"
+                              >
+                                <option value="standard">Standard</option>
+                                <option value="pro">Pro</option>
+                                <option value="raw_spread">Raw Spread</option>
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                30D ROI (%)
+                              </label>
+                              <input
+                                type="number"
+                                step="0.1"
+                                value={tr.monthlyRoiPercent}
+                                onChange={(e) =>
+                                  updateTr({ monthlyRoiPercent: Number(e.target.value) || 0 })
+                                }
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-xs"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                Daily Target (%)
+                              </label>
+                              <input
+                                type="number"
+                                step="0.05"
+                                min={0}
+                                value={tr.dailyTargetPercent}
+                                onChange={(e) =>
+                                  updateTr({
+                                    dailyTargetPercent: Math.max(0, Number(e.target.value) || 0),
+                                  })
+                                }
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-xs"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                Win Rate (%)
+                              </label>
+                              <input
+                                type="number"
+                                min={1}
+                                max={100}
+                                value={tr.winRatePercent}
+                                onChange={(e) =>
+                                  updateTr({
+                                    winRatePercent: Math.max(1, Math.min(100, Number(e.target.value) || 50)),
+                                  })
+                                }
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-xs"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                Perf Fee (%)
+                              </label>
+                              <input
+                                type="number"
+                                min={0}
+                                max={50}
+                                value={tr.performanceFeePercent}
+                                onChange={(e) =>
+                                  updateTr({
+                                    performanceFeePercent: Math.max(0, Number(e.target.value) || 0),
+                                  })
+                                }
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-xs"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                Min Copy ($)
+                              </label>
+                              <input
+                                type="number"
+                                min={1}
+                                value={tr.minCopyUsd}
+                                onChange={(e) =>
+                                  updateTr({ minCopyUsd: Math.max(1, Number(e.target.value) || 10) })
+                                }
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-xs"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                Followers
+                              </label>
+                              <input
+                                type="number"
+                                min={0}
+                                value={tr.followersCount}
+                                onChange={(e) =>
+                                  updateTr({ followersCount: Math.max(0, Number(e.target.value) || 0) })
+                                }
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-xs"
+                              />
+                            </div>
+
+                            <div className="col-span-2 md:col-span-6">
+                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                Strategy Description
+                              </label>
+                              <input
+                                type="text"
+                                value={tr.strategy}
+                                onChange={(e) => updateTr({ strategy: e.target.value })}
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 3. Live Client Forex Trades & Copy Trade Subscriptions Overview */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
+                    <h3 className="font-display font-bold text-slate-900 text-base flex items-center gap-2">
+                      <TrendingUp className="w-4 h-4 text-orange-600" />
+                      Client WebTerminal Orders ({allForexTrades.length})
+                    </h3>
+                    {allForexTrades.length === 0 ? (
+                      <p className="text-xs text-slate-500">No client Forex trades placed yet.</p>
+                    ) : (
+                      <div className="space-y-2 max-h-72 overflow-y-auto">
+                        {allForexTrades.map((ft) => (
+                          <div
+                            key={ft.id}
+                            className="p-2.5 rounded-lg border border-slate-200 text-xs flex items-center justify-between gap-2"
+                          >
+                            <div>
+                              <span className="font-semibold text-slate-900">{ft.userName}</span> ·{' '}
+                              <span
+                                className={`font-mono font-bold ${
+                                  ft.direction === 'BUY' ? 'text-emerald-700' : 'text-red-700'
+                                }`}
+                              >
+                                {ft.direction} {ft.lots} {ft.symbol}
+                              </span>{' '}
+                              <span className="text-slate-500">({ft.accountTierName})</span>
+                            </div>
+                            <div className="font-mono text-right tabular-nums">
+                              <div className="font-bold text-slate-900">
+                                {ft.status === 'open'
+                                  ? `Open ($${ft.marginUsd.toFixed(2)})`
+                                  : `${ft.realizedPnlUsd >= 0 ? '+' : ''}$${ft.realizedPnlUsd.toFixed(2)}`}
+                              </div>
+                              <div className="text-[10px] text-slate-500">
+                                Fee: ${ft.commissionUsd.toFixed(2)}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
+                    <h3 className="font-display font-bold text-slate-900 text-base flex items-center gap-2">
+                      <Users className="w-4 h-4 text-orange-600" />
+                      Client Copy Trade Subscriptions ({allCopySubs.length})
+                    </h3>
+                    {allCopySubs.length === 0 ? (
+                      <p className="text-xs text-slate-500">No active or past copy subscriptions yet.</p>
+                    ) : (
+                      <div className="space-y-2 max-h-72 overflow-y-auto">
+                        {allCopySubs.map((cs) => (
+                          <div
+                            key={cs.id}
+                            className="p-2.5 rounded-lg border border-slate-200 text-xs flex items-center justify-between gap-2"
+                          >
+                            <div>
+                              <span className="font-semibold text-slate-900">{cs.userName}</span> →{' '}
+                              <span className="font-mono text-orange-700 font-semibold">
+                                {cs.traderName}
+                              </span>{' '}
+                              <span className="text-slate-500">({cs.status})</span>
+                            </div>
+                            <div className="font-mono text-right tabular-nums">
+                              <div className="font-bold text-slate-900">
+                                ${cs.allocatedUsd.toFixed(2)} ({cs.riskMultiplier}x)
+                              </div>
+                              <div className="text-[10px] text-emerald-700">
+                                Claimed: +${cs.claimedProfitUsd.toFixed(2)}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </section>
+            );
+          })()}
 
           {/* TAB 5: DEPOSIT/WITHDRAW ADDRESSES, PAYMENT CHANNELS & MEME COIN */}
           {tab === 'wallets-meme' && (
