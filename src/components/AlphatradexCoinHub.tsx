@@ -25,6 +25,7 @@ import {
   CoinMiningStake,
 } from '../types/platform';
 import { CoinMiningStage3D } from './CoinMiningStage3D';
+import { TermsAgreementCheckbox } from './TermsAndConditionsView';
 
 const THEME_STYLES: Record<
   BannerAdTheme,
@@ -186,6 +187,7 @@ interface AlphatradexCoinHubProps {
   onRequireAuth?: () => void;
   onPrimaryHeroAction?: () => void;
   primaryHeroLabel?: string;
+  onOpenTerms?: () => void;
 }
 
 function formatCountdown(msRemaining: number): string {
@@ -210,6 +212,7 @@ export const AlphatradexCoinHub: React.FC<AlphatradexCoinHubProps> = ({
   onRequireAuth,
   onPrimaryHeroAction,
   primaryHeroLabel,
+  onOpenTerms,
 }) => {
   const {
     authUser,
@@ -239,6 +242,7 @@ export const AlphatradexCoinHub: React.FC<AlphatradexCoinHubProps> = ({
     String(activePlans[0]?.minUsd || 25)
   );
   const [busyMining, setBusyMining] = useState(false);
+  const [acceptedMiningTerms, setAcceptedMiningTerms] = useState(false);
   const [busyTapClaim, setBusyTapClaim] = useState(false);
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
 
@@ -437,6 +441,13 @@ export const AlphatradexCoinHub: React.FC<AlphatradexCoinHubProps> = ({
       return;
     }
     if (!selectedPlan) return;
+    if (!acceptedMiningTerms) {
+      onNotify?.(
+        'err',
+        'Please confirm the Terms & Conditions and Risk Disclosure checkbox before deploying a mining stake.'
+      );
+      return;
+    }
     const amt = Number(stakeAmount);
     if (!Number.isFinite(amt) || amt <= 0) {
       onNotify?.('err', 'Enter a valid USD mining stake amount.');
@@ -790,6 +801,15 @@ export const AlphatradexCoinHub: React.FC<AlphatradexCoinHubProps> = ({
                           </div>
                         </div>
                       </div>
+
+                      {mode === 'vault' && (
+                        <TermsAgreementCheckbox
+                          id="mining-invest-terms-checkbox"
+                          checked={acceptedMiningTerms}
+                          onChange={setAcceptedMiningTerms}
+                          onOpenTerms={() => onOpenTerms?.()}
+                        />
+                      )}
 
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-mono">

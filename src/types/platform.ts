@@ -406,6 +406,8 @@ export interface CopyTradeSubscription {
   updatedAt?: unknown;
 }
 
+export type PackageFundingSource = 'deposit_wallet' | 'income_wallet' | 'combined';
+
 export type NavSection =
   | 'home'
   | 'plans'
@@ -413,4 +415,5 @@ export type NavSection =
   | 'forex'
   | 'pump-fun'
   | 'mentor-referral'
+  | 'terms'
   | 'auth';

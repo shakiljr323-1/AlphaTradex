@@ -19,16 +19,30 @@ function checkIsAdminRoute(): boolean {
   return path === '/admin' || path.endsWith('/admin') || hash === '#/admin';
 }
 
+function checkIsTermsRoute(): boolean {
+  const path = window.location.pathname.replace(/\/+$/, '');
+  const hash = window.location.hash.replace(/\/+$/, '');
+  return path === '/terms' || path.endsWith('/terms') || hash === '#/terms';
+}
+
 const AppRouter: React.FC = () => {
   const { authUser, authReady, platformConfig } = usePlatform();
   const [isAdminRoute, setIsAdminRoute] = useState<boolean>(checkIsAdminRoute);
-  const [activeSection, setActiveSection] = useState<NavSection>('home');
+  const [activeSection, setActiveSection] = useState<NavSection>(() =>
+    checkIsTermsRoute() ? 'terms' : 'home'
+  );
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
-  const [showHomeView, setShowHomeView] = useState(false);
+  const [showHomeView, setShowHomeView] = useState<boolean>(() => checkIsTermsRoute());
   const [dashTargetTab, setDashTargetTab] = useState<'dashboard' | 'forex-market' | 'pump-fun'>('dashboard');
 
   useEffect(() => {
-    const syncRoute = () => setIsAdminRoute(checkIsAdminRoute());
+    const syncRoute = () => {
+      setIsAdminRoute(checkIsAdminRoute());
+      if (checkIsTermsRoute()) {
+        setActiveSection('terms');
+        setShowHomeView(true);
+      }
+    };
     window.addEventListener('popstate', syncRoute);
     window.addEventListener('hashchange', syncRoute);
     return () => {
@@ -138,9 +152,22 @@ const AppRouter: React.FC = () => {
       </div>
       <footer className="relative z-10 border-t border-slate-800/80 bg-[#0B111E]/85 backdrop-blur-md py-5 px-4 sm:px-6 text-xs text-slate-400">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
-          <span>
-            © {new Date().getFullYear()} {platformConfig.companyName}. Institutional Multi-Asset Portal.
-          </span>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <span>
+              © {new Date().getFullYear()} {platformConfig.companyName}. Institutional Multi-Asset Portal.
+            </span>
+            <button
+              type="button"
+              onClick={() => handleSelectSection('terms')}
+              className={`font-semibold transition-colors underline underline-offset-4 ${
+                activeSection === 'terms'
+                  ? 'text-orange-400'
+                  : 'text-slate-300 hover:text-orange-400'
+              }`}
+            >
+              Terms &amp; Conditions
+            </button>
+          </div>
           <span>Crypto Settlement Only: USDT (TRC20) · USDT (ERC20) · SOL</span>
         </div>
       </footer>

@@ -759,14 +759,14 @@ export const ForexMarketView: React.FC<ForexMarketViewProps> = ({
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs font-display font-bold text-white">
-                  Income Wallet Trading
+                  Income Wallet Trading (Profit &amp; Commission)
                 </span>
                 <span className="px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-mono text-[10px] font-bold uppercase">
                   Active
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
-                Deposit into Deposit Wallet → Buy a Package → Trade Forex &amp; grow your earned Income Wallet profit.
+                Deposit into Deposit Wallet → Buy a Plan → Trade Forex strictly with earned Profit &amp; Commission USD to grow your Income Wallet.
               </p>
             </div>
           </div>
@@ -819,7 +819,7 @@ export const ForexMarketView: React.FC<ForexMarketViewProps> = ({
               Package Activation Required Before Forex Trading
             </div>
             <p className="text-[11px] text-amber-200/85">
-              Direct trading from Deposit Wallet is Upcoming. First fund your Deposit Wallet, purchase an AI Trading package, and use the generated Income Wallet balance to trade Forex and grow your income.
+              Direct trading from Deposit Wallet is Upcoming. First fund your Deposit Wallet, purchase an AI Trading plan, and trade Forex strictly using earned Profit &amp; Commission dollars in your Income Wallet.
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -1123,7 +1123,7 @@ export const ForexMarketView: React.FC<ForexMarketViewProps> = ({
                     Market Order · {activePair.symbol}
                   </h3>
                   <p className="text-[11px] text-slate-400">
-                    Orders trade exclusively using earned Income Wallet profit after package purchase; P&amp;L grows your Income Wallet. (Direct Deposit Trade: Upcoming)
+                    Orders trade strictly using Profit &amp; Commission USD in your Income Wallet after package purchase; P&amp;L grows your Income Wallet. (Direct Deposit Trade: Upcoming)
                   </p>
                 </div>
 
@@ -1311,7 +1311,7 @@ export const ForexMarketView: React.FC<ForexMarketViewProps> = ({
 
                 {!isAuthenticated && (
                   <p className="text-[11px] text-slate-400 text-center">
-                    Sign in, buy a package from Deposit Wallet, and trade live using your Income Wallet profits (Direct Trade: Upcoming).
+                    Sign in, deposit to buy a plan, and trade live using your Income Wallet Profit &amp; Commission USD (Direct Deposit Trade: Upcoming).
                   </p>
                 )}
               </div>
@@ -1675,7 +1675,7 @@ export const ForexMarketView: React.FC<ForexMarketViewProps> = ({
                   Alphatradex Copy Trade · Verified Master Strategy Providers
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Mirror institutional FX &amp; Gold desks automatically using your Income Wallet profits earned from packages. Direct Deposit Trade is Upcoming.
+                  Mirror institutional FX &amp; Gold desks automatically using earned Profit &amp; Commission USD in your Income Wallet. Direct Deposit Trade is Upcoming.
                 </p>
               </div>
 

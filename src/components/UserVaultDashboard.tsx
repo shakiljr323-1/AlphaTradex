@@ -43,7 +43,14 @@ import {
   Zap,
 } from 'lucide-react';
 import { usePlatform } from '../context/PlatformContext';
-import { CryptoNetwork, IdType, Investment, NavSection, Withdrawal } from '../types/platform';
+import {
+  CryptoNetwork,
+  IdType,
+  Investment,
+  NavSection,
+  PackageFundingSource,
+  Withdrawal,
+} from '../types/platform';
 import {
   compressImageToDataUrl,
   computeInvestmentMetrics,
@@ -55,6 +62,7 @@ import { AlphatradexCoinHub, BannerAdSlot } from './AlphatradexCoinHub';
 import { ForexMarketView } from './ForexMarketView';
 import { AlphatradexLogo3D } from './AlphatradexLogo3D';
 import { ReferralDashboard } from './ReferralDashboard';
+import { TermsAgreementCheckbox } from './TermsAndConditionsView';
 
 function formatVaultError(raw: string): string {
   if (raw.startsWith('{') && raw.includes('"error"')) {
@@ -118,6 +126,7 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
     signOutUser,
     submitCryptoDeposit,
     activatePackage,
+    transferIncomeToDepositWallet,
     claimInvestmentProfit,
     withdrawInstantProfit,
     requestManualCapitalWithdrawal,
@@ -139,6 +148,12 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
     }
   });
   const [busyAction, setBusyAction] = useState(false);
+  const [acceptedPackageTerms, setAcceptedPackageTerms] = useState(false);
+  const [acceptedMemeTerms, setAcceptedMemeTerms] = useState(false);
+  const [packageFundingSource, setPackageFundingSource] =
+    useState<PackageFundingSource>('deposit_wallet');
+  const [walletTransferAmount, setWalletTransferAmount] = useState('10');
+  const [showWalletTransferBar, setShowWalletTransferBar] = useState(false);
   const [copiedText, setCopiedText] = useState('');
   const [selectedBreakdown, setSelectedBreakdown] = useState<Withdrawal | null>(null);
   const [retryingSync, setRetryingSync] = useState(false);
@@ -1159,118 +1174,259 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
           {/* VIEW: MAIN DASHBOARD */}
           {activeNav === 'dashboard' && (
             <div className="space-y-5">
-              {/* Row 1: 3 Wallet Cards (Deposit Wallet, Income Wallet, Pump.fun Wallet) */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* Deposit Wallet */}
-                <div className="bg-[#0B111E]/78 backdrop-blur-md border border-slate-700/70 rounded-2xl p-5 relative overflow-hidden flex flex-col justify-between min-h-[126px] shadow-xl">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                        <Wallet className="w-3.5 h-3.5 text-sky-400" />
-                        <span>Deposit Wallet</span>
-                      </div>
-                      <div className="font-mono font-extrabold text-2xl text-white tabular-nums mt-2">
-                        {userProfile.usdBalance.toFixed(2)} <span className="text-sky-400 text-base">₮</span>
-                      </div>
-                      <div className="text-[10px] text-slate-400 mt-1">
-                        For AI Plans &amp; Mining · Direct FX: <span className="text-amber-300 font-semibold">Upcoming</span>
-                      </div>
-                    </div>
-                    <div className="w-10 h-10 rounded-full bg-sky-500/15 border border-sky-500/30 text-sky-400 flex items-center justify-center">
-                      <Lock className="w-4 h-4" />
-                    </div>
+              {/* Row 1: Wallet Overview Section (Deposit Wallet, Income Wallet, Pump.fun Wallet + Transfer to Package Funding) */}
+              <section aria-labelledby="wallet-overview-heading" className="space-y-3.5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2
+                      id="wallet-overview-heading"
+                      className="font-display font-bold text-white text-base sm:text-lg tracking-tight flex items-center gap-2"
+                    >
+                      <Wallet className="w-4 h-4 text-orange-400" />
+                      <span>Wallet Overview</span>
+                    </h2>
+                    <p className="text-xs text-slate-400">
+                      Combined Vault Liquidity:{' '}
+                      <strong className="font-mono text-slate-200 tabular-nums">
+                        ${(userProfile.usdBalance + userProfile.profitBalance).toFixed(2)}
+                      </strong>{' '}
+                      · Transfer from Income Wallet or fund AI trading packages directly from either balance.
+                    </p>
                   </div>
-                  <div className="flex items-center justify-between pt-3 text-xs">
+                  <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => selectNav('deposit')}
-                      className="text-sky-400 font-semibold hover:underline inline-flex items-center gap-1"
+                      onClick={() => setShowWalletTransferBar((v) => !v)}
+                      className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-900/85 hover:border-emerald-500/60 text-xs font-semibold text-slate-200 inline-flex items-center gap-1.5 transition-colors"
                     >
-                      Deposit Crypto <ArrowRight className="w-3 h-3" />
+                      <RefreshCw className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Transfer Income → Deposit</span>
                     </button>
                     <button
                       type="button"
-                      onClick={() => selectNav('activate-trading')}
-                      className="text-slate-300 hover:text-white font-medium"
+                      onClick={() => {
+                        setPackageFundingSource(
+                          userProfile.usdBalance >= 100
+                            ? 'deposit_wallet'
+                            : userProfile.profitBalance >= 100
+                            ? 'income_wallet'
+                            : 'combined'
+                        );
+                        selectNav('activate-trading');
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors"
                     >
-                      Buy Plan
-                    </button>
-                  </div>
-                </div>
-
-                {/* Income / Profit Wallet */}
-                <div className="bg-[#0B111E]/78 backdrop-blur-md border border-slate-700/70 rounded-2xl p-5 relative overflow-hidden flex flex-col justify-between min-h-[126px] shadow-xl">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                        <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
-                        <span>Income Wallet</span>
-                      </div>
-                      <div className="font-mono font-extrabold text-2xl text-white tabular-nums mt-2">
-                        {userProfile.profitBalance.toFixed(2)}{' '}
-                        <span className="text-emerald-400 text-base">₮</span>
-                      </div>
-                      <div className="text-[10px] text-slate-400 mt-1">
-                        Trade Forex &amp; Copy Trade to grow profit or withdraw
-                      </div>
-                    </div>
-                    <div className="w-10 h-10 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center">
-                      <Wallet className="w-4 h-4" />
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between pt-3 text-xs">
-                    <button
-                      type="button"
-                      onClick={() => selectNav('withdraw')}
-                      className="text-emerald-400 font-semibold hover:underline inline-flex items-center gap-1"
-                    >
-                      Withdraw Instant (${platformConfig.minWithdrawalUsd} Min) <ArrowRight className="w-3 h-3" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => selectNav('forex-market')}
-                      className="text-orange-400 hover:underline font-semibold"
-                    >
-                      Forex Trade
+                      <Zap className="w-3.5 h-3.5" />
+                      <span>Fund AI Package</span>
                     </button>
                   </div>
                 </div>
 
-                {/* Pump.fun Coin Wallet */}
-                <div className="bg-[#0B111E]/78 backdrop-blur-md border border-slate-700/70 rounded-2xl p-5 relative overflow-hidden flex flex-col justify-between min-h-[126px] shadow-xl">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                        <Coins className="w-3.5 h-3.5 text-orange-400" />
-                        <span>Pump.fun (${platformConfig.pumpFunToken.ticker})</span>
+                {showWalletTransferBar && (
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      const amt = Number(walletTransferAmount);
+                      if (!Number.isFinite(amt) || amt < 1) {
+                        notify('err', 'Enter at least $1.00 USD to transfer.');
+                        return;
+                      }
+                      setBusyAction(true);
+                      try {
+                        await transferIncomeToDepositWallet(amt);
+                        notify(
+                          'ok',
+                          `Transferred $${amt.toFixed(2)} from Income Wallet to Deposit Wallet.`
+                        );
+                        setShowWalletTransferBar(false);
+                      } catch (err) {
+                        notify('err', (err as Error).message);
+                      } finally {
+                        setBusyAction(false);
+                      }
+                    }}
+                    className="bg-[#0B111E]/90 backdrop-blur-md border border-emerald-500/40 rounded-2xl p-4 flex flex-wrap items-end justify-between gap-3 shadow-xl"
+                  >
+                    <div className="space-y-1 flex-1 min-w-[220px]">
+                      <div className="text-xs font-semibold text-white">
+                        Internal Wallet Transfer: Income Wallet → Deposit Wallet
                       </div>
-                      <div className="font-mono font-extrabold text-2xl text-white tabular-nums mt-2">
-                        {totalMemeTokens.toLocaleString()}{' '}
-                        <span className="text-orange-400 text-sm">${platformConfig.pumpFunToken.ticker}</span>
+                      <p className="text-[11px] text-slate-400">
+                        Available Income Wallet:{' '}
+                        <strong className="font-mono text-emerald-400">
+                          ${userProfile.profitBalance.toFixed(2)}
+                        </strong>{' '}
+                        · Move profits into Deposit Wallet to fund AI Trading &amp; Mining packages.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex items-center gap-1">
+                        {[0.25, 0.5, 1].map((ratio) => (
+                          <button
+                            key={ratio}
+                            type="button"
+                            onClick={() =>
+                              setWalletTransferAmount(
+                                Math.max(0, Number((userProfile.profitBalance * ratio).toFixed(2))).toString()
+                              )
+                            }
+                            className="px-2 py-1.5 rounded-lg border border-slate-700 bg-slate-900 text-[11px] font-mono text-slate-300 hover:border-emerald-500/60"
+                          >
+                            {ratio === 1 ? 'MAX' : `${ratio * 100}%`}
+                          </button>
+                        ))}
+                      </div>
+                      <input
+                        type="number"
+                        min={1}
+                        step="0.01"
+                        required
+                        value={walletTransferAmount}
+                        onChange={(e) => setWalletTransferAmount(e.target.value)}
+                        aria-label="Transfer amount USD"
+                        className="w-28 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-950 text-white font-mono text-xs tabular-nums"
+                      />
+                      <button
+                        type="submit"
+                        disabled={busyAction || userProfile.profitBalance < 1}
+                        className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold whitespace-nowrap"
+                      >
+                        Transfer to Deposit
+                      </button>
+                    </div>
+                  </form>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Deposit Wallet Card */}
+                  <div className="bg-[#0B111E]/78 backdrop-blur-md border border-sky-500/35 rounded-2xl p-5 relative overflow-hidden flex flex-col justify-between min-h-[136px] shadow-xl">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="text-[11px] font-semibold uppercase tracking-wider text-sky-300 flex items-center gap-1.5">
+                          <Wallet className="w-3.5 h-3.5 text-sky-400" />
+                          <span>Deposit Wallet</span>
+                        </div>
+                        <div className="font-mono font-extrabold text-2xl text-white tabular-nums mt-2">
+                          {userProfile.usdBalance.toFixed(2)} <span className="text-sky-400 text-base">₮</span>
+                        </div>
+                        <div className="text-[10px] text-slate-400 mt-1">
+                          For AI Plans &amp; Mining · Direct FX: <span className="text-amber-300 font-semibold">Upcoming</span>
+                        </div>
+                      </div>
+                      <div className="w-10 h-10 rounded-full bg-sky-500/15 border border-sky-500/30 text-sky-400 flex items-center justify-center shrink-0">
+                        <Lock className="w-4 h-4" />
                       </div>
                     </div>
-                    <div className="w-10 h-10 rounded-full bg-orange-500/15 border border-orange-500/30 text-orange-400 flex items-center justify-center">
-                      <Rocket className="w-4 h-4" />
+                    <div className="flex items-center justify-between pt-3 text-xs border-t border-slate-800/70 mt-3">
+                      <button
+                        type="button"
+                        onClick={() => selectNav('deposit')}
+                        className="text-sky-400 font-semibold hover:underline inline-flex items-center gap-1"
+                      >
+                        Deposit Crypto <ArrowRight className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPackageFundingSource('deposit_wallet');
+                          selectNav('activate-trading');
+                        }}
+                        className="text-slate-200 hover:text-orange-400 font-semibold"
+                      >
+                        Fund AI Package
+                      </button>
                     </div>
                   </div>
-                  <div className="flex items-center justify-between pt-3 text-xs">
-                    <button
-                      type="button"
-                      onClick={() => selectNav('pump-fun')}
-                      className="text-orange-400 font-semibold hover:underline inline-flex items-center gap-1"
-                    >
-                      Mine &amp; Allocate <ArrowRight className="w-3 h-3" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => selectNav('p2p-transfers')}
-                      className="text-slate-400 hover:text-white"
-                    >
-                      P2P Send
-                    </button>
+
+                  {/* Income Wallet Card */}
+                  <div className="bg-[#0B111E]/78 backdrop-blur-md border border-emerald-500/35 rounded-2xl p-5 relative overflow-hidden flex flex-col justify-between min-h-[136px] shadow-xl">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="text-[11px] font-semibold uppercase tracking-wider text-emerald-300 flex items-center gap-1.5">
+                          <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Income Wallet</span>
+                        </div>
+                        <div className="font-mono font-extrabold text-2xl text-white tabular-nums mt-2">
+                          {userProfile.profitBalance.toFixed(2)}{' '}
+                          <span className="text-emerald-400 text-base">₮</span>
+                        </div>
+                        <div className="text-[10px] text-slate-400 mt-1">
+                          Profit &amp; Commission · Fund AI Plans, Trade Forex or Withdraw
+                        </div>
+                      </div>
+                      <div className="w-10 h-10 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0">
+                        <Wallet className="w-4 h-4" />
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-3 text-xs border-t border-slate-800/70 mt-3">
+                      <button
+                        type="button"
+                        onClick={() => selectNav('withdraw')}
+                        className="text-emerald-400 font-semibold hover:underline inline-flex items-center gap-1"
+                      >
+                        Withdraw (${platformConfig.minWithdrawalUsd} Min) <ArrowRight className="w-3 h-3" />
+                      </button>
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPackageFundingSource('income_wallet');
+                            selectNav('activate-trading');
+                          }}
+                          className="text-slate-200 hover:text-orange-400 font-semibold"
+                        >
+                          Fund Plan
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => selectNav('forex-market')}
+                          className="text-orange-400 hover:underline font-semibold"
+                        >
+                          Forex Trade
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Pump.fun Coin Wallet Card */}
+                  <div className="bg-[#0B111E]/78 backdrop-blur-md border border-slate-700/70 rounded-2xl p-5 relative overflow-hidden flex flex-col justify-between min-h-[136px] shadow-xl">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                          <Coins className="w-3.5 h-3.5 text-orange-400" />
+                          <span>Pump.fun (${platformConfig.pumpFunToken.ticker})</span>
+                        </div>
+                        <div className="font-mono font-extrabold text-2xl text-white tabular-nums mt-2">
+                          {totalMemeTokens.toLocaleString()}{' '}
+                          <span className="text-orange-400 text-sm">${platformConfig.pumpFunToken.ticker}</span>
+                        </div>
+                        <div className="text-[10px] text-slate-400 mt-1">
+                          ASIC Mining &amp; Launchpad Allocations
+                        </div>
+                      </div>
+                      <div className="w-10 h-10 rounded-full bg-orange-500/15 border border-orange-500/30 text-orange-400 flex items-center justify-center shrink-0">
+                        <Rocket className="w-4 h-4" />
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between pt-3 text-xs border-t border-slate-800/70 mt-3">
+                      <button
+                        type="button"
+                        onClick={() => selectNav('pump-fun')}
+                        className="text-orange-400 font-semibold hover:underline inline-flex items-center gap-1"
+                      >
+                        Mine &amp; Allocate <ArrowRight className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => selectNav('p2p-transfers')}
+                        className="text-slate-400 hover:text-white"
+                      >
+                        P2P Send
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
+              </section>
 
               {/* Row 2: Total Running AI Trading Exposure Banner */}
               <div className="bg-[#0B111E]/78 backdrop-blur-md border border-slate-700/70 rounded-2xl px-5 py-4 flex flex-wrap items-center justify-between gap-4 shadow-xl">
@@ -1585,28 +1741,117 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
           {(activeNav === 'my-packages' || activeNav === 'capital-withdraw') && renderInvestmentsTable()}
 
           {/* VIEW: ACTIVATE TRADING (200-DAY AI PACKAGES) */}
-          {activeNav === 'activate-trading' && (
+          {activeNav === 'activate-trading' && (() => {
+            const combinedWalletBalance = Number(
+              (userProfile.usdBalance + userProfile.profitBalance).toFixed(2)
+            );
+            const selectedWalletBalance =
+              packageFundingSource === 'deposit_wallet'
+                ? userProfile.usdBalance
+                : packageFundingSource === 'income_wallet'
+                ? userProfile.profitBalance
+                : combinedWalletBalance;
+            const selectedWalletLabel =
+              packageFundingSource === 'deposit_wallet'
+                ? 'Deposit Wallet'
+                : packageFundingSource === 'income_wallet'
+                ? 'Income Wallet'
+                : 'Combined (Deposit + Income)';
+
+            return (
             <section className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="font-display font-bold text-white text-lg">
-                    Activate 200 Profit-Day AI Package
+                    Fund &amp; Activate 200 Profit-Day AI Package
                   </h2>
                   <p className="text-xs text-slate-300">
-                    AI trading &amp; L1–L3 referral commissions active on all tiers. Earning days run Mon–Fri (~280 calendar days total).
+                    Choose your funding wallet (Deposit Wallet, Income Wallet, or both combined) to activate AI trading &amp; L1–L3 referral commissions.
                   </p>
                 </div>
-                <div className="text-xs font-mono bg-[#0B111E]/80 backdrop-blur-md border border-slate-700/70 px-3 py-1.5 rounded-lg text-slate-200">
-                  Deposit Wallet: <strong className="text-white">${userProfile.usdBalance.toFixed(2)}</strong>
+                <div className="flex flex-wrap items-center gap-2 text-xs font-mono">
+                  <span className="bg-[#0B111E]/80 backdrop-blur-md border border-sky-500/40 px-3 py-1.5 rounded-lg text-slate-200">
+                    Deposit Wallet: <strong className="text-sky-300">${userProfile.usdBalance.toFixed(2)}</strong>
+                  </span>
+                  <span className="bg-[#0B111E]/80 backdrop-blur-md border border-emerald-500/40 px-3 py-1.5 rounded-lg text-slate-200">
+                    Income Wallet: <strong className="text-emerald-300">${userProfile.profitBalance.toFixed(2)}</strong>
+                  </span>
                 </div>
               </div>
+
+              {/* Wallet Funding Source Selector */}
+              <div className="bg-[#0B111E]/82 backdrop-blur-md border border-slate-700/75 rounded-2xl p-4 space-y-3 shadow-xl">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-white">
+                    Select Package Funding Source
+                  </span>
+                  <span className="text-[11px] font-mono text-slate-400">
+                    Active Source Balance:{' '}
+                    <strong className="text-orange-400">${selectedWalletBalance.toFixed(2)}</strong>
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  {[
+                    {
+                      id: 'deposit_wallet' as PackageFundingSource,
+                      title: 'Deposit Wallet',
+                      balance: userProfile.usdBalance,
+                      hint: 'Primary crypto deposits',
+                      accent: 'border-sky-500 bg-sky-500/15 text-sky-200',
+                    },
+                    {
+                      id: 'income_wallet' as PackageFundingSource,
+                      title: 'Income Wallet',
+                      balance: userProfile.profitBalance,
+                      hint: 'Reinvest earned profits & commissions',
+                      accent: 'border-emerald-500 bg-emerald-500/15 text-emerald-200',
+                    },
+                    {
+                      id: 'combined' as PackageFundingSource,
+                      title: 'Combined Wallets',
+                      balance: combinedWalletBalance,
+                      hint: 'Auto-uses Deposit + Income balance',
+                      accent: 'border-orange-500 bg-orange-500/15 text-orange-200',
+                    },
+                  ].map((opt) => {
+                    const active = packageFundingSource === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => setPackageFundingSource(opt.id)}
+                        className={`p-3 rounded-xl border text-left transition-colors ${
+                          active
+                            ? opt.accent
+                            : 'border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-600'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-bold">{opt.title}</span>
+                          <span className="font-mono font-bold text-xs tabular-nums">
+                            ${opt.balance.toFixed(2)}
+                          </span>
+                        </div>
+                        <div className="text-[11px] opacity-80 mt-0.5">{opt.hint}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <TermsAgreementCheckbox
+                id="invest-package-terms-checkbox"
+                checked={acceptedPackageTerms}
+                onChange={setAcceptedPackageTerms}
+                onOpenTerms={() => onOpenHomePage?.('terms')}
+              />
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 {platformConfig.packages.map((pkg) => {
                   const dailyUsd = (pkg.capital * pkg.dailyPercent) / 100;
                   const totalTarget = dailyUsd * pkg.profitDays;
                   const lockDays = pkg.id === 'elite' ? platformConfig.eliteCapitalLockDays : pkg.capitalLockDays;
-                  const canAfford = userProfile.usdBalance >= pkg.capital;
+                  const canAfford = selectedWalletBalance >= pkg.capital;
 
                   return (
                     <div
@@ -1664,13 +1909,28 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                         onClick={async () => {
                           if (!canAfford) {
                             selectNav('deposit');
-                            notify('err', `Deposit at least $${pkg.capital} via USDT or SOL to activate ${pkg.name}.`);
+                            notify(
+                              'err',
+                              `Insufficient ${selectedWalletLabel} balance ($${selectedWalletBalance.toFixed(
+                                2
+                              )}). Deposit $${(pkg.capital - selectedWalletBalance).toFixed(2)} more or select Combined Wallets.`
+                            );
+                            return;
+                          }
+                          if (!acceptedPackageTerms) {
+                            notify(
+                              'err',
+                              'Please check the Terms & Conditions and Risk Disclosure agreement above before investing in a package.'
+                            );
                             return;
                           }
                           setBusyAction(true);
                           try {
-                            await activatePackage(pkg);
-                            notify('ok', `${pkg.name} ($${pkg.capital}) activated! Mon–Fri AI trading is now live.`);
+                            await activatePackage(pkg, packageFundingSource);
+                            notify(
+                              'ok',
+                              `${pkg.name} ($${pkg.capital}) funded from ${selectedWalletLabel}! Mon–Fri AI trading is now live.`
+                            );
                             selectNav('dashboard');
                           } catch (err) {
                             notify('err', (err as Error).message);
@@ -1687,7 +1947,7 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                         {platformConfig.globalPaused
                           ? 'Platform Paused'
                           : canAfford
-                          ? `Activate ${pkg.name} ($${pkg.capital})`
+                          ? `Fund & Activate ($${pkg.capital})`
                           : `Deposit to Activate ($${pkg.capital})`}
                       </button>
                     </div>
@@ -1695,17 +1955,24 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                 })}
               </div>
             </section>
-          )}
+            );
+          })()}
 
           {/* VIEW: DEPOSIT & REPORT */}
           {(activeNav === 'deposit' || activeNav === 'deposit-report') && (
             <section className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               <div className="lg:col-span-5 bg-[#0B111E]/78 backdrop-blur-md border border-slate-700/70 rounded-2xl p-6 space-y-4 shadow-xl">
-                <div>
-                  <h2 className="font-display font-bold text-white text-lg">Deposit Funds to Vault</h2>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Select any active payment channel below and submit your transaction reference ID.
-                  </p>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <h2 className="font-display font-bold text-white text-lg">Deposit Funds to Deposit Wallet</h2>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Fund your Deposit Wallet to buy AI Trading &amp; Mining plans. Direct Forex trading from Deposit Wallet is{' '}
+                      <span className="text-amber-300 font-semibold">Upcoming</span>.
+                    </p>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-lg bg-sky-500/15 border border-sky-500/35 font-mono text-xs text-sky-300 shrink-0">
+                    ${userProfile.usdBalance.toFixed(2)}
+                  </span>
                 </div>
 
                 {enabledDepositMethods.length === 0 ? (
@@ -1884,6 +2151,54 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
           {/* VIEW: WITHDRAW, INCOME WALLET & P2P TRANSFERS */}
           {(activeNav === 'income-wallet' || activeNav === 'p2p-transfers' || activeNav === 'withdraw') && (
             <section className="space-y-6">
+              {/* Dual Wallet Overview Strip */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-[#0B111E]/78 backdrop-blur-md border border-emerald-500/40 rounded-2xl p-4 flex items-center justify-between gap-3 shadow-xl">
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-emerald-400">
+                      Income Wallet (Profit &amp; Commission)
+                    </div>
+                    <div className="font-mono font-extrabold text-2xl text-white tabular-nums mt-1">
+                      ${userProfile.profitBalance.toFixed(2)}
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Earned from packages &amp; referral commissions. Trade Forex to grow balance or withdraw.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => selectNav('forex-market')}
+                    className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold whitespace-nowrap shrink-0 transition-colors"
+                  >
+                    Forex Trade
+                  </button>
+                </div>
+
+                <div className="bg-[#0B111E]/78 backdrop-blur-md border border-slate-700/70 rounded-2xl p-4 flex items-center justify-between gap-3 shadow-xl">
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-sky-400 flex items-center gap-2">
+                      <span>Deposit Wallet (Plans Only)</span>
+                      <span className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 font-mono text-[10px]">
+                        Direct Trade: Upcoming
+                      </span>
+                    </div>
+                    <div className="font-mono font-extrabold text-2xl text-white tabular-nums mt-1">
+                      ${userProfile.usdBalance.toFixed(2)}
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Deposit funds here first to activate AI Trading plans and generate Income Wallet profits.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => selectNav('activate-trading')}
+                    className="px-3 py-2 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold whitespace-nowrap shrink-0 transition-colors"
+                  >
+                    Buy Plan
+                  </button>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="bg-[#0B111E]/78 backdrop-blur-md border border-slate-700/70 rounded-2xl p-6 space-y-4 shadow-xl">
                   <div className="flex items-start justify-between gap-2">
@@ -2254,6 +2569,7 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
               <AlphatradexCoinHub
                 mode="vault"
                 onNotify={notify}
+                onOpenTerms={() => onOpenHomePage?.('terms')}
                 onPrimaryHeroAction={() => {
                   buyTokenInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                   buyTokenInputRef.current?.focus();
@@ -2332,6 +2648,13 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                     }
                     if (memePayMethod === 'SOL_WALLET' && !memeSolTx.trim()) {
                       notify('err', 'Paste your Solana wallet transfer signature for SOL Direct allocation.');
+                      return;
+                    }
+                    if (!acceptedMemeTerms) {
+                      notify(
+                        'err',
+                        'Please agree to the Terms & Conditions and Risk Disclosure checkbox before allocating funds.'
+                      );
                       return;
                     }
                     setBusyAction(true);
@@ -2419,6 +2742,13 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                       />
                     </div>
                   )}
+
+                  <TermsAgreementCheckbox
+                    id="invest-meme-terms-checkbox"
+                    checked={acceptedMemeTerms}
+                    onChange={setAcceptedMemeTerms}
+                    onOpenTerms={() => onOpenHomePage?.('terms')}
+                  />
 
                   <button
                     type="submit"
@@ -2796,6 +3126,23 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
               </div>
             </section>
           )}
+
+          {/* Vault Portal Footer */}
+          <footer className="pt-4 mt-4 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+              <span>© {new Date().getFullYear()} {platformConfig.companyName}</span>
+              {onOpenHomePage && (
+                <button
+                  type="button"
+                  onClick={() => onOpenHomePage('terms')}
+                  className="font-semibold text-slate-300 hover:text-orange-400 underline underline-offset-4 transition-colors"
+                >
+                  Terms &amp; Conditions
+                </button>
+              )}
+            </div>
+            <span>Domain: alphatradex.pro · Crypto Settlement Only</span>
+          </footer>
         </main>
       </div>
 

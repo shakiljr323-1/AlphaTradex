@@ -48,6 +48,7 @@ import {
   MemeCoinInvestment,
   MlmCommission,
   P2PTransfer,
+  PackageFundingSource,
   PaymentMethodConfig,
   PlatformConfig,
   ReferralLinkRecord,
@@ -126,7 +127,8 @@ interface PlatformContextValue {
     amountUsd: number;
     txId: string;
   }) => Promise<void>;
-  activatePackage: (pkg: InvestmentPackage) => Promise<void>;
+  activatePackage: (pkg: InvestmentPackage, fundingSource?: PackageFundingSource) => Promise<void>;
+  transferIncomeToDepositWallet: (amountUsd: number) => Promise<void>;
   claimInvestmentProfit: (investment: Investment) => Promise<number>;
   withdrawInstantProfit: (params: {
     amountUsd: number;
@@ -1157,11 +1159,33 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  const activatePackage = async (pkg: InvestmentPackage) => {
+  const activatePackage = async (
+    pkg: InvestmentPackage,
+    fundingSource: PackageFundingSource = 'deposit_wallet'
+  ) => {
     if (!authUser || !userProfile) throw new Error('Authentication required.');
     if (platformConfig.globalPaused) throw new Error('Trading allocations are temporarily paused by administration.');
-    if (userProfile.usdBalance < pkg.capital) {
-      throw new Error(`Insufficient Deposit Wallet balance. Deposit $${(pkg.capital - userProfile.usdBalance).toFixed(2)} more.`);
+
+    if (fundingSource === 'deposit_wallet' && userProfile.usdBalance < pkg.capital) {
+      throw new Error(
+        `Insufficient Deposit Wallet balance. Deposit $${(pkg.capital - userProfile.usdBalance).toFixed(2)} more or switch funding source.`
+      );
+    }
+    if (fundingSource === 'income_wallet' && userProfile.profitBalance < pkg.capital) {
+      throw new Error(
+        `Insufficient Income Wallet balance. Need $${(pkg.capital - userProfile.profitBalance).toFixed(2)} more or use Combined/Deposit Wallet.`
+      );
+    }
+    if (
+      fundingSource === 'combined' &&
+      userProfile.usdBalance + userProfile.profitBalance < pkg.capital
+    ) {
+      throw new Error(
+        `Insufficient combined Deposit + Income Wallet balance. Need $${(
+          pkg.capital -
+          (userProfile.usdBalance + userProfile.profitBalance)
+        ).toFixed(2)} more.`
+      );
     }
 
     const invId = makeId('inv');
@@ -1173,7 +1197,26 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const userSnap = await tx.get(userRef);
         if (!userSnap.exists()) throw new Error('Profile missing.');
         const current = userSnap.data() as UserProfile;
-        if (current.usdBalance < pkg.capital) throw new Error('Insufficient USD balance.');
+
+        let deductDeposit = 0;
+        let deductIncome = 0;
+        if (fundingSource === 'deposit_wallet') {
+          if (current.usdBalance < pkg.capital) {
+            throw new Error('Insufficient Deposit Wallet balance.');
+          }
+          deductDeposit = pkg.capital;
+        } else if (fundingSource === 'income_wallet') {
+          if (current.profitBalance < pkg.capital) {
+            throw new Error('Insufficient Income Wallet balance.');
+          }
+          deductIncome = pkg.capital;
+        } else {
+          if (current.usdBalance + current.profitBalance < pkg.capital) {
+            throw new Error('Insufficient combined wallet balance.');
+          }
+          deductDeposit = Number(Math.min(current.usdBalance, pkg.capital).toFixed(2));
+          deductIncome = Number((pkg.capital - deductDeposit).toFixed(2));
+        }
 
         // Read uplines before writing
         const uplines: { uid: string; level: number; rate: number; snapData: UserProfile }[] = [];
@@ -1199,7 +1242,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           }
         }
 
-        const nextUsdBalance = Number((current.usdBalance - pkg.capital).toFixed(2));
+        const nextUsdBalance = Number(Math.max(0, current.usdBalance - deductDeposit).toFixed(2));
+        const nextProfitBalance = Number(Math.max(0, current.profitBalance - deductIncome).toFixed(2));
         const nextTotalInvested = Number((current.totalInvested + pkg.capital).toFixed(2));
         const startedAtMs = Date.now();
         const totalProfitDays = pkg.profitDays || platformConfig.totalProfitDays;
@@ -1208,6 +1252,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         // Deduct capital & record investment
         tx.update(userRef, {
           usdBalance: nextUsdBalance,
+          profitBalance: nextProfitBalance,
           totalInvested: nextTotalInvested,
           updatedAt: serverTimestamp(),
         });
@@ -1297,6 +1342,39 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `investments/${invId}`);
+    }
+  };
+
+  const transferIncomeToDepositWallet = async (amountUsd: number) => {
+    if (!authUser || !userProfile) throw new Error('Authentication required.');
+    const amount = Number(Number(amountUsd).toFixed(2));
+    if (!Number.isFinite(amount) || amount < 1) {
+      throw new Error('Minimum internal wallet transfer is $1.00 USD.');
+    }
+    if (userProfile.profitBalance < amount) {
+      throw new Error(
+        `Insufficient Income Wallet balance. Available: $${userProfile.profitBalance.toFixed(2)}.`
+      );
+    }
+
+    try {
+      await runTransaction(db, async (tx) => {
+        const userRef = doc(db, 'users', authUser.uid);
+        const userSnap = await tx.get(userRef);
+        if (!userSnap.exists()) throw new Error('Profile missing.');
+        const cur = userSnap.data() as UserProfile;
+        if (cur.profitBalance < amount) {
+          throw new Error('Insufficient Income Wallet balance.');
+        }
+
+        tx.update(userRef, {
+          usdBalance: Number((cur.usdBalance + amount).toFixed(2)),
+          profitBalance: Number((cur.profitBalance - amount).toFixed(2)),
+          updatedAt: serverTimestamp(),
+        });
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `users/${authUser.uid}`);
     }
   };
 
@@ -2690,6 +2768,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         signOutUser,
         submitCryptoDeposit,
         activatePackage,
+        transferIncomeToDepositWallet,
         claimInvestmentProfit,
         withdrawInstantProfit,
         requestManualCapitalWithdrawal,

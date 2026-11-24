@@ -30,6 +30,7 @@ import { compressImageToDataUrl, isWeekendDate } from '../utils/investmentMath';
 import { AlphatradexCoinHub, BannerAdSlot } from './AlphatradexCoinHub';
 import { ForexMarketView } from './ForexMarketView';
 import { AlphatradexLogo3D } from './AlphatradexLogo3D';
+import { TermsAgreementCheckbox, TermsAndConditionsView } from './TermsAndConditionsView';
 
 interface FrontPageProps {
   activeSection: NavSection;
@@ -72,6 +73,7 @@ export const FrontPage: React.FC<FrontPageProps> = ({
   const [errorMsg, setErrorMsg] = useState('');
   const [providerNotEnabled, setProviderNotEnabled] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
 
   // Dedicated Page interactive states
   const [copiedMint, setCopiedMint] = useState(false);
@@ -173,6 +175,12 @@ export const FrontPage: React.FC<FrontPageProps> = ({
       setErrorMsg('Please upload both your Identity Document Photo and Client Portrait Photo for KYC.');
       return;
     }
+    if (!acceptedTerms) {
+      setErrorMsg(
+        'Please read and agree to the Terms & Conditions and Privacy Policy before registering.'
+      );
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -212,6 +220,12 @@ export const FrontPage: React.FC<FrontPageProps> = ({
     setErrorMsg('');
     setProviderNotEnabled(false);
     setSuccessMsg('');
+    if (authMode === 'signup' && !acceptedTerms) {
+      setErrorMsg(
+        'Please read and agree to the Terms & Conditions and Privacy Policy checkbox below before continuing with registration.'
+      );
+      return;
+    }
     setSubmitting(true);
     try {
       const kycDraft =
@@ -672,6 +686,14 @@ export const FrontPage: React.FC<FrontPageProps> = ({
                       </button>
                     </div>
                   </div>
+
+                  <TermsAgreementCheckbox
+                    id="signup-terms-checkbox"
+                    variant="light"
+                    checked={acceptedTerms}
+                    onChange={setAcceptedTerms}
+                    onOpenTerms={() => onSelectSection('terms')}
+                  />
 
                   <button
                     type="submit"
@@ -1351,6 +1373,14 @@ export const FrontPage: React.FC<FrontPageProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* 7. DEDICATED TERMS & CONDITIONS PAGE */}
+      {activeSection === 'terms' && (
+        <TermsAndConditionsView
+          onBack={() => onSelectSection('home')}
+          backLabel={authUser && onOpenDashboard ? 'Back to Home Overview' : 'Back to Home Overview'}
+        />
       )}
     </main>
   );
