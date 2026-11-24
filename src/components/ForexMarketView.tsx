@@ -7,6 +7,7 @@ import {
   Globe,
   History,
   Layers,
+  Lock,
   RefreshCw,
   Search,
   Shield,
@@ -14,6 +15,7 @@ import {
   TrendingDown,
   TrendingUp,
   Users,
+  Wallet,
   XCircle,
 } from 'lucide-react';
 import { DEFAULT_PLATFORM_CONFIG } from '../constants/defaults';
@@ -153,6 +155,8 @@ interface ForexMarketViewProps {
   mode?: 'vault' | 'preview';
   onNotify?: (type: 'ok' | 'err', message: string) => void;
   onRequireAuth?: () => void;
+  onNavigateToDeposit?: () => void;
+  onNavigateToPackages?: () => void;
 }
 
 export const ForexMarketView: React.FC<ForexMarketViewProps> = ({
@@ -160,11 +164,14 @@ export const ForexMarketView: React.FC<ForexMarketViewProps> = ({
   mode = 'vault',
   onNotify,
   onRequireAuth,
+  onNavigateToDeposit,
+  onNavigateToPackages,
 }) => {
   const {
     authUser,
     userProfile,
     platformConfig,
+    investments,
     forexTrades,
     copyTradeSubscriptions,
     openForexTrade,
@@ -185,8 +192,14 @@ export const ForexMarketView: React.FC<ForexMarketViewProps> = ({
     [forexCfg.copyTraders]
   );
 
-  const effectiveBalance = userProfile?.usdBalance ?? vaultBalanceUsd ?? 0;
+  const incomeBalance = userProfile?.profitBalance ?? vaultBalanceUsd ?? 0;
+  const depositBalance = userProfile?.usdBalance ?? 0;
+  const effectiveBalance = incomeBalance;
   const isAuthenticated = Boolean(authUser && userProfile && mode === 'vault');
+  const hasPurchasedPackage = useMemo(
+    () => investments.length > 0 || (userProfile?.totalInvested ?? 0) > 0,
+    [investments.length, userProfile?.totalInvested]
+  );
 
   const [terminalTab, setTerminalTab] = useState<TerminalTab>('terminal');
   const [selectedSymbol, setSelectedSymbol] = useState<string>('EUR/USD');
@@ -510,6 +523,13 @@ export const ForexMarketView: React.FC<ForexMarketViewProps> = ({
       onRequireAuth?.();
       return;
     }
+    if (!hasPurchasedPackage) {
+      emitToast(
+        'err',
+        'Buy an AI Trading package from your Deposit Wallet first. Forex trading only uses earned Income Wallet profits (Direct Deposit Trade is Upcoming).'
+      );
+      return;
+    }
     const entryPrice = direction === 'BUY' ? askPrice : bidPrice;
     const slPrice =
       parsedSlPips > 0
@@ -603,6 +623,13 @@ export const ForexMarketView: React.FC<ForexMarketViewProps> = ({
       onRequireAuth?.();
       return;
     }
+    if (!hasPurchasedPackage) {
+      emitToast(
+        'err',
+        'Buy an AI Trading package from your Deposit Wallet first. Copy Trading unlocks strictly with earned Income Wallet balance (Direct Deposit Trade is Upcoming).'
+      );
+      return;
+    }
     setBusyAction(true);
     setLocalBanner(null);
     try {
@@ -691,9 +718,16 @@ export const ForexMarketView: React.FC<ForexMarketViewProps> = ({
 
         <div className="flex flex-wrap items-center gap-4 text-xs font-mono tabular-nums">
           <div>
-            <span className="text-slate-400">Deposit Wallet: </span>
-            <strong className="text-white">${effectiveBalance.toFixed(2)}</strong>
+            <span className="text-slate-400">Income Wallet: </span>
+            <strong className="text-emerald-400">${incomeBalance.toFixed(2)}</strong>
           </div>
+          {isAuthenticated && (
+            <div>
+              <span className="text-slate-400">Deposit Wallet: </span>
+              <strong className="text-sky-300">${depositBalance.toFixed(2)}</strong>
+              <span className="text-[10px] text-slate-500 ml-1">(Plans Only)</span>
+            </div>
+          )}
           <div>
             <span className="text-slate-400">Open Orders: </span>
             <strong className="text-white">{openTrades.length}</strong>
@@ -714,6 +748,102 @@ export const ForexMarketView: React.FC<ForexMarketViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Wallet Mode Strip: Income Wallet Trading (LIVE) vs Direct Deposit Trading (Upcoming) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="bg-[#0B111E]/90 backdrop-blur-md border border-emerald-500/40 rounded-2xl p-3.5 flex items-center justify-between gap-3 shadow-lg">
+          <div className="flex items-start gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/35 text-emerald-400 flex items-center justify-center shrink-0 mt-0.5">
+              <Wallet className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-display font-bold text-white">
+                  Income Wallet Trading
+                </span>
+                <span className="px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-mono text-[10px] font-bold uppercase">
+                  Active
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                Deposit into Deposit Wallet → Buy a Package → Trade Forex &amp; grow your earned Income Wallet profit.
+              </p>
+            </div>
+          </div>
+          {isAuthenticated && (
+            <div className="text-right font-mono shrink-0">
+              <div className="text-[10px] text-slate-400">Available</div>
+              <div className="text-sm font-bold text-emerald-400 tabular-nums">
+                ${incomeBalance.toFixed(2)}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="bg-[#0B111E]/90 backdrop-blur-md border border-slate-700/80 rounded-2xl p-3.5 flex items-center justify-between gap-3 shadow-lg opacity-90">
+          <div className="flex items-start gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-lg bg-amber-500/15 border border-amber-500/35 text-amber-400 flex items-center justify-center shrink-0 mt-0.5">
+              <Lock className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-display font-bold text-white">
+                  Direct Deposit Trade
+                </span>
+                <span className="px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 font-mono text-[10px] font-bold uppercase">
+                  Upcoming
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                Direct Forex trading with Deposit Wallet funds is upcoming. Deposit Wallet is currently for purchasing plans.
+              </p>
+            </div>
+          </div>
+          {isAuthenticated && onNavigateToPackages && !hasPurchasedPackage && (
+            <button
+              type="button"
+              onClick={onNavigateToPackages}
+              className="px-3 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-[11px] font-semibold whitespace-nowrap shrink-0 transition-colors"
+            >
+              Buy Plan
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Package Required Notice if authenticated without any package yet */}
+      {isAuthenticated && !hasPurchasedPackage && (
+        <div className="px-4 py-3.5 rounded-xl border border-amber-500/50 bg-amber-950/55 text-xs text-amber-100 flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-0.5">
+            <div className="font-semibold text-amber-200">
+              Package Activation Required Before Forex Trading
+            </div>
+            <p className="text-[11px] text-amber-200/85">
+              Direct trading from Deposit Wallet is Upcoming. First fund your Deposit Wallet, purchase an AI Trading package, and use the generated Income Wallet balance to trade Forex and grow your income.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {onNavigateToDeposit && (
+              <button
+                type="button"
+                onClick={onNavigateToDeposit}
+                className="px-3 py-1.5 rounded-lg border border-sky-500/50 bg-sky-950/60 hover:bg-sky-900/70 text-sky-200 text-xs font-semibold transition-colors"
+              >
+                1. Deposit Funds
+              </button>
+            )}
+            {onNavigateToPackages && (
+              <button
+                type="button"
+                onClick={onNavigateToPackages}
+                className="px-3 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold transition-colors"
+              >
+                2. Buy Package
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Inline Feedback Notice */}
       {localBanner && (
@@ -985,15 +1115,15 @@ export const ForexMarketView: React.FC<ForexMarketViewProps> = ({
                       <SlidersHorizontal className="w-3.5 h-3.5" />
                       {selectedTier.name} WebTerminal
                     </span>
-                    <span className="text-[11px] font-mono text-slate-300 tabular-nums">
-                      Vault: ${effectiveBalance.toFixed(2)}
+                    <span className="text-[11px] font-mono text-emerald-300 tabular-nums">
+                      Income: ${effectiveBalance.toFixed(2)}
                     </span>
                   </div>
                   <h3 className="font-display font-bold text-lg text-white">
                     Market Order · {activePair.symbol}
                   </h3>
                   <p className="text-[11px] text-slate-400">
-                    Margin &amp; fee settle from Deposit Wallet; winning P&amp;L credits directly to your Income Wallet.
+                    Orders trade exclusively using earned Income Wallet profit after package purchase; P&amp;L grows your Income Wallet. (Direct Deposit Trade: Upcoming)
                   </p>
                 </div>
 
@@ -1106,10 +1236,12 @@ export const ForexMarketView: React.FC<ForexMarketViewProps> = ({
                     </span>
                   </div>
                   <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
-                    <span className="text-slate-200 font-semibold">Total Vault Outlay</span>
+                    <span className="text-slate-200 font-semibold">Total Income Outlay</span>
                     <span
                       className={`font-mono font-bold tabular-nums ${
-                        vaultCoversTotal && meetsTierMin ? 'text-emerald-400' : 'text-amber-400'
+                        vaultCoversTotal && meetsTierMin && hasPurchasedPackage
+                          ? 'text-emerald-400'
+                          : 'text-amber-400'
                       }`}
                     >
                       ${totalOutlayUsd.toFixed(2)}
@@ -1132,10 +1264,17 @@ export const ForexMarketView: React.FC<ForexMarketViewProps> = ({
 
               {/* Execution Buttons */}
               <div className="space-y-2.5 pt-3 border-t border-slate-800">
-                {!meetsTierMin && isAuthenticated && (
+                {isAuthenticated && !hasPurchasedPackage ? (
                   <div className="p-2.5 rounded-lg bg-amber-950/60 border border-amber-500/40 text-[11px] text-amber-200">
-                    {selectedTier.name} tier requires min ${selectedTier.minDepositUsd} in Deposit Wallet. Switch to Standard ($10 min) or deposit funds.
+                    Buy a package from Deposit Wallet first to unlock Income Wallet trading. Direct Deposit Trade is Upcoming.
                   </div>
+                ) : (
+                  !meetsTierMin &&
+                  isAuthenticated && (
+                    <div className="p-2.5 rounded-lg bg-amber-950/60 border border-amber-500/40 text-[11px] text-amber-200">
+                      {selectedTier.name} tier requires min ${selectedTier.minDepositUsd} in Income Wallet. Switch to Standard ($10 min) or earn more package profit.
+                    </div>
+                  )
                 )}
 
                 <div className="grid grid-cols-2 gap-2.5">
@@ -1172,7 +1311,7 @@ export const ForexMarketView: React.FC<ForexMarketViewProps> = ({
 
                 {!isAuthenticated && (
                   <p className="text-[11px] text-slate-400 text-center">
-                    Sign in to place live Buy &amp; Sell orders directly from your USD Vault.
+                    Sign in, buy a package from Deposit Wallet, and trade live using your Income Wallet profits (Direct Trade: Upcoming).
                   </p>
                 )}
               </div>
@@ -1480,11 +1619,11 @@ export const ForexMarketView: React.FC<ForexMarketViewProps> = ({
                                 'ok',
                                 `Stopped copying ${sub.traderName}. Returned $${res.returnedCapitalUsd.toFixed(
                                   2
-                                )} capital to Deposit Wallet${
+                                )} capital${
                                   res.claimedProfitUsd >= 0.01
-                                    ? ` + $${res.claimedProfitUsd.toFixed(2)} profit to Income Wallet`
+                                    ? ` + $${res.claimedProfitUsd.toFixed(2)} profit`
                                     : ''
-                                }.`
+                                } to your Income Wallet.`
                               );
                             } catch (err) {
                               emitToast('err', (err as Error).message);
@@ -1536,7 +1675,7 @@ export const ForexMarketView: React.FC<ForexMarketViewProps> = ({
                   Alphatradex Copy Trade · Verified Master Strategy Providers
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Mirror institutional FX &amp; Gold desks automatically using your USD Deposit Wallet. Stop anytime with instant principal return.
+                  Mirror institutional FX &amp; Gold desks automatically using your Income Wallet profits earned from packages. Direct Deposit Trade is Upcoming.
                 </p>
               </div>
 
@@ -1769,7 +1908,7 @@ export const ForexMarketView: React.FC<ForexMarketViewProps> = ({
 
                 <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
                   <div className="text-xs font-mono text-slate-300 tabular-nums">
-                    Deposit Wallet: <strong className="text-white">${effectiveBalance.toFixed(2)}</strong> ·
+                    Income Wallet: <strong className="text-emerald-400">${effectiveBalance.toFixed(2)}</strong> ·
                     Est. Net Daily Yield:{' '}
                     <strong className="text-emerald-400">
                       +$
@@ -1815,7 +1954,7 @@ export const ForexMarketView: React.FC<ForexMarketViewProps> = ({
                 </p>
               </div>
               <span className="font-mono text-xs text-slate-300 tabular-nums">
-                Deposit Wallet: <strong className="text-white">${effectiveBalance.toFixed(2)}</strong>
+                Income Wallet: <strong className="text-emerald-400">${effectiveBalance.toFixed(2)}</strong>
               </span>
             </div>
 
@@ -1864,7 +2003,7 @@ export const ForexMarketView: React.FC<ForexMarketViewProps> = ({
                           </span>
                         </div>
                         <div className="flex items-center justify-between">
-                          <span className="text-slate-400">Min Deposit Balance</span>
+                          <span className="text-slate-400">Min Income Balance</span>
                           <span className="font-bold text-white">${tier.minDepositUsd}</span>
                         </div>
                         <div className="flex items-center justify-between">

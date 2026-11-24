@@ -141,7 +141,7 @@ export const DEFAULT_PLATFORM_CONFIG: PlatformConfig = {
     tone: 'info',
     title: 'Important Platform Announcement',
     message:
-      'Live Forex WebTerminal & Copy Trading are now active in your Vault! Choose from Standard, Pro, or Raw Spread accounts to self-trade FX & Gold or copy verified Master Traders directly from your USD Vault.',
+      'Fund your Deposit Wallet to activate AI Trading packages first. Once your package generates income, trade Forex WebTerminal & Copy Trading directly with your Income Wallet balance to compound profits (Direct Deposit Trading is Upcoming).',
     updatedBy: 'Administration',
   },
   bannerAds: [

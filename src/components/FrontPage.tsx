@@ -1152,6 +1152,8 @@ export const FrontPage: React.FC<FrontPageProps> = ({
           <ForexMarketView
             mode="preview"
             onRequireAuth={() => openPortalOrAuth('forex-market', 'signin')}
+            onNavigateToDeposit={() => openPortalOrAuth('dashboard', 'signin')}
+            onNavigateToPackages={() => onSelectSection('plans')}
           />
         </div>
       )}

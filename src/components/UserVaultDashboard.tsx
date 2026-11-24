@@ -461,7 +461,7 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
     enabledWithdrawMethods.find((m) => m.id === capitalNet) || enabledWithdrawMethods[0];
   const activeCapitalNetworkId = selectedCapitalMethod?.id || capitalNet;
 
-  const referralLink = `${window.location.origin}/?ref=${userProfile.handle}`;
+  const referralLink = `${window.location.origin}${import.meta.env.BASE_URL}?ref=${userProfile.handle}`;
 
   const sidebarGroups: {
     heading: string;
@@ -1172,6 +1172,9 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                       <div className="font-mono font-extrabold text-2xl text-white tabular-nums mt-2">
                         {userProfile.usdBalance.toFixed(2)} <span className="text-sky-400 text-base">₮</span>
                       </div>
+                      <div className="text-[10px] text-slate-400 mt-1">
+                        For AI Plans &amp; Mining · Direct FX: <span className="text-amber-300 font-semibold">Upcoming</span>
+                      </div>
                     </div>
                     <div className="w-10 h-10 rounded-full bg-sky-500/15 border border-sky-500/30 text-sky-400 flex items-center justify-center">
                       <Lock className="w-4 h-4" />
@@ -1187,10 +1190,10 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={() => selectNav('deposit-report')}
-                      className="text-slate-400 hover:text-white"
+                      onClick={() => selectNav('activate-trading')}
+                      className="text-slate-300 hover:text-white font-medium"
                     >
-                      History
+                      Buy Plan
                     </button>
                   </div>
                 </div>
@@ -1207,6 +1210,9 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                         {userProfile.profitBalance.toFixed(2)}{' '}
                         <span className="text-emerald-400 text-base">₮</span>
                       </div>
+                      <div className="text-[10px] text-slate-400 mt-1">
+                        Trade Forex &amp; Copy Trade to grow profit or withdraw
+                      </div>
                     </div>
                     <div className="w-10 h-10 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center">
                       <Wallet className="w-4 h-4" />
@@ -1222,10 +1228,10 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={() => selectNav('income-details')}
-                      className="text-slate-400 hover:text-white"
+                      onClick={() => selectNav('forex-market')}
+                      className="text-orange-400 hover:underline font-semibold"
                     >
-                      History
+                      Forex Trade
                     </button>
                   </div>
                 </div>
@@ -2472,9 +2478,11 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
           {/* VIEW: FOREX MARKET WEBTERMINAL & COPY TRADE */}
           {activeNav === 'forex-market' && (
             <ForexMarketView
-              vaultBalanceUsd={userProfile.usdBalance}
+              vaultBalanceUsd={userProfile.profitBalance}
               mode="vault"
               onNotify={notify}
+              onNavigateToDeposit={() => selectNav('deposit')}
+              onNavigateToPackages={() => selectNav('activate-trading')}
             />
           )}
 

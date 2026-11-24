@@ -1161,7 +1161,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!authUser || !userProfile) throw new Error('Authentication required.');
     if (platformConfig.globalPaused) throw new Error('Trading allocations are temporarily paused by administration.');
     if (userProfile.usdBalance < pkg.capital) {
-      throw new Error(`Insufficient USD Vault balance. Deposit $${(pkg.capital - userProfile.usdBalance).toFixed(2)} more.`);
+      throw new Error(`Insufficient Deposit Wallet balance. Deposit $${(pkg.capital - userProfile.usdBalance).toFixed(2)} more.`);
     }
 
     const invId = makeId('inv');
@@ -1902,6 +1902,13 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       throw new Error(`${params.tier.name} account tier is currently disabled.`);
     }
 
+    const hasPurchasedPackage = investments.length > 0 || (userProfile.totalInvested || 0) > 0;
+    if (!hasPurchasedPackage) {
+      throw new Error(
+        'Purchase an AI Trading package from your Deposit Wallet first. Forex trading is unlocked strictly with Income Wallet profits earned after buying a package (Direct Deposit Trade is Upcoming).'
+      );
+    }
+
     const lots = Number(params.lots);
     const leverage = Math.round(Number(params.leverage));
     const entryPrice = Number(params.entryPrice);
@@ -1920,16 +1927,16 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!Number.isFinite(entryPrice) || entryPrice <= 0 || marginUsd <= 0) {
       throw new Error('Live quote unavailable. Wait a moment for price sync.');
     }
-    if (userProfile.usdBalance < params.tier.minDepositUsd) {
+    if (userProfile.profitBalance < params.tier.minDepositUsd) {
       throw new Error(
-        `${params.tier.name} account requires at least $${params.tier.minDepositUsd.toFixed(2)} in your Deposit Wallet.`
+        `${params.tier.name} account requires at least $${params.tier.minDepositUsd.toFixed(2)} in your Income Wallet. Direct Deposit trading is Upcoming.`
       );
     }
-    if (userProfile.usdBalance < totalOutlayUsd) {
+    if (userProfile.profitBalance < totalOutlayUsd) {
       throw new Error(
-        `Insufficient Deposit Wallet balance. Need $${totalOutlayUsd.toFixed(2)} (Margin $${marginUsd.toFixed(
+        `Insufficient Income Wallet balance. Need $${totalOutlayUsd.toFixed(2)} (Margin $${marginUsd.toFixed(
           2
-        )} + Fee $${commissionUsd.toFixed(2)}).`
+        )} + Fee $${commissionUsd.toFixed(2)}). Direct Deposit trading is Upcoming.`
       );
     }
 
@@ -1943,17 +1950,22 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         if (!userSnap.exists()) throw new Error('User vault profile missing.');
         const cur = userSnap.data() as UserProfile;
 
-        if (cur.usdBalance < params.tier.minDepositUsd) {
+        if (investments.length === 0 && (cur.totalInvested || 0) <= 0) {
           throw new Error(
-            `${params.tier.name} requires $${params.tier.minDepositUsd.toFixed(2)} minimum balance.`
+            'Purchase a package from your Deposit Wallet first to trade Forex with your Income Wallet.'
           );
         }
-        if (cur.usdBalance < totalOutlayUsd) {
-          throw new Error('Insufficient USD Vault balance for margin + commission.');
+        if (cur.profitBalance < params.tier.minDepositUsd) {
+          throw new Error(
+            `${params.tier.name} requires $${params.tier.minDepositUsd.toFixed(2)} minimum Income Wallet balance.`
+          );
+        }
+        if (cur.profitBalance < totalOutlayUsd) {
+          throw new Error('Insufficient Income Wallet balance for margin + commission.');
         }
 
         tx.update(userRef, {
-          usdBalance: Number((cur.usdBalance - totalOutlayUsd).toFixed(2)),
+          profitBalance: Number((cur.profitBalance - totalOutlayUsd).toFixed(2)),
           updatedAt: serverTimestamp(),
         });
 
@@ -2019,6 +2031,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             ? curTrade.marginUsd
             : Math.max(0, Number((curTrade.marginUsd + boundedPnl).toFixed(2)));
         const addedProfitUsd = boundedPnl > 0 ? boundedPnl : 0;
+        const creditToIncomeWalletUsd = Number((returnedMarginUsd + addedProfitUsd).toFixed(2));
 
         tx.update(tradeRef, {
           closePrice: safeClosePrice,
@@ -2029,8 +2042,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         });
 
         tx.update(userRef, {
-          usdBalance: Number((curUser.usdBalance + returnedMarginUsd).toFixed(2)),
-          profitBalance: Number((curUser.profitBalance + addedProfitUsd).toFixed(2)),
+          profitBalance: Number((curUser.profitBalance + creditToIncomeWalletUsd).toFixed(2)),
           updatedAt: serverTimestamp(),
         });
       });
@@ -2057,6 +2069,13 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       throw new Error(`${params.trader.name} is not accepting new copiers right now.`);
     }
 
+    const hasPurchasedPackage = investments.length > 0 || (userProfile.totalInvested || 0) > 0;
+    if (!hasPurchasedPackage) {
+      throw new Error(
+        'Purchase an AI Trading package from your Deposit Wallet first. Copy Trading allocates strictly from Income Wallet profits (Direct Deposit Trade is Upcoming).'
+      );
+    }
+
     const allocatedUsd = Number(Number(params.allocatedUsd).toFixed(2));
     const riskMultiplier = Math.max(0.25, Math.min(5, Number(params.riskMultiplier) || 1));
     const stopLossPercent = Math.max(5, Math.min(95, Number(params.stopLossPercent) || 25));
@@ -2066,9 +2085,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         `Minimum copy allocation for ${params.trader.name} is $${params.trader.minCopyUsd.toFixed(2)}.`
       );
     }
-    if (userProfile.usdBalance < allocatedUsd) {
+    if (userProfile.profitBalance < allocatedUsd) {
       throw new Error(
-        `Insufficient Deposit Wallet balance. Need $${(allocatedUsd - userProfile.usdBalance).toFixed(2)} more.`
+        `Insufficient Income Wallet balance. Need $${(allocatedUsd - userProfile.profitBalance).toFixed(
+          2
+        )} more in earned Income Wallet balance.`
       );
     }
 
@@ -2082,12 +2103,15 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const userSnap = await tx.get(userRef);
         if (!userSnap.exists()) throw new Error('Profile missing.');
         const cur = userSnap.data() as UserProfile;
-        if (cur.usdBalance < allocatedUsd) {
-          throw new Error('Insufficient Deposit Wallet balance.');
+        if (investments.length === 0 && (cur.totalInvested || 0) <= 0) {
+          throw new Error('Purchase a package from your Deposit Wallet first before Copy Trading.');
+        }
+        if (cur.profitBalance < allocatedUsd) {
+          throw new Error('Insufficient Income Wallet balance.');
         }
 
         tx.update(userRef, {
-          usdBalance: Number((cur.usdBalance - allocatedUsd).toFixed(2)),
+          profitBalance: Number((cur.profitBalance - allocatedUsd).toFixed(2)),
           updatedAt: serverTimestamp(),
         });
 
@@ -2201,8 +2225,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         });
 
         tx.update(userRef, {
-          usdBalance: Number((curUser.usdBalance + curSub.allocatedUsd).toFixed(2)),
-          profitBalance: Number((curUser.profitBalance + addProfit).toFixed(2)),
+          profitBalance: Number((curUser.profitBalance + curSub.allocatedUsd + addProfit).toFixed(2)),
           updatedAt: serverTimestamp(),
         });
       });
