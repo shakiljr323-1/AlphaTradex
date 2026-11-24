@@ -18,6 +18,7 @@ import {
   ExternalLink,
   FileCheck,
   Globe,
+  History,
   Home,
   LayoutDashboard,
   Lock,
@@ -58,11 +59,15 @@ import {
   isWeekendDate,
 } from '../utils/investmentMath';
 import { CapitalRequestModal } from './CapitalRequestModal';
+import { DepositFundsModal } from './DepositFundsModal';
 import { AlphatradexCoinHub, BannerAdSlot } from './AlphatradexCoinHub';
 import { ForexMarketView } from './ForexMarketView';
 import { AlphatradexLogo3D } from './AlphatradexLogo3D';
 import { ReferralDashboard } from './ReferralDashboard';
+import { ReferralMentorDeskView } from './ReferralMentorDeskView';
+import { ProfileManagementView } from './ProfileManagementView';
 import { TermsAgreementCheckbox } from './TermsAndConditionsView';
+import { TransactionHistoryView } from './TransactionHistoryView';
 
 function formatVaultError(raw: string): string {
   if (raw.startsWith('{') && raw.includes('"error"')) {
@@ -84,6 +89,7 @@ type SidebarSection =
   | 'p2p-transfers'
   | 'withdraw'
   | 'payment-methods'
+  | 'transaction-history'
   | 'activate-trading'
   | 'my-packages'
   | 'capital-withdraw'
@@ -91,6 +97,7 @@ type SidebarSection =
   | 'forex-market'
   | 'income-details'
   | 'mlm-commissions'
+  | 'referral-mentor-desk'
   | 'referral-network'
   | 'downline-team'
   | 'profile-kyc';
@@ -115,12 +122,15 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
     deposits,
     withdrawals,
     p2pTransfers,
+    walletTransfers,
     mlmCommissions,
     memeCoinInvestments,
     downlineReferrals,
     referralLinkClicks,
     savedPaymentMethods,
     submitKycUpdate,
+    updateProfileAvatar,
+    updateAccountEmail,
     resendVerificationEmail,
     refreshAuthVerification,
     signOutUser,
@@ -154,6 +164,7 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
     useState<PackageFundingSource>('deposit_wallet');
   const [walletTransferAmount, setWalletTransferAmount] = useState('10');
   const [showWalletTransferBar, setShowWalletTransferBar] = useState(false);
+  const [showDepositModal, setShowDepositModal] = useState(false);
   const [copiedText, setCopiedText] = useState('');
   const [selectedBreakdown, setSelectedBreakdown] = useState<Withdrawal | null>(null);
   const [retryingSync, setRetryingSync] = useState(false);
@@ -495,6 +506,7 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
         { id: 'p2p-transfers', label: 'P2P Transfers', Icon: Send },
         { id: 'withdraw', label: 'Withdraw', Icon: ArrowUpRight },
         { id: 'payment-methods', label: 'Payment Methods', Icon: CreditCard },
+        { id: 'transaction-history', label: 'Transaction History', Icon: History },
       ],
     },
     {
@@ -510,6 +522,7 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
     {
       heading: 'INCOME & REFERRALS',
       items: [
+        { id: 'referral-mentor-desk', label: 'Referral & Mentor Desk', Icon: ShieldCheck },
         { id: 'income-details', label: 'Income Details', Icon: TrendingUp },
         { id: 'mlm-commissions', label: 'All-Plan Commissions', Icon: Award },
       ],
@@ -523,54 +536,43 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
     },
     {
       heading: 'ACCOUNT',
-      items: [{ id: 'profile-kyc', label: 'Profile & KYC', Icon: UserCheck }],
+      items: [{ id: 'profile-kyc', label: 'Profile Management', Icon: UserCheck }],
     },
   ];
 
   const activeNavTitle =
     sidebarGroups.flatMap((g) => g.items).find((i) => i.id === activeNav)?.label || 'Dashboard';
 
-  // Reusable KYC Verification Card
+  // Reusable KYC Verification Card (shown on non-profile views when unsubmitted/rejected)
   const renderKycBannerOrForm = () => {
-    if (userProfile.kycStatus !== 'unsubmitted' && userProfile.kycStatus !== 'rejected' && activeNav !== 'profile-kyc') {
+    if (
+      activeNav === 'profile-kyc' ||
+      (userProfile.kycStatus !== 'unsubmitted' && userProfile.kycStatus !== 'rejected')
+    ) {
       return null;
     }
+
+    const isRejected = userProfile.kycStatus === 'rejected';
 
     return (
       <div className="bg-[#0B111E]/78 backdrop-blur-md border border-slate-700/70 rounded-2xl p-5 sm:p-6 shadow-xl space-y-4 text-slate-100">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h2 className="font-display font-bold text-white text-base">
-              {userProfile.kycStatus === 'approved'
-                ? 'Verified Identity (KYC Approved)'
-                : userProfile.kycStatus === 'pending'
-                ? 'Identity Verification Under Review'
-                : 'Complete Identity Verification (KYC)'}
+              Complete Identity Verification (KYC)
             </h2>
             <p className="text-xs text-slate-300 mt-0.5">
-              {userProfile.kycStatus === 'approved'
-                ? `${userProfile.idType} · ${userProfile.idNumber} — Verified on Vault Ledger.`
-                : userProfile.kycStatus === 'pending'
-                ? `${userProfile.idType} · ${userProfile.idNumber} — Pending Super Admin inspection.`
-                : userProfile.kycStatus === 'rejected'
+              {isRejected
                 ? 'Your previous KYC submission was declined. Please re-submit valid documents.'
                 : 'Submit your NID, Passport, or Driving License along with a portrait photo for Admin approval.'}
             </p>
           </div>
-          <span
-            className={`px-2.5 py-1 rounded text-xs font-semibold shrink-0 ${
-              userProfile.kycStatus === 'approved'
-                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                : userProfile.kycStatus === 'pending'
-                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                : 'bg-red-500/20 text-red-300 border border-red-500/30'
-            }`}
-          >
+          <span className="px-2.5 py-1 rounded text-xs font-semibold shrink-0 bg-red-500/20 text-red-300 border border-red-500/30">
             KYC: {userProfile.kycStatus.toUpperCase()}
           </span>
         </div>
 
-        {(userProfile.kycStatus === 'unsubmitted' || userProfile.kycStatus === 'rejected') && (
+        {(userProfile.kycStatus === 'unsubmitted' || isRejected) && (
           <form
             onSubmit={async (e) => {
               e.preventDefault();
@@ -1039,12 +1041,30 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
               KYC: {userProfile.kycStatus.toUpperCase()}
             </button>
 
-            <div className="hidden sm:flex items-center gap-2 pl-2 border-l border-slate-800 text-xs">
+            <button
+              type="button"
+              onClick={() => selectNav('profile-kyc')}
+              title="Open Profile Management"
+              className="hidden sm:flex items-center gap-2.5 pl-2.5 border-l border-slate-800 text-xs hover:opacity-90 transition-opacity"
+            >
+              <div className="w-8 h-8 rounded-full overflow-hidden border border-orange-500/45 bg-slate-900 flex items-center justify-center shrink-0">
+                {userProfile.avatarData ? (
+                  <img
+                    src={userProfile.avatarData}
+                    alt={`${userProfile.fullName} avatar`}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <span className="font-display font-bold text-orange-400 text-[11px]">
+                    {(userProfile.fullName || 'VC').slice(0, 2).toUpperCase()}
+                  </span>
+                )}
+              </div>
               <div className="text-right">
                 <div className="font-semibold text-white leading-tight">{userProfile.fullName}</div>
                 <div className="font-mono text-[11px] text-slate-400">{userProfile.handle}</div>
               </div>
-            </div>
+            </button>
           </div>
         </header>
 
@@ -1196,6 +1216,22 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
+                      onClick={() => setShowDepositModal(true)}
+                      className="px-3 py-1.5 rounded-lg border border-sky-500/50 bg-sky-500/15 hover:bg-sky-500/25 text-xs font-semibold text-sky-200 inline-flex items-center gap-1.5 transition-colors"
+                    >
+                      <PlusCircle className="w-3.5 h-3.5 text-sky-400" />
+                      <span>Deposit Funds</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => selectNav('transaction-history')}
+                      className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-900/85 hover:border-sky-500/60 text-xs font-semibold text-slate-200 inline-flex items-center gap-1.5 transition-colors"
+                    >
+                      <History className="w-3.5 h-3.5 text-sky-400" />
+                      <span>Transaction History</span>
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => setShowWalletTransferBar((v) => !v)}
                       className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-900/85 hover:border-emerald-500/60 text-xs font-semibold text-slate-200 inline-flex items-center gap-1.5 transition-colors"
                     >
@@ -1320,7 +1356,7 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                     <div className="flex items-center justify-between pt-3 text-xs border-t border-slate-800/70 mt-3">
                       <button
                         type="button"
-                        onClick={() => selectNav('deposit')}
+                        onClick={() => setShowDepositModal(true)}
                         className="text-sky-400 font-semibold hover:underline inline-flex items-center gap-1"
                       >
                         Deposit Crypto <ArrowRight className="w-3 h-3" />
@@ -1498,9 +1534,13 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                       <Users className="w-3.5 h-3.5 text-orange-400" />
                       All-Plan Referral Earnings
                     </span>
-                    <span className="px-2 py-0.5 rounded bg-orange-600/90 text-white text-[10px] font-mono font-semibold">
-                      All Plans Active
-                    </span>
+                    <button
+                      type="button"
+                      onClick={() => selectNav('referral-mentor-desk')}
+                      className="text-[11px] font-semibold text-orange-400 hover:underline inline-flex items-center gap-1"
+                    >
+                      Referral &amp; Mentor Desk <ArrowRight className="w-3 h-3" />
+                    </button>
                   </div>
                   <div className="grid grid-cols-2 gap-4 pt-1">
                     <div>
@@ -2563,6 +2603,19 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
             </section>
           )}
 
+          {/* VIEW: TRANSACTION HISTORY */}
+          {activeNav === 'transaction-history' && (
+            <TransactionHistoryView
+              deposits={deposits}
+              withdrawals={withdrawals}
+              p2pTransfers={p2pTransfers}
+              walletTransfers={walletTransfers}
+              currentUid={userProfile.uid}
+              onSelectBreakdown={(w) => setSelectedBreakdown(w)}
+              onNavigate={(sec) => selectNav(sec)}
+            />
+          )}
+
           {/* VIEW: ALPHATRADEX COIN MINING, TAP-TO-MINE, BANNER ADS & PUMP.FUN */}
           {activeNav === 'pump-fun' && (
             <section className="space-y-6">
@@ -2813,6 +2866,21 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
               onNotify={notify}
               onNavigateToDeposit={() => selectNav('deposit')}
               onNavigateToPackages={() => selectNav('activate-trading')}
+            />
+          )}
+
+          {/* VIEW: REFERRAL & MENTOR DESK */}
+          {activeNav === 'referral-mentor-desk' && (
+            <ReferralMentorDeskView
+              userProfile={userProfile}
+              platformConfig={platformConfig}
+              referralLink={referralLink}
+              referralLinkClicks={referralLinkClicks}
+              downlineReferrals={downlineReferrals}
+              mlmCommissions={mlmCommissions}
+              copiedText={copiedText}
+              onCopyValue={copyValue}
+              onOpenWithdraw={() => selectNav('withdraw')}
             />
           )}
 
@@ -3106,25 +3174,19 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
             </section>
           )}
 
-          {/* VIEW: PROFILE & KYC */}
+          {/* VIEW: PROFILE MANAGEMENT */}
           {activeNav === 'profile-kyc' && (
-            <section className="bg-[#0B111E]/78 backdrop-blur-md border border-slate-700/70 rounded-2xl p-6 space-y-4 shadow-xl">
-              <h2 className="font-display font-bold text-white text-lg">Client Vault Profile</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
-                <div className="p-3.5 rounded-xl bg-slate-900/75 border border-slate-700/70">
-                  <div className="text-slate-400">Full Legal Name</div>
-                  <div className="font-semibold text-white mt-0.5">{userProfile.fullName}</div>
-                </div>
-                <div className="p-3.5 rounded-xl bg-slate-900/75 border border-slate-700/70">
-                  <div className="text-slate-400">Email Address</div>
-                  <div className="font-semibold text-white mt-0.5">{userProfile.email}</div>
-                </div>
-                <div className="p-3.5 rounded-xl bg-slate-900/75 border border-slate-700/70">
-                  <div className="text-slate-400">Vault Handle / Referral ID</div>
-                  <div className="font-mono font-bold text-orange-400 mt-0.5">{userProfile.handle}</div>
-                </div>
-              </div>
-            </section>
+            <ProfileManagementView
+              userProfile={userProfile}
+              authEmail={authUser?.email || userProfile.email}
+              usesPasswordProvider={Boolean(
+                authUser?.providerData?.some((p) => p.providerId === 'password')
+              )}
+              onUpdateProfileAvatar={updateProfileAvatar}
+              onUpdateAccountEmail={updateAccountEmail}
+              onSubmitKyc={submitKycUpdate}
+              onNotify={notify}
+            />
           )}
 
           {/* Vault Portal Footer */}
@@ -3269,6 +3331,18 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
       <CapitalRequestModal
         withdrawal={selectedBreakdown}
         onClose={() => setSelectedBreakdown(null)}
+      />
+
+      {/* Wallet Overview Deposit Funds Modal (QR Code, Wallet Address & USDT/SOL Network Selection) */}
+      <DepositFundsModal
+        open={showDepositModal}
+        onClose={() => setShowDepositModal(false)}
+        paymentMethods={platformConfig.paymentMethods}
+        depositWallets={platformConfig.depositWallets}
+        currentDepositBalance={userProfile.usdBalance}
+        initialNetwork={activeDepositNetworkId}
+        onSubmitDeposit={submitCryptoDeposit}
+        onNotify={notify}
       />
     </div>
   );

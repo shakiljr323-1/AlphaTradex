@@ -186,7 +186,7 @@ service cloud.firestore {
       ]) && data.keys().hasOnly([
         'uid', 'email', 'fullName', 'handle', 'role', 'referredByUid',
         'referredByHandle', 'uplineChain', 'kycStatus', 'idType', 'idNumber',
-        'idPhotoData', 'portraitPhotoData', 'usdBalance', 'profitBalance',
+        'idPhotoData', 'portraitPhotoData', 'avatarData', 'usdBalance', 'profitBalance',
         'totalInvested', 'totalWithdrawn', 'isMentor', 'mentorGiftedCapital',
         'mentorRequiredVolume', 'mentorBroughtVolume', 'createdAt', 'updatedAt'
       ])
@@ -204,6 +204,7 @@ service cloud.firestore {
       && isBoundedString(data.idNumber, 64)
       && isBoundedString(data.idPhotoData, 300000)
       && isBoundedString(data.portraitPhotoData, 300000)
+      && (!('avatarData' in data) || isBoundedString(data.avatarData, 300000))
       && data.usdBalance is number && data.usdBalance >= 0
       && data.profitBalance is number && data.profitBalance >= 0
       && data.totalInvested is number && data.totalInvested >= 0
@@ -370,6 +371,25 @@ service cloud.firestore {
       && isNonEmptyString(data.receiverName, 120)
       && data.amountUsd is number && data.amountUsd > 0 && data.amountUsd <= 1000000
       && isBoundedString(data.note, 200)
+      && data.createdAt == request.time;
+    }
+
+    function isValidWalletTransfer(data) {
+      return data.keys().hasAll([
+        'uid', 'userName', 'direction', 'fromWallet', 'toWallet',
+        'amountUsd', 'note', 'status', 'createdAt'
+      ]) && data.keys().hasOnly([
+        'uid', 'userName', 'direction', 'fromWallet', 'toWallet',
+        'amountUsd', 'note', 'status', 'createdAt'
+      ])
+      && isValidId(data.uid) && data.uid == request.auth.uid
+      && isNonEmptyString(data.userName, 120)
+      && data.direction == 'income_to_deposit'
+      && data.fromWallet == 'Income Wallet'
+      && data.toWallet == 'Deposit Wallet'
+      && data.amountUsd is number && data.amountUsd >= 1 && data.amountUsd <= 10000000
+      && isBoundedString(data.note, 200)
+      && data.status == 'approved'
       && data.createdAt == request.time;
     }
 
@@ -597,6 +617,22 @@ service cloud.firestore {
             isOwner(userId)
             && incoming().role == existing().role
             && incoming().kycStatus == existing().kycStatus
+            && incoming().usdBalance == existing().usdBalance
+            && incoming().profitBalance == existing().profitBalance
+            && incoming().totalInvested == existing().totalInvested
+            && incoming().totalWithdrawn == existing().totalWithdrawn
+            && incoming().isMentor == existing().isMentor
+            && incoming().mentorGiftedCapital == existing().mentorGiftedCapital
+            && incoming().mentorRequiredVolume == existing().mentorRequiredVolume
+            && incoming().mentorBroughtVolume == existing().mentorBroughtVolume
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'avatarData', 'email', 'fullName', 'updatedAt'
+            ])
+          )
+          || (
+            isOwner(userId)
+            && incoming().role == existing().role
+            && incoming().kycStatus == existing().kycStatus
             && incoming().isMentor == existing().isMentor
             && incoming().mentorGiftedCapital == existing().mentorGiftedCapital
             && incoming().mentorRequiredVolume == existing().mentorRequiredVolume
@@ -800,6 +836,16 @@ service cloud.firestore {
       allow create: if isValidId(transferId)
         && isVerifiedUser()
         && isValidP2PTransfer(incoming());
+      allow update, delete: if false;
+    }
+
+    match /walletTransfers/{transferId} {
+      allow get: if isValidId(transferId) && isSignedIn() && (existing().uid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow create: if isValidId(transferId)
+        && isVerifiedUser()
+        && isValidWalletTransfer(incoming())
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
       allow update, delete: if false;
     }
 

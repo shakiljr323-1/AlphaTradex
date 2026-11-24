@@ -64,6 +64,7 @@
         "idNumber": { "type": "string", "maxLength": 64 },
         "idPhotoData": { "type": "string", "maxLength": 300000 },
         "portraitPhotoData": { "type": "string", "maxLength": 300000 },
+        "avatarData": { "type": "string", "maxLength": 300000 },
         "usdBalance": { "type": "number" },
         "profitBalance": { "type": "number" },
         "totalInvested": { "type": "number" },
@@ -247,6 +248,33 @@
         "receiverHandle",
         "receiverName",
         "amountUsd",
+        "createdAt"
+      ]
+    },
+    "WalletTransfer": {
+      "title": "WalletTransfer",
+      "description": "Internal wallet transfer between Income Wallet and Deposit Wallet.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userName": { "type": "string", "maxLength": 120 },
+        "direction": { "type": "string", "enum": ["income_to_deposit"] },
+        "fromWallet": { "type": "string", "enum": ["Income Wallet"] },
+        "toWallet": { "type": "string", "enum": ["Deposit Wallet"] },
+        "amountUsd": { "type": "number" },
+        "note": { "type": "string", "maxLength": 200 },
+        "status": { "type": "string", "enum": ["approved"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid",
+        "userName",
+        "direction",
+        "fromWallet",
+        "toWallet",
+        "amountUsd",
+        "note",
+        "status",
         "createdAt"
       ]
     },
@@ -555,6 +583,10 @@
     "/p2pTransfers/{transferId}": {
       "schema": { "$ref": "#/entities/P2PTransfer" },
       "description": "User-to-user P2P USD balance transfers."
+    },
+    "/walletTransfers/{transferId}": {
+      "schema": { "$ref": "#/entities/WalletTransfer" },
+      "description": "Internal Income Wallet to Deposit Wallet transfer ledger."
     },
     "/mlmCommissions/{commissionId}": {
       "schema": { "$ref": "#/entities/MlmCommission" },

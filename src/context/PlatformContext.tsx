@@ -1,12 +1,17 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import {
   createUserWithEmailAndPassword,
+  EmailAuthProvider,
   onAuthStateChanged,
+  reauthenticateWithCredential,
+  reauthenticateWithPopup,
   sendEmailVerification,
   signInWithEmailAndPassword,
   signInWithPopup,
   signOut,
+  updateEmail,
   User,
+  verifyBeforeUpdateEmail,
 } from 'firebase/auth';
 import {
   collection,
@@ -55,6 +60,7 @@ import {
   ReferralStats,
   UserPaymentMethod,
   UserProfile,
+  WalletTransfer,
   Withdrawal,
 } from '../types/platform';
 import {
@@ -86,6 +92,7 @@ interface PlatformContextValue {
   deposits: CryptoDeposit[];
   withdrawals: Withdrawal[];
   p2pTransfers: P2PTransfer[];
+  walletTransfers: WalletTransfer[];
   mlmCommissions: MlmCommission[];
   memeCoinInvestments: MemeCoinInvestment[];
   coinMiningStakes: CoinMiningStake[];
@@ -118,6 +125,11 @@ interface PlatformContextValue {
     idPhotoData: string;
     portraitPhotoData: string;
   }) => Promise<void>;
+  updateProfileAvatar: (avatarData: string, fullName?: string) => Promise<void>;
+  updateAccountEmail: (
+    newEmail: string,
+    currentPassword?: string
+  ) => Promise<{ status: 'updated' | 'verification_sent'; email: string }>;
   resendVerificationEmail: () => Promise<void>;
   refreshAuthVerification: () => Promise<boolean>;
   signOutUser: () => Promise<void>;
@@ -254,6 +266,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [deposits, setDeposits] = useState<CryptoDeposit[]>([]);
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
   const [p2pTransfers, setP2pTransfers] = useState<P2PTransfer[]>([]);
+  const [walletTransfers, setWalletTransfers] = useState<WalletTransfer[]>([]);
   const [mlmCommissions, setMlmCommissions] = useState<MlmCommission[]>([]);
   const [memeCoinInvestments, setMemeCoinInvestments] = useState<MemeCoinInvestment[]>([]);
   const [coinMiningStakes, setCoinMiningStakes] = useState<CoinMiningStake[]>([]);
@@ -607,6 +620,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setDeposits([]);
         setWithdrawals([]);
         setP2pTransfers([]);
+        setWalletTransfers([]);
         setMlmCommissions([]);
         setMemeCoinInvestments([]);
         setCoinMiningStakes([]);
@@ -733,6 +747,16 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       (err) => handleFirestoreError(err, OperationType.LIST, 'p2pTransfers')
     );
 
+    const unsubWalletTransfers = onSnapshot(
+      query(collection(db, 'walletTransfers'), where('uid', '==', uid)),
+      (snap) => {
+        const list = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<WalletTransfer, 'id'>) }));
+        list.sort((a, b) => createdAtSeconds(b.createdAt) - createdAtSeconds(a.createdAt));
+        setWalletTransfers(list);
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'walletTransfers')
+    );
+
     const unsubMlm = onSnapshot(
       query(collection(db, 'mlmCommissions'), where('beneficiaryUid', '==', uid)),
       (snap) => {
@@ -825,6 +849,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       unsubWith();
       unsubP2PSent();
       unsubP2PRecv();
+      unsubWalletTransfers();
       unsubMlm();
       unsubMeme();
       unsubCoinStakes();
@@ -969,6 +994,113 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `users/${authUser.uid}`);
+    }
+  };
+
+  const updateProfileAvatar = async (avatarData: string, fullName?: string) => {
+    if (!authUser || !userProfile) throw new Error('Authentication required.');
+    if (avatarData && avatarData.length > 300000) {
+      throw new Error('Avatar image is too large. Please choose a smaller image.');
+    }
+    const payload: Record<string, unknown> = {
+      avatarData: avatarData || '',
+      updatedAt: serverTimestamp(),
+    };
+    if (fullName !== undefined) {
+      const cleanName = fullName.trim().slice(0, 120);
+      if (!cleanName) throw new Error('Full name cannot be empty.');
+      payload.fullName = cleanName;
+    }
+    try {
+      await updateDoc(doc(db, 'users', authUser.uid), payload);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `users/${authUser.uid}`);
+    }
+  };
+
+  const updateAccountEmail = async (
+    newEmail: string,
+    currentPassword?: string
+  ): Promise<{ status: 'updated' | 'verification_sent'; email: string }> => {
+    const current = auth.currentUser;
+    if (!current || !userProfile) throw new Error('Authentication required.');
+    const cleanEmail = newEmail.trim().toLowerCase().slice(0, 254);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      throw new Error('Please enter a valid email address.');
+    }
+    if (cleanEmail === (current.email || userProfile.email).toLowerCase()) {
+      throw new Error('The new email address is the same as your current email.');
+    }
+
+    const usesGoogle = current.providerData.some((p) => p.providerId === 'google.com');
+    const usesPassword = current.providerData.some((p) => p.providerId === 'password');
+
+    if (currentPassword && current.email && usesPassword) {
+      const cred = EmailAuthProvider.credential(current.email, currentPassword);
+      await reauthenticateWithCredential(current, cred);
+    }
+
+    const applyEmailSync = async () => {
+      try {
+        await updateDoc(doc(db, 'users', current.uid), {
+          email: cleanEmail,
+          updatedAt: serverTimestamp(),
+        });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.UPDATE, `users/${current.uid}`);
+      }
+      try {
+        const emailHash = await sha256Hex(cleanEmail);
+        const existingHash = await getDoc(doc(db, 'emailHashes', emailHash));
+        if (!existingHash.exists()) {
+          await setDoc(doc(db, 'emailHashes', emailHash), {
+            uid: current.uid,
+            handle: userProfile.handle,
+            displayName: userProfile.fullName,
+            createdAt: serverTimestamp(),
+          });
+        }
+      } catch {
+        // Non-fatal email lookup index sync
+      }
+    };
+
+    try {
+      await updateEmail(current, cleanEmail);
+      await applyEmailSync();
+      setAuthUser({ ...current, email: cleanEmail } as User);
+      return { status: 'updated', email: cleanEmail };
+    } catch (err) {
+      const code = (err as { code?: string })?.code || '';
+      if (code === 'auth/requires-recent-login') {
+        if (usesGoogle && !currentPassword) {
+          await reauthenticateWithPopup(current, googleProvider);
+          try {
+            await updateEmail(current, cleanEmail);
+            await applyEmailSync();
+            setAuthUser({ ...current, email: cleanEmail } as User);
+            return { status: 'updated', email: cleanEmail };
+          } catch (retryErr) {
+            const retryCode = (retryErr as { code?: string })?.code || '';
+            if (retryCode === 'auth/operation-not-allowed') {
+              await verifyBeforeUpdateEmail(current, cleanEmail);
+              return { status: 'verification_sent', email: cleanEmail };
+            }
+            throw retryErr;
+          }
+        }
+        throw new Error(
+          'Security check required: enter your current account password above to confirm this email change.'
+        );
+      }
+      if (code === 'auth/operation-not-allowed') {
+        await verifyBeforeUpdateEmail(current, cleanEmail);
+        return { status: 'verification_sent', email: cleanEmail };
+      }
+      if (code === 'auth/email-already-in-use') {
+        throw new Error('That email address is already registered to another account.');
+      }
+      throw err;
     }
   };
 
@@ -1357,6 +1489,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       );
     }
 
+    const wtId = makeId('wtx');
     try {
       await runTransaction(db, async (tx) => {
         const userRef = doc(db, 'users', authUser.uid);
@@ -1371,6 +1504,18 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           usdBalance: Number((cur.usdBalance + amount).toFixed(2)),
           profitBalance: Number((cur.profitBalance - amount).toFixed(2)),
           updatedAt: serverTimestamp(),
+        });
+
+        tx.set(doc(db, 'walletTransfers', wtId), {
+          uid: authUser.uid,
+          userName: (cur.fullName || userProfile.fullName || 'Vault Client').slice(0, 120),
+          direction: 'income_to_deposit',
+          fromWallet: 'Income Wallet',
+          toWallet: 'Deposit Wallet',
+          amountUsd: amount,
+          note: 'Internal wallet transfer for package funding',
+          status: 'approved',
+          createdAt: serverTimestamp(),
         });
       });
     } catch (err) {
@@ -2750,6 +2895,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         deposits,
         withdrawals,
         p2pTransfers,
+        walletTransfers,
         mlmCommissions,
         memeCoinInvestments,
         coinMiningStakes,
@@ -2763,6 +2909,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         signInWithEmail,
         signUpWithKyc,
         submitKycUpdate,
+        updateProfileAvatar,
+        updateAccountEmail,
         resendVerificationEmail,
         refreshAuthVerification,
         signOutUser,

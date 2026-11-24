@@ -203,6 +203,7 @@ export interface UserProfile {
   idNumber: string;
   idPhotoData: string;
   portraitPhotoData: string;
+  avatarData?: string;
   usdBalance: number;
   profitBalance: number;
   totalInvested: number;
@@ -280,6 +281,19 @@ export interface P2PTransfer {
   receiverName: string;
   amountUsd: number;
   note: string;
+  createdAt?: unknown;
+}
+
+export interface WalletTransfer {
+  id: string;
+  uid: string;
+  userName: string;
+  direction: 'income_to_deposit';
+  fromWallet: 'Income Wallet';
+  toWallet: 'Deposit Wallet';
+  amountUsd: number;
+  note: string;
+  status: 'approved';
   createdAt?: unknown;
 }
 
