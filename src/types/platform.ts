@@ -160,6 +160,32 @@ export interface ForexPlatformConfig {
   copyTraders: CopyTraderProfile[];
 }
 
+export interface AdminModuleControls {
+  aiTradingEnabled: boolean;
+  forexMarketEnabled: boolean;
+  coinMiningEnabled: boolean;
+  p2pEnabled: boolean;
+  requireSignupForTradingModules: boolean;
+}
+
+export interface SupportLinksConfig {
+  telegramUrl: string;
+  whatsappUrl: string;
+  supportEmail: string;
+}
+
+export interface AdminActionLog {
+  id: string;
+  adminUid: string;
+  adminEmail: string;
+  action: string;
+  targetUid: string;
+  targetLabel: string;
+  details: string;
+  amountUsd: number;
+  createdAt?: unknown;
+}
+
 export interface PlatformConfig {
   companyName: string;
   companyTagline: string;
@@ -175,6 +201,11 @@ export interface PlatformConfig {
   eliteCapitalLockDays: number;
   totalProfitDays: number;
   globalPaused: boolean;
+  withdrawalsPaused?: boolean;
+  signupsPaused?: boolean;
+  p2pPaused?: boolean;
+  moduleControls?: AdminModuleControls;
+  supportLinks?: SupportLinksConfig;
   packages: InvestmentPackage[];
   mlmRates: MlmRates;
   mentorConfig: MentorConfig;
@@ -204,6 +235,13 @@ export interface UserProfile {
   idPhotoData: string;
   portraitPhotoData: string;
   avatarData?: string;
+  countryCode?: string;
+  countryName?: string;
+  phoneDialPrefix?: string;
+  phoneNumber?: string;
+  phoneVerified?: boolean;
+  suspended?: boolean;
+  suspensionReason?: string;
   usdBalance: number;
   profitBalance: number;
   totalInvested: number;

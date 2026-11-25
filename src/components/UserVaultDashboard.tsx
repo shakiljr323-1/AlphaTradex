@@ -68,6 +68,9 @@ import { ReferralMentorDeskView } from './ReferralMentorDeskView';
 import { ProfileManagementView } from './ProfileManagementView';
 import { TermsAgreementCheckbox } from './TermsAndConditionsView';
 import { TransactionHistoryView } from './TransactionHistoryView';
+import { IncomeWalletGrowthChart } from './IncomeWalletGrowthChart';
+import { MarketTickerBar } from './MarketTickerBar';
+import { TradeHistorySection } from './TradeHistorySection';
 
 function formatVaultError(raw: string): string {
   if (raw.startsWith('{') && raw.includes('"error"')) {
@@ -92,6 +95,7 @@ type SidebarSection =
   | 'transaction-history'
   | 'activate-trading'
   | 'my-packages'
+  | 'trade-history'
   | 'capital-withdraw'
   | 'pump-fun'
   | 'forex-market'
@@ -125,11 +129,15 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
     walletTransfers,
     mlmCommissions,
     memeCoinInvestments,
+    coinMiningStakes,
     downlineReferrals,
     referralLinkClicks,
     savedPaymentMethods,
+    forexTrades,
+    copyTradeSubscriptions,
     submitKycUpdate,
     updateProfileAvatar,
+    updateUserPhone,
     updateAccountEmail,
     resendVerificationEmail,
     refreshAuthVerification,
@@ -458,6 +466,74 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
     );
   }
 
+  if (userProfile.suspended) {
+    const sl = platformConfig.supportLinks;
+    return (
+      <div className="min-h-screen bg-[#060911] flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-[#0B111E] border border-red-500/40 rounded-2xl p-6 text-center space-y-4 shadow-2xl">
+          <div className="w-12 h-12 rounded-2xl bg-red-500/15 border border-red-500/30 flex items-center justify-center mx-auto">
+            <Lock className="w-6 h-6 text-red-400" />
+          </div>
+          <div>
+            <h2 className="font-display font-bold text-white text-xl">Account Suspended</h2>
+            <p className="text-xs text-slate-400 mt-1">
+              Access to your vault ({userProfile.handle}) has been temporarily restricted by administration.
+            </p>
+          </div>
+          {userProfile.suspensionReason && (
+            <div className="p-3 rounded-xl bg-red-950/40 border border-red-500/30 text-xs text-red-200 text-left">
+              <div className="font-semibold text-red-300 mb-0.5">Reason:</div>
+              <div>{userProfile.suspensionReason}</div>
+            </div>
+          )}
+          {(sl?.telegramUrl || sl?.whatsappUrl || sl?.supportEmail) && (
+            <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2 text-xs">
+              <div className="text-slate-400 font-semibold">Contact Compliance Support:</div>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                {sl?.telegramUrl && (
+                  <a
+                    href={sl.telegramUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-1.5 rounded-lg bg-sky-600/20 border border-sky-500/40 text-sky-300 hover:bg-sky-600/30 inline-flex items-center gap-1"
+                  >
+                    Telegram <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
+                {sl?.whatsappUrl && (
+                  <a
+                    href={sl.whatsappUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-1.5 rounded-lg bg-emerald-600/20 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-600/30 inline-flex items-center gap-1"
+                  >
+                    WhatsApp <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
+                {sl?.supportEmail && (
+                  <a
+                    href={`mailto:${sl.supportEmail}`}
+                    className="px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:bg-slate-700"
+                  >
+                    {sl.supportEmail}
+                  </a>
+                )}
+              </div>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={signOutUser}
+            className="w-full py-2.5 px-4 rounded-lg border border-slate-700 hover:bg-slate-800 text-slate-200 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            Sign Out
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const enabledDepositMethods = platformConfig.paymentMethods.filter(
     (m) => m.enabled && m.allowDeposit
   );
@@ -489,6 +565,8 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
 
   const referralLink = `${window.location.origin}${import.meta.env.BASE_URL}?ref=${userProfile.handle}`;
 
+  const moduleControls = platformConfig.moduleControls;
+
   const sidebarGroups: {
     heading: string;
     items: { id: SidebarSection; label: string; Icon: React.ComponentType<{ className?: string }> }[];
@@ -503,7 +581,9 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
         { id: 'deposit', label: 'Deposit Funds', Icon: PlusCircle },
         { id: 'deposit-report', label: 'Deposit Wallet Report', Icon: Receipt },
         { id: 'income-wallet', label: 'Income Wallet', Icon: Wallet },
-        { id: 'p2p-transfers', label: 'P2P Transfers', Icon: Send },
+        ...(moduleControls?.p2pEnabled !== false
+          ? [{ id: 'p2p-transfers' as SidebarSection, label: 'P2P Transfers', Icon: Send }]
+          : []),
         { id: 'withdraw', label: 'Withdraw', Icon: ArrowUpRight },
         { id: 'payment-methods', label: 'Payment Methods', Icon: CreditCard },
         { id: 'transaction-history', label: 'Transaction History', Icon: History },
@@ -512,11 +592,18 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
     {
       heading: 'AI TRADING & LAUNCHPAD',
       items: [
-        { id: 'activate-trading', label: 'Activate Trading', Icon: Zap },
+        ...(moduleControls?.aiTradingEnabled !== false
+          ? [{ id: 'activate-trading' as SidebarSection, label: 'Activate Trading', Icon: Zap }]
+          : []),
         { id: 'my-packages', label: 'My Packages', Icon: Bot },
+        { id: 'trade-history', label: 'Trade History', Icon: Activity },
         { id: 'capital-withdraw', label: 'Capital Withdraw', Icon: Lock },
-        { id: 'pump-fun', label: `${platformConfig.pumpFunToken.name} Coin`, Icon: Rocket },
-        { id: 'forex-market', label: 'Forex Market', Icon: Globe },
+        ...(moduleControls?.coinMiningEnabled !== false
+          ? [{ id: 'pump-fun' as SidebarSection, label: `${platformConfig.pumpFunToken.name} Coin`, Icon: Rocket }]
+          : []),
+        ...(moduleControls?.forexMarketEnabled !== false
+          ? [{ id: 'forex-market' as SidebarSection, label: 'Forex Market', Icon: Globe }]
+          : []),
       ],
     },
     {
@@ -979,8 +1066,26 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
 
       {/* RIGHT MAIN WORKSPACE */}
       <div className="flex-1 min-w-0 flex flex-col">
-        {/* Glass Top Utility Header */}
-        <header className="sticky top-0 z-20 h-16 bg-[#0B111E]/82 backdrop-blur-xl border-b border-slate-800/80 px-4 sm:px-6 flex items-center justify-between gap-4">
+        <div className="sticky top-0 z-20">
+          <MarketTickerBar
+            pumpFunToken={platformConfig.pumpFunToken}
+            onSelectAsset={(symbol) => {
+              if (symbol.startsWith('USDT') || symbol.startsWith('SOL')) {
+                setShowDepositModal(true);
+              } else if (symbol.startsWith('XAU')) {
+                selectNav('forex-market');
+              } else if (
+                symbol.startsWith((platformConfig.pumpFunToken.ticker || 'ATX').toUpperCase())
+              ) {
+                selectNav('pump-fun');
+              } else {
+                selectNav('activate-trading');
+              }
+            }}
+          />
+
+          {/* Glass Top Utility Header */}
+          <header className="h-16 bg-[#0B111E]/88 backdrop-blur-xl border-b border-slate-800/80 px-4 sm:px-6 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
             <button
               type="button"
@@ -1066,7 +1171,8 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
               </div>
             </button>
           </div>
-        </header>
+          </header>
+        </div>
 
         {/* Main Scrollable Content */}
         <main className="flex-1 p-4 sm:p-6 space-y-5 max-w-[1400px] w-full mx-auto">
@@ -1462,6 +1568,17 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                     </div>
                   </div>
                 </div>
+
+                {/* 30-Day Income Wallet Growth Line Chart */}
+                <IncomeWalletGrowthChart
+                  currentIncomeBalance={userProfile.profitBalance}
+                  investments={investments}
+                  mlmCommissions={mlmCommissions}
+                  withdrawals={withdrawals}
+                  walletTransfers={walletTransfers}
+                  forexTrades={forexTrades}
+                  copyTradeSubscriptions={copyTradeSubscriptions}
+                />
               </section>
 
               {/* Row 2: Total Running AI Trading Exposure Banner */}
@@ -1774,11 +1891,35 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
 
               {/* Row 6: Active Investments & Capital Control Table */}
               {renderInvestmentsTable()}
+
+              {/* Row 7: Recent AI Trade History */}
+              <TradeHistorySection
+                investments={investments}
+                forexTrades={forexTrades}
+                copyTradeSubscriptions={copyTradeSubscriptions}
+                coinMiningStakes={coinMiningStakes}
+                withdrawals={withdrawals}
+                globalPaused={platformConfig.globalPaused}
+                compact
+                onViewAll={() => selectNav('trade-history')}
+              />
             </div>
           )}
 
           {/* VIEW: MY PACKAGES / CAPITAL WITHDRAW */}
           {(activeNav === 'my-packages' || activeNav === 'capital-withdraw') && renderInvestmentsTable()}
+
+          {/* VIEW: AI TRADE HISTORY */}
+          {activeNav === 'trade-history' && (
+            <TradeHistorySection
+              investments={investments}
+              forexTrades={forexTrades}
+              copyTradeSubscriptions={copyTradeSubscriptions}
+              coinMiningStakes={coinMiningStakes}
+              withdrawals={withdrawals}
+              globalPaused={platformConfig.globalPaused}
+            />
+          )}
 
           {/* VIEW: ACTIVATE TRADING (200-DAY AI PACKAGES) */}
           {activeNav === 'activate-trading' && (() => {
@@ -2263,6 +2404,13 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                     </button>
                   </div>
 
+                  {platformConfig.withdrawalsPaused && (
+                    <div className="p-3 rounded-xl bg-amber-500/15 border border-amber-500/40 text-xs text-amber-200 flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span>Withdrawals are temporarily paused for scheduled liquidity maintenance.</span>
+                    </div>
+                  )}
+
                   {savedPaymentMethods.length > 0 && (
                     <div className="p-3 rounded-xl bg-slate-900/75 border border-slate-700/70 space-y-2">
                       <div className="text-[11px] font-semibold text-slate-300">
@@ -2404,10 +2552,16 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                     </label>
                     <button
                       type="submit"
-                      disabled={busyAction || enabledWithdrawMethods.length === 0}
-                      className="w-full py-2.5 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold"
+                      disabled={
+                        busyAction ||
+                        enabledWithdrawMethods.length === 0 ||
+                        Boolean(platformConfig.withdrawalsPaused)
+                      }
+                      className="w-full py-2.5 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold"
                     >
-                      Withdraw Profit Instantly
+                      {platformConfig.withdrawalsPaused
+                        ? 'Withdrawals Temporarily Paused'
+                        : 'Withdraw Profit Instantly'}
                     </button>
                   </form>
                 </div>
@@ -2426,6 +2580,13 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                     </div>
                     <Send className="w-5 h-5 text-orange-400 shrink-0" />
                   </div>
+
+                  {(platformConfig.p2pPaused || platformConfig.moduleControls?.p2pEnabled === false) && (
+                    <div className="p-3 rounded-xl bg-amber-500/15 border border-amber-500/40 text-xs text-amber-200 flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span>Internal P2P transfers are currently paused by administration.</span>
+                    </div>
+                  )}
 
                   <form
                     onSubmit={async (e) => {
@@ -2492,10 +2653,16 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                     </div>
                     <button
                       type="submit"
-                      disabled={busyAction}
-                      className="w-full py-2.5 px-4 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-sm font-semibold"
+                      disabled={
+                        busyAction ||
+                        Boolean(platformConfig.p2pPaused) ||
+                        platformConfig.moduleControls?.p2pEnabled === false
+                      }
+                      className="w-full py-2.5 px-4 rounded-lg bg-orange-600 hover:bg-orange-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold"
                     >
-                      Send Instant P2P USD
+                      {platformConfig.p2pPaused || platformConfig.moduleControls?.p2pEnabled === false
+                        ? 'P2P Transfers Paused'
+                        : 'Send Instant P2P USD'}
                     </button>
                   </form>
                 </div>
@@ -3183,6 +3350,7 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                 authUser?.providerData?.some((p) => p.providerId === 'password')
               )}
               onUpdateProfileAvatar={updateProfileAvatar}
+              onUpdateUserPhone={updateUserPhone}
               onUpdateAccountEmail={updateAccountEmail}
               onSubmitKyc={submitKycUpdate}
               onNotify={notify}
@@ -3201,6 +3369,34 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                 >
                   Terms &amp; Conditions
                 </button>
+              )}
+              {platformConfig.supportLinks?.telegramUrl && (
+                <a
+                  href={platformConfig.supportLinks.telegramUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-semibold text-sky-400 hover:text-sky-300 inline-flex items-center gap-1"
+                >
+                  Telegram Support <ExternalLink className="w-3 h-3" />
+                </a>
+              )}
+              {platformConfig.supportLinks?.whatsappUrl && (
+                <a
+                  href={platformConfig.supportLinks.whatsappUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-semibold text-emerald-400 hover:text-emerald-300 inline-flex items-center gap-1"
+                >
+                  WhatsApp Support <ExternalLink className="w-3 h-3" />
+                </a>
+              )}
+              {platformConfig.supportLinks?.supportEmail && (
+                <a
+                  href={`mailto:${platformConfig.supportLinks.supportEmail}`}
+                  className="font-semibold text-slate-300 hover:text-orange-400"
+                >
+                  {platformConfig.supportLinks.supportEmail}
+                </a>
               )}
             </div>
             <span>Domain: alphatradex.pro · Crypto Settlement Only</span>
@@ -3305,6 +3501,12 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono text-xs"
                 />
               </div>
+              {platformConfig.withdrawalsPaused && (
+                <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Withdrawals are temporarily paused by administration.</span>
+                </div>
+              )}
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
@@ -3315,8 +3517,8 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                 </button>
                 <button
                   type="submit"
-                  disabled={busyAction}
-                  className="px-4 py-2 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold inline-flex items-center gap-1.5"
+                  disabled={busyAction || Boolean(platformConfig.withdrawalsPaused)}
+                  className="px-4 py-2 rounded-lg bg-orange-600 hover:bg-orange-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold inline-flex items-center gap-1.5"
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" />
                   Submit Capital Request

@@ -35,6 +35,8 @@ import {
 } from '../constants/defaults';
 import { auth, db, googleProvider, handleFirestoreError, OperationType } from '../lib/firebase';
 import {
+  AdminActionLog,
+  AdminModuleControls,
   BannerAdConfig,
   CoinMiningPlan,
   CoinMiningStake,
@@ -58,6 +60,7 @@ import {
   PlatformConfig,
   ReferralLinkRecord,
   ReferralStats,
+  SupportLinksConfig,
   UserPaymentMethod,
   UserProfile,
   WalletTransfer,
@@ -77,6 +80,11 @@ interface KycDraft {
   idNumber: string;
   idPhotoData: string;
   portraitPhotoData: string;
+  countryCode?: string;
+  countryName?: string;
+  phoneDialPrefix?: string;
+  phoneNumber?: string;
+  phoneVerified?: boolean;
 }
 
 interface PlatformContextValue {
@@ -117,6 +125,11 @@ interface PlatformContextValue {
     idNumber: string;
     idPhotoData: string;
     portraitPhotoData: string;
+    countryCode: string;
+    countryName: string;
+    phoneDialPrefix: string;
+    phoneNumber: string;
+    phoneVerified: boolean;
   }) => Promise<{ needsEmailVerification: boolean }>;
   submitKycUpdate: (params: {
     fullName: string;
@@ -126,6 +139,13 @@ interface PlatformContextValue {
     portraitPhotoData: string;
   }) => Promise<void>;
   updateProfileAvatar: (avatarData: string, fullName?: string) => Promise<void>;
+  updateUserPhone: (params: {
+    countryCode: string;
+    countryName: string;
+    phoneDialPrefix: string;
+    phoneNumber: string;
+    phoneVerified: boolean;
+  }) => Promise<void>;
   updateAccountEmail: (
     newEmail: string,
     currentPassword?: string
@@ -218,14 +238,27 @@ interface PlatformContextValue {
   rejectCryptoDeposit: (deposit: CryptoDeposit, adminNote: string) => Promise<void>;
   approveKyc: (targetUid: string) => Promise<void>;
   rejectKyc: (targetUid: string) => Promise<void>;
+  setUserKycStatus: (targetUid: string, status: UserProfile['kycStatus']) => Promise<void>;
+  verifyUserPhone: (targetUid: string, verified: boolean) => Promise<void>;
+  bulkApproveKyc: (targetUids: string[]) => Promise<number>;
+  bulkVerifyPhones: (targetUids: string[]) => Promise<number>;
   approveCapitalWithdrawal: (withdrawal: Withdrawal, adminNote?: string) => Promise<void>;
   rejectCapitalWithdrawal: (withdrawal: Withdrawal, adminNote: string) => Promise<void>;
+  updateWithdrawalNote: (withdrawalId: string, adminNote: string) => Promise<void>;
   giftMentorAccount: (params: {
     targetUid: string;
     giftedCapital: number;
     dailyPercent: number;
     aiMode: string;
   }) => Promise<void>;
+  adjustUserBalance: (params: {
+    targetUid: string;
+    wallet: 'usdBalance' | 'profitBalance';
+    mode: 'credit' | 'debit';
+    amountUsd: number;
+    reason: string;
+  }) => Promise<void>;
+  setUserSuspension: (targetUid: string, suspended: boolean, reason: string) => Promise<void>;
 }
 
 const PlatformContext = createContext<PlatformContextValue | null>(null);
@@ -306,6 +339,17 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           setPlatformConfig({
             ...DEFAULT_PLATFORM_CONFIG,
             ...data,
+            withdrawalsPaused: Boolean(data.withdrawalsPaused),
+            signupsPaused: Boolean(data.signupsPaused),
+            p2pPaused: Boolean(data.p2pPaused),
+            moduleControls: {
+              ...DEFAULT_PLATFORM_CONFIG.moduleControls!,
+              ...(data.moduleControls || {}),
+            },
+            supportLinks: {
+              ...DEFAULT_PLATFORM_CONFIG.supportLinks!,
+              ...(data.supportLinks || {}),
+            },
             mlmRates: { ...DEFAULT_PLATFORM_CONFIG.mlmRates, ...(data.mlmRates || {}) },
             mentorConfig: { ...DEFAULT_PLATFORM_CONFIG.mentorConfig, ...(data.mentorConfig || {}) },
             depositWallets: mergedWallets,
@@ -503,6 +547,18 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const hasKycFields = Boolean(draft?.idType && cleanIdNumber);
       const batch = writeBatch(db);
 
+      const cleanCountryCode = (draft?.countryCode || '').trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4);
+      const cleanCountryName = (draft?.countryName || '').trim().slice(0, 80);
+      const cleanDialPrefix =
+        draft?.phoneDialPrefix && /^\+[0-9]{1,8}$/.test(draft.phoneDialPrefix.trim())
+          ? draft.phoneDialPrefix.trim()
+          : '';
+      const cleanPhoneNumber =
+        draft?.phoneNumber && /^\+[0-9]{6,18}$/.test(draft.phoneNumber.trim())
+          ? draft.phoneNumber.trim()
+          : '';
+      const cleanPhoneVerified = Boolean(draft?.phoneVerified && cleanPhoneNumber);
+
       const newClientRecord = {
         uid: user.uid,
         email,
@@ -517,6 +573,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         idNumber: cleanIdNumber,
         idPhotoData: cleanIdPhoto,
         portraitPhotoData: cleanPortrait,
+        ...(cleanCountryCode ? { countryCode: cleanCountryCode } : {}),
+        ...(cleanCountryName ? { countryName: cleanCountryName } : {}),
+        ...(cleanDialPrefix ? { phoneDialPrefix: cleanDialPrefix } : {}),
+        ...(cleanPhoneNumber ? { phoneNumber: cleanPhoneNumber } : {}),
+        ...(cleanPhoneNumber ? { phoneVerified: cleanPhoneVerified } : {}),
         usdBalance: 0,
         profitBalance: 0,
         totalInvested: 0,
@@ -905,7 +966,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const hasDraft = Boolean(
       kycDraft &&
         (kycDraft.fullName?.trim() ||
-          (kycDraft.idType && kycDraft.idNumber?.trim()))
+          (kycDraft.idType && kycDraft.idNumber?.trim()) ||
+          kycDraft.phoneNumber?.trim())
     );
     const normalizedDraft: KycDraft | null = hasDraft
       ? {
@@ -915,6 +977,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           idNumber: (kycDraft?.idNumber || '').trim(),
           idPhotoData: kycDraft?.idPhotoData || '',
           portraitPhotoData: kycDraft?.portraitPhotoData || '',
+          countryCode: kycDraft?.countryCode || '',
+          countryName: kycDraft?.countryName || '',
+          phoneDialPrefix: kycDraft?.phoneDialPrefix || '',
+          phoneNumber: kycDraft?.phoneNumber || '',
+          phoneVerified: Boolean(kycDraft?.phoneVerified),
         }
       : null;
 
@@ -950,7 +1017,15 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     idNumber: string;
     idPhotoData: string;
     portraitPhotoData: string;
+    countryCode: string;
+    countryName: string;
+    phoneDialPrefix: string;
+    phoneNumber: string;
+    phoneVerified: boolean;
   }) => {
+    if (platformConfig.signupsPaused) {
+      throw new Error('New client registrations are temporarily paused by administration. Please try again shortly.');
+    }
     const cred = await createUserWithEmailAndPassword(auth, params.email.trim(), params.password);
     const draft: KycDraft = {
       fullName: params.fullName.trim(),
@@ -959,6 +1034,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       idNumber: params.idNumber.trim(),
       idPhotoData: params.idPhotoData,
       portraitPhotoData: params.portraitPhotoData,
+      countryCode: params.countryCode.trim().toUpperCase(),
+      countryName: params.countryName.trim(),
+      phoneDialPrefix: params.phoneDialPrefix.trim(),
+      phoneNumber: params.phoneNumber.trim(),
+      phoneVerified: Boolean(params.phoneVerified),
     };
     try {
       localStorage.setItem(`vtv_kyc_draft_${cred.user.uid}`, JSON.stringify(draft));
@@ -1013,6 +1093,38 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
     try {
       await updateDoc(doc(db, 'users', authUser.uid), payload);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `users/${authUser.uid}`);
+    }
+  };
+
+  const updateUserPhone = async (params: {
+    countryCode: string;
+    countryName: string;
+    phoneDialPrefix: string;
+    phoneNumber: string;
+    phoneVerified: boolean;
+  }) => {
+    if (!authUser || !userProfile) throw new Error('Authentication required.');
+    const cleanCountryCode = params.countryCode.trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4);
+    const cleanCountryName = params.countryName.trim().slice(0, 80);
+    const cleanPrefix = params.phoneDialPrefix.trim();
+    const cleanPhone = params.phoneNumber.trim();
+    if (!/^\+[0-9]{1,8}$/.test(cleanPrefix)) {
+      throw new Error('Invalid country phone prefix.');
+    }
+    if (!/^\+[0-9]{6,18}$/.test(cleanPhone)) {
+      throw new Error('Invalid E.164 phone number format.');
+    }
+    try {
+      await updateDoc(doc(db, 'users', authUser.uid), {
+        countryCode: cleanCountryCode,
+        countryName: cleanCountryName,
+        phoneDialPrefix: cleanPrefix,
+        phoneNumber: cleanPhone,
+        phoneVerified: Boolean(params.phoneVerified),
+        updatedAt: serverTimestamp(),
+      });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `users/${authUser.uid}`);
     }
@@ -1167,6 +1279,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     txId: string;
   }) => {
     if (!authUser || !userProfile) throw new Error('User vault profile required.');
+    if (userProfile.suspended) {
+      throw new Error(`Account suspended: ${userProfile.suspensionReason || 'Contact compliance support.'}`);
+    }
     const methodId = sanitizeRuleId(params.network, 'USDT_TRC20');
     const amount = Number(params.amountUsd);
     if (!Number.isFinite(amount) || amount <= 0) {
@@ -1296,6 +1411,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     fundingSource: PackageFundingSource = 'deposit_wallet'
   ) => {
     if (!authUser || !userProfile) throw new Error('Authentication required.');
+    if (userProfile.suspended) {
+      throw new Error(`Account suspended: ${userProfile.suspensionReason || 'Contact compliance support.'}`);
+    }
+    if (platformConfig.moduleControls?.aiTradingEnabled === false) {
+      throw new Error('AI Trading module is temporarily disabled by administration.');
+    }
     if (platformConfig.globalPaused) throw new Error('Trading allocations are temporarily paused by administration.');
 
     if (fundingSource === 'deposit_wallet' && userProfile.usdBalance < pkg.capital) {
@@ -1479,6 +1600,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const transferIncomeToDepositWallet = async (amountUsd: number) => {
     if (!authUser || !userProfile) throw new Error('Authentication required.');
+    if (userProfile.suspended) {
+      throw new Error(`Account suspended: ${userProfile.suspensionReason || 'Contact compliance support.'}`);
+    }
     const amount = Number(Number(amountUsd).toFixed(2));
     if (!Number.isFinite(amount) || amount < 1) {
       throw new Error('Minimum internal wallet transfer is $1.00 USD.');
@@ -1525,6 +1649,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const claimInvestmentProfit = async (investment: Investment): Promise<number> => {
     if (!authUser || !userProfile) throw new Error('Authentication required.');
+    if (userProfile.suspended) {
+      throw new Error(`Account suspended: ${userProfile.suspensionReason || 'Contact compliance support.'}`);
+    }
     const metrics = computeInvestmentMetrics(investment, platformConfig.globalPaused);
     if (metrics.unclaimedProfit <= 0) {
       throw new Error('No unclaimed weekday profit available yet.');
@@ -1572,6 +1699,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     source: 'package_profit' | 'mlm_commission' | 'mentor_profit';
   }) => {
     if (!authUser || !userProfile) throw new Error('Authentication required.');
+    if (userProfile.suspended) {
+      throw new Error(`Account suspended: ${userProfile.suspensionReason || 'Contact compliance support.'}`);
+    }
+    if (platformConfig.withdrawalsPaused) {
+      throw new Error('Withdrawals are temporarily paused for scheduled maintenance by administration.');
+    }
     const amount = Number(params.amountUsd);
     if (!Number.isFinite(amount) || amount <= 0) {
       throw new Error('Enter a valid withdrawal USD amount.');
@@ -1655,6 +1788,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     destinationAddress: string;
   }) => {
     if (!authUser || !userProfile) throw new Error('Authentication required.');
+    if (userProfile.suspended) {
+      throw new Error(`Account suspended: ${userProfile.suspensionReason || 'Contact compliance support.'}`);
+    }
+    if (platformConfig.withdrawalsPaused) {
+      throw new Error('Capital withdrawals are temporarily paused for scheduled maintenance by administration.');
+    }
     const inv = params.investment;
     const metrics = computeInvestmentMetrics(inv, platformConfig.globalPaused);
     if (!metrics.isCapitalUnlockEligible) {
@@ -1716,6 +1855,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     note: string;
   }) => {
     if (!authUser || !userProfile) throw new Error('Authentication required.');
+    if (userProfile.suspended) {
+      throw new Error(`Account suspended: ${userProfile.suspensionReason || 'Contact compliance support.'}`);
+    }
+    if (platformConfig.p2pPaused || platformConfig.moduleControls?.p2pEnabled === false) {
+      throw new Error('P2P internal transfers are temporarily paused by administration.');
+    }
     const amount = Number(params.amountUsd);
     if (!Number.isFinite(amount) || amount <= 0) {
       throw new Error('Transfer amount must be greater than $0.');
@@ -1799,6 +1944,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     txSignature?: string;
   }) => {
     if (!authUser || !userProfile) throw new Error('Authentication required.');
+    if (userProfile.suspended) {
+      throw new Error(`Account suspended: ${userProfile.suspensionReason || 'Contact compliance support.'}`);
+    }
+    if (platformConfig.moduleControls?.coinMiningEnabled === false) {
+      throw new Error('Coin Launchpad & Mining module is temporarily disabled by administration.');
+    }
     const amount = Number(params.amountUsd);
     if (!Number.isFinite(amount) || amount <= 0) {
       throw new Error('Allocation amount must be greater than $0.');
@@ -1847,7 +1998,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const startCoinMiningStake = async (plan: CoinMiningPlan, amountUsd: number) => {
     if (!authUser || !userProfile) throw new Error('Authentication required.');
-    if (!platformConfig.coinMiningSettings.paidMiningEnabled) {
+    if (userProfile.suspended) {
+      throw new Error(`Account suspended: ${userProfile.suspensionReason || 'Contact compliance support.'}`);
+    }
+    if (platformConfig.moduleControls?.coinMiningEnabled === false || !platformConfig.coinMiningSettings.paidMiningEnabled) {
       throw new Error('Coin mining allocations are temporarily paused by administration.');
     }
     if (!plan.enabled) {
@@ -2115,6 +2269,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     commissionUsd: number;
   }) => {
     if (!authUser || !userProfile) throw new Error('Authentication required to place Forex orders.');
+    if (userProfile.suspended) {
+      throw new Error(`Account suspended: ${userProfile.suspensionReason || 'Contact compliance support.'}`);
+    }
+    if (platformConfig.moduleControls?.forexMarketEnabled === false) {
+      throw new Error('Forex Market module is temporarily disabled by administration.');
+    }
     if (platformConfig.globalPaused) {
       throw new Error('Platform trading is temporarily paused by administration.');
     }
@@ -2282,6 +2442,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     stopLossPercent: number;
   }) => {
     if (!authUser || !userProfile) throw new Error('Authentication required to start Copy Trading.');
+    if (userProfile.suspended) {
+      throw new Error(`Account suspended: ${userProfile.suspensionReason || 'Contact compliance support.'}`);
+    }
+    if (platformConfig.moduleControls?.forexMarketEnabled === false) {
+      throw new Error('Forex & Copy Trading module is temporarily disabled by administration.');
+    }
     if (platformConfig.globalPaused) {
       throw new Error('Platform allocations are temporarily paused by administration.');
     }
@@ -2648,11 +2814,38 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         enabled: Boolean(ct.enabled),
       }));
 
-    const safeForexConfig: ForexPlatformConfig = {
-      tradingEnabled: rawFx.tradingEnabled !== false,
-      copyTradingEnabled: rawFx.copyTradingEnabled !== false,
-      accountTiers: safeAccountTiers,
-      copyTraders: safeCopyTraders,
+    const safeModuleControls: AdminModuleControls = {
+      aiTradingEnabled: next.moduleControls?.aiTradingEnabled !== false,
+      forexMarketEnabled: next.moduleControls?.forexMarketEnabled !== false,
+      coinMiningEnabled: next.moduleControls?.coinMiningEnabled !== false,
+      p2pEnabled: next.moduleControls?.p2pEnabled !== false,
+      requireSignupForTradingModules:
+        next.moduleControls?.requireSignupForTradingModules !== false,
+    };
+
+    const safeSupportLinks: SupportLinksConfig = {
+      telegramUrl: String(next.supportLinks?.telegramUrl || '').trim().slice(0, 250),
+      whatsappUrl: String(next.supportLinks?.whatsappUrl || '').trim().slice(0, 250),
+      supportEmail: String(next.supportLinks?.supportEmail || '').trim().slice(0, 254),
+    };
+
+    const writeAdminLog = async (entry: Omit<AdminActionLog, 'id' | 'adminUid' | 'adminEmail' | 'createdAt'>) => {
+      if (!authUser) return;
+      try {
+        const logId = makeId('alog');
+        await setDoc(doc(db, 'adminLogs', logId), {
+          adminUid: authUser.uid,
+          adminEmail: (authUser.email || SUPER_ADMIN_EMAIL).trim().slice(0, 254),
+          action: entry.action.trim().slice(0, 80),
+          targetUid: entry.targetUid.trim().slice(0, 128),
+          targetLabel: (entry.targetLabel.trim() || 'Platform').slice(0, 160),
+          details: (entry.details.trim() || 'Admin action executed').slice(0, 500),
+          amountUsd: Number.isFinite(entry.amountUsd) ? Number(entry.amountUsd.toFixed(2)) : 0,
+          createdAt: serverTimestamp(),
+        });
+      } catch (err) {
+        console.warn('Admin audit log write skipped:', err instanceof Error ? err.message : String(err));
+      }
     };
 
     try {
@@ -2674,6 +2867,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         eliteCapitalLockDays: Math.max(1, Math.round(Number(next.eliteCapitalLockDays) || 70)),
         totalProfitDays: Math.max(1, Math.round(Number(next.totalProfitDays) || 200)),
         globalPaused: Boolean(next.globalPaused),
+        withdrawalsPaused: Boolean(next.withdrawalsPaused),
+        signupsPaused: Boolean(next.signupsPaused),
+        p2pPaused: Boolean(next.p2pPaused),
+        moduleControls: safeModuleControls,
+        supportLinks: safeSupportLinks,
         mlmRates: safeMlmRates,
         depositWallets: safeDepositWallets,
         pumpFunToken: safePumpFunToken,
@@ -2684,11 +2882,42 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         bannerAds: safeBannerAds,
         coinMiningSettings: safeCoinMiningSettings,
         coinMiningPlans: safeMiningPlans,
-        forexConfig: safeForexConfig,
+        forexConfig: {
+          tradingEnabled: rawFx.tradingEnabled !== false,
+          copyTradingEnabled: rawFx.copyTradingEnabled !== false,
+          accountTiers: safeAccountTiers,
+          copyTraders: safeCopyTraders,
+        },
         updatedAt: serverTimestamp(),
+      });
+      await writeAdminLog({
+        action: 'CONFIG_PUBLISHED',
+        targetUid: '',
+        targetLabel: 'config/platform',
+        details: `Global Pause=${Boolean(next.globalPaused)} · Withdrawals Paused=${Boolean(next.withdrawalsPaused)} · Signups Paused=${Boolean(next.signupsPaused)} · P2P Paused=${Boolean(next.p2pPaused)}`,
+        amountUsd: 0,
       });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, 'config/platform');
+    }
+  };
+
+  const recordAdminAudit = async (entry: Omit<AdminActionLog, 'id' | 'adminUid' | 'adminEmail' | 'createdAt'>) => {
+    if (!authUser) return;
+    try {
+      const logId = makeId('alog');
+      await setDoc(doc(db, 'adminLogs', logId), {
+        adminUid: authUser.uid,
+        adminEmail: (authUser.email || SUPER_ADMIN_EMAIL).trim().slice(0, 254),
+        action: entry.action.trim().slice(0, 80),
+        targetUid: entry.targetUid.trim().slice(0, 128),
+        targetLabel: (entry.targetLabel.trim() || 'Platform').slice(0, 160),
+        details: (entry.details.trim() || 'Admin action executed').slice(0, 500),
+        amountUsd: Number.isFinite(entry.amountUsd) ? Number(entry.amountUsd.toFixed(2)) : 0,
+        createdAt: serverTimestamp(),
+      });
+    } catch (err) {
+      console.warn('Admin audit log write skipped:', err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -2717,6 +2946,13 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           updatedAt: serverTimestamp(),
         });
       });
+      await recordAdminAudit({
+        action: 'DEPOSIT_APPROVED',
+        targetUid: deposit.uid,
+        targetLabel: deposit.userName || deposit.userEmail,
+        details: `Approved ${deposit.network} deposit (TxID: ${deposit.txId})`,
+        amountUsd: deposit.amountUsd,
+      });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `cryptoDeposits/${deposit.id}`);
     }
@@ -2730,6 +2966,13 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         adminNote: note,
         updatedAt: serverTimestamp(),
       });
+      await recordAdminAudit({
+        action: 'DEPOSIT_REJECTED',
+        targetUid: deposit.uid,
+        targetLabel: deposit.userName || deposit.userEmail,
+        details: `Rejected ${deposit.network} deposit: ${note}`,
+        amountUsd: deposit.amountUsd,
+      });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `cryptoDeposits/${deposit.id}`);
     }
@@ -2738,9 +2981,20 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const approveKyc = async (targetUid: string) => {
     try {
       const userRef = doc(db, 'users', targetUid);
+      const snap = await getDoc(userRef);
+      const targetUser = snap.exists() ? (snap.data() as UserProfile) : null;
+      const hasPhone = Boolean(targetUser?.phoneNumber);
       await updateDoc(userRef, {
         kycStatus: 'approved',
+        ...(hasPhone ? { phoneVerified: true } : {}),
         updatedAt: serverTimestamp(),
+      });
+      await recordAdminAudit({
+        action: 'KYC_APPROVED',
+        targetUid,
+        targetLabel: targetUser ? `${targetUser.fullName} (${targetUser.handle})` : targetUid,
+        details: `KYC approved${hasPhone ? ' + phone verified' : ''}`,
+        amountUsd: 0,
       });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `users/${targetUid}`);
@@ -2750,16 +3004,138 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const rejectKyc = async (targetUid: string) => {
     try {
       const userRef = doc(db, 'users', targetUid);
+      const snap = await getDoc(userRef);
+      const targetUser = snap.exists() ? (snap.data() as UserProfile) : null;
       await updateDoc(userRef, {
         kycStatus: 'rejected',
         updatedAt: serverTimestamp(),
+      });
+      await recordAdminAudit({
+        action: 'KYC_REJECTED',
+        targetUid,
+        targetLabel: targetUser ? `${targetUser.fullName} (${targetUser.handle})` : targetUid,
+        details: 'KYC submission rejected',
+        amountUsd: 0,
       });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `users/${targetUid}`);
     }
   };
 
+  const setUserKycStatus = async (targetUid: string, status: UserProfile['kycStatus']) => {
+    try {
+      const userRef = doc(db, 'users', targetUid);
+      const snap = await getDoc(userRef);
+      const targetUser = snap.exists() ? (snap.data() as UserProfile) : null;
+      await updateDoc(userRef, {
+        kycStatus: status,
+        updatedAt: serverTimestamp(),
+      });
+      await recordAdminAudit({
+        action: 'KYC_STATUS_SET',
+        targetUid,
+        targetLabel: targetUser ? `${targetUser.fullName} (${targetUser.handle})` : targetUid,
+        details: `KYC status set to ${status}`,
+        amountUsd: 0,
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `users/${targetUid}`);
+    }
+  };
+
+  const verifyUserPhone = async (targetUid: string, verified: boolean) => {
+    try {
+      const userRef = doc(db, 'users', targetUid);
+      const snap = await getDoc(userRef);
+      const targetUser = snap.exists() ? (snap.data() as UserProfile) : null;
+      await updateDoc(userRef, {
+        phoneVerified: verified,
+        updatedAt: serverTimestamp(),
+      });
+      await recordAdminAudit({
+        action: verified ? 'PHONE_VERIFIED' : 'PHONE_UNVERIFIED',
+        targetUid,
+        targetLabel: targetUser ? `${targetUser.fullName} (${targetUser.handle})` : targetUid,
+        details: `Phone verification set to ${verified ? 'VERIFIED' : 'PENDING'}`,
+        amountUsd: 0,
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `users/${targetUid}`);
+    }
+  };
+
+  const bulkApproveKyc = async (targetUids: string[]): Promise<number> => {
+    const unique = Array.from(new Set(targetUids.filter(Boolean)));
+    if (unique.length === 0) return 0;
+    let count = 0;
+    try {
+      for (let i = 0; i < unique.length; i += 200) {
+        const slice = unique.slice(i, i + 200);
+        const batch = writeBatch(db);
+        for (const uid of slice) {
+          const userRef = doc(db, 'users', uid);
+          const snap = await getDoc(userRef);
+          if (!snap.exists()) continue;
+          const u = snap.data() as UserProfile;
+          batch.update(userRef, {
+            kycStatus: 'approved',
+            ...(u.phoneNumber ? { phoneVerified: true } : {}),
+            updatedAt: serverTimestamp(),
+          });
+          count++;
+        }
+        await batch.commit();
+      }
+      await recordAdminAudit({
+        action: 'BULK_KYC_APPROVED',
+        targetUid: '',
+        targetLabel: `${count} Clients`,
+        details: `Bulk approved KYC for ${count} selected client accounts`,
+        amountUsd: 0,
+      });
+      return count;
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, 'users/bulk-kyc');
+    }
+  };
+
+  const bulkVerifyPhones = async (targetUids: string[]): Promise<number> => {
+    const unique = Array.from(new Set(targetUids.filter(Boolean)));
+    if (unique.length === 0) return 0;
+    let count = 0;
+    try {
+      for (let i = 0; i < unique.length; i += 200) {
+        const slice = unique.slice(i, i + 200);
+        const batch = writeBatch(db);
+        for (const uid of slice) {
+          const userRef = doc(db, 'users', uid);
+          const snap = await getDoc(userRef);
+          if (!snap.exists()) continue;
+          const u = snap.data() as UserProfile;
+          if (!u.phoneNumber) continue;
+          batch.update(userRef, {
+            phoneVerified: true,
+            updatedAt: serverTimestamp(),
+          });
+          count++;
+        }
+        await batch.commit();
+      }
+      await recordAdminAudit({
+        action: 'BULK_PHONE_VERIFIED',
+        targetUid: '',
+        targetLabel: `${count} Clients`,
+        details: `Bulk verified phone numbers for ${count} clients`,
+        amountUsd: 0,
+      });
+      return count;
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, 'users/bulk-phone');
+    }
+  };
+
   const approveCapitalWithdrawal = async (withdrawal: Withdrawal, adminNote = 'Manual capital payout released') => {
+    const cleanNote = adminNote.trim().slice(0, 300) || 'Manual capital payout released';
     try {
       await runTransaction(db, async (tx) => {
         const wdRef = doc(db, 'withdrawals', withdrawal.id);
@@ -2794,9 +3170,16 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
         tx.update(wdRef, {
           status: 'approved',
-          adminNote,
+          adminNote: cleanNote,
           updatedAt: serverTimestamp(),
         });
+      });
+      await recordAdminAudit({
+        action: 'CAPITAL_WITHDRAWAL_APPROVED',
+        targetUid: withdrawal.uid,
+        targetLabel: withdrawal.userName || withdrawal.userEmail,
+        details: `Released Package #${withdrawal.packageNumber} capital payout · ${cleanNote}`,
+        amountUsd: withdrawal.amountUsd,
       });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `withdrawals/${withdrawal.id}`);
@@ -2804,7 +3187,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const rejectCapitalWithdrawal = async (withdrawal: Withdrawal, adminNote: string) => {
-    const note = adminNote || 'Rejected by administration';
+    const note = adminNote.trim().slice(0, 300) || 'Rejected by administration';
     try {
       await runTransaction(db, async (tx) => {
         const wdRef = doc(db, 'withdrawals', withdrawal.id);
@@ -2824,8 +3207,34 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           updatedAt: serverTimestamp(),
         });
       });
+      await recordAdminAudit({
+        action: 'CAPITAL_WITHDRAWAL_REJECTED',
+        targetUid: withdrawal.uid,
+        targetLabel: withdrawal.userName || withdrawal.userEmail,
+        details: `Rejected Package #${withdrawal.packageNumber} capital withdrawal: ${note}`,
+        amountUsd: withdrawal.amountUsd,
+      });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `withdrawals/${withdrawal.id}`);
+    }
+  };
+
+  const updateWithdrawalNote = async (withdrawalId: string, adminNote: string) => {
+    const cleanNote = adminNote.trim().slice(0, 300);
+    try {
+      await updateDoc(doc(db, 'withdrawals', withdrawalId), {
+        adminNote: cleanNote,
+        updatedAt: serverTimestamp(),
+      });
+      await recordAdminAudit({
+        action: 'WITHDRAWAL_NOTE_UPDATED',
+        targetUid: '',
+        targetLabel: withdrawalId,
+        details: `Updated payout TXID / reference: ${cleanNote || '(cleared)'}`,
+        amountUsd: 0,
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `withdrawals/${withdrawalId}`);
     }
   };
 
@@ -2838,6 +3247,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const giftAmount = Number(params.giftedCapital);
     if (giftAmount <= 0) throw new Error('Gifted capital must be greater than $0.');
     const invId = makeId('mentor_inv');
+    let targetLabel = params.targetUid;
 
     try {
       await runTransaction(db, async (tx) => {
@@ -2845,6 +3255,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const userSnap = await tx.get(userRef);
         if (!userSnap.exists()) throw new Error('Target user not found.');
         const cur = userSnap.data() as UserProfile;
+        targetLabel = `${cur.fullName} (${cur.handle})`;
 
         const multiplier = Math.max(1, Number(platformConfig.mentorConfig?.volumeMultiplier) || 4);
         const nextGifted = Number(((cur.mentorGiftedCapital || 0) + giftAmount).toFixed(2));
@@ -2875,8 +3286,94 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           updatedAt: serverTimestamp(),
         });
       });
+      await recordAdminAudit({
+        action: 'MENTOR_GIFTED',
+        targetUid: params.targetUid,
+        targetLabel,
+        details: `Gifted $${giftAmount.toFixed(2)} mentor vault (${Number(params.dailyPercent) || 2}%/day)`,
+        amountUsd: giftAmount,
+      });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `users/${params.targetUid}`);
+    }
+  };
+
+  const adjustUserBalance = async (params: {
+    targetUid: string;
+    wallet: 'usdBalance' | 'profitBalance';
+    mode: 'credit' | 'debit';
+    amountUsd: number;
+    reason: string;
+  }) => {
+    const amount = Number(Number(params.amountUsd).toFixed(2));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error('Adjustment amount must be greater than $0.00.');
+    }
+    const cleanReason = params.reason.trim().slice(0, 300) || 'Admin manual balance adjustment';
+    let targetLabel = params.targetUid;
+    let nextBal = 0;
+
+    try {
+      await runTransaction(db, async (tx) => {
+        const userRef = doc(db, 'users', params.targetUid);
+        const snap = await tx.get(userRef);
+        if (!snap.exists()) throw new Error('Client account not found.');
+        const cur = snap.data() as UserProfile;
+        targetLabel = `${cur.fullName} (${cur.handle})`;
+        const prevBal = Number(cur[params.wallet] || 0);
+        if (params.mode === 'debit' && prevBal < amount) {
+          throw new Error(
+            `Cannot debit $${amount.toFixed(2)}; current ${
+              params.wallet === 'usdBalance' ? 'Deposit Wallet' : 'Income Wallet'
+            } balance is $${prevBal.toFixed(2)}.`
+          );
+        }
+        nextBal =
+          params.mode === 'credit'
+            ? Number((prevBal + amount).toFixed(2))
+            : Number(Math.max(0, prevBal - amount).toFixed(2));
+        tx.update(userRef, {
+          [params.wallet]: nextBal,
+          updatedAt: serverTimestamp(),
+        });
+      });
+
+      await recordAdminAudit({
+        action: params.mode === 'credit' ? 'BALANCE_CREDITED' : 'BALANCE_DEBITED',
+        targetUid: params.targetUid,
+        targetLabel,
+        details: `${params.mode === 'credit' ? 'Credited +' : 'Debited -'}$${amount.toFixed(2)} on ${
+          params.wallet === 'usdBalance' ? 'Deposit Wallet' : 'Income Wallet'
+        } (New: $${nextBal.toFixed(2)}) · ${cleanReason}`,
+        amountUsd: params.mode === 'credit' ? amount : -amount,
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `users/${params.targetUid}`);
+    }
+  };
+
+  const setUserSuspension = async (targetUid: string, suspended: boolean, reason: string) => {
+    const cleanReason = suspended
+      ? reason.trim().slice(0, 300) || 'Account frozen by administration for compliance review.'
+      : '';
+    try {
+      const userRef = doc(db, 'users', targetUid);
+      const snap = await getDoc(userRef);
+      const targetUser = snap.exists() ? (snap.data() as UserProfile) : null;
+      await updateDoc(userRef, {
+        suspended,
+        suspensionReason: cleanReason,
+        updatedAt: serverTimestamp(),
+      });
+      await recordAdminAudit({
+        action: suspended ? 'ACCOUNT_SUSPENDED' : 'ACCOUNT_UNFROZEN',
+        targetUid,
+        targetLabel: targetUser ? `${targetUser.fullName} (${targetUser.handle})` : targetUid,
+        details: suspended ? `Account suspended: ${cleanReason}` : 'Account suspension lifted',
+        amountUsd: 0,
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `users/${targetUid}`);
     }
   };
 
@@ -2910,6 +3407,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         signUpWithKyc,
         submitKycUpdate,
         updateProfileAvatar,
+        updateUserPhone,
         updateAccountEmail,
         resendVerificationEmail,
         refreshAuthVerification,
@@ -2939,9 +3437,16 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         rejectCryptoDeposit,
         approveKyc,
         rejectKyc,
+        setUserKycStatus,
+        verifyUserPhone,
+        bulkApproveKyc,
+        bulkVerifyPhones,
         approveCapitalWithdrawal,
         rejectCapitalWithdrawal,
+        updateWithdrawalNote,
         giftMentorAccount,
+        adjustUserBalance,
+        setUserSuspension,
       }}
     >
       {children}

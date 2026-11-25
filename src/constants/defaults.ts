@@ -70,6 +70,21 @@ export const DEFAULT_PLATFORM_CONFIG: PlatformConfig = {
   eliteCapitalLockDays: 70,
   totalProfitDays: 200,
   globalPaused: false,
+  withdrawalsPaused: false,
+  signupsPaused: false,
+  p2pPaused: false,
+  moduleControls: {
+    aiTradingEnabled: true,
+    forexMarketEnabled: true,
+    coinMiningEnabled: true,
+    p2pEnabled: true,
+    requireSignupForTradingModules: true,
+  },
+  supportLinks: {
+    telegramUrl: '',
+    whatsappUrl: '',
+    supportEmail: '',
+  },
   packages: [
     {
       id: 'starter',

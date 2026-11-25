@@ -3,30 +3,41 @@ import {
   Activity,
   AlertTriangle,
   ArrowLeft,
+  Ban,
   Bell,
   CheckCircle2,
+  CheckSquare,
   Coins,
   Copy,
   Cpu,
   CreditCard,
+  Database,
   Download,
+  FileJson,
   Gift,
   Globe,
+  LayoutDashboard,
+  Lock,
   LogOut,
   Megaphone,
   Menu,
+  MessageCircle,
   PauseCircle,
   PlayCircle,
   Plus,
+  Power,
   Save,
   Search,
   Settings,
   Shield,
   ShieldCheck,
+  Sliders,
   Sparkles,
   Trash2,
   TrendingUp,
+  Unlock,
   Users,
+  Wallet,
   X,
 } from 'lucide-react';
 import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
@@ -34,6 +45,7 @@ import { DEFAULT_PLATFORM_CONFIG } from '../constants/defaults';
 import { usePlatform } from '../context/PlatformContext';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import {
+  AdminActionLog,
   AnnouncementTone,
   BannerAdConfig,
   BannerAdPlacement,
@@ -75,6 +87,7 @@ function formatUiError(err: unknown): string {
 }
 
 type AdminTab =
+  | 'overview'
   | 'approvals'
   | 'clients'
   | 'mentors'
@@ -82,6 +95,7 @@ type AdminTab =
   | 'forex-copy'
   | 'announcements'
   | 'coin-ads-mining'
+  | 'modules-support'
   | 'company'
   | 'wallets-meme'
   | 'audit';
@@ -96,12 +110,19 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
     rejectCryptoDeposit,
     approveKyc,
     rejectKyc,
+    setUserKycStatus,
+    verifyUserPhone,
+    bulkApproveKyc,
+    bulkVerifyPhones,
     approveCapitalWithdrawal,
     rejectCapitalWithdrawal,
+    updateWithdrawalNote,
     giftMentorAccount,
+    adjustUserBalance,
+    setUserSuspension,
   } = usePlatform();
 
-  const [tab, setTab] = useState<AdminTab>('approvals');
+  const [tab, setTab] = useState<AdminTab>('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [draftConfig, setDraftConfig] = useState<PlatformConfig>(platformConfig);
   const [statusMsg, setStatusMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
@@ -119,9 +140,22 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
   const [allCoinStakes, setAllCoinStakes] = useState<CoinMiningStake[]>([]);
   const [allForexTrades, setAllForexTrades] = useState<ForexTrade[]>([]);
   const [allCopySubs, setAllCopySubs] = useState<CopyTradeSubscription[]>([]);
+  const [allAdminLogs, setAllAdminLogs] = useState<AdminActionLog[]>([]);
 
   const [clientSearch, setClientSearch] = useState('');
   const [clientKycFilter, setClientKycFilter] = useState<'all' | 'pending' | 'approved' | 'unsubmitted' | 'rejected'>('all');
+
+  const [selectedKycUids, setSelectedKycUids] = useState<string[]>([]);
+  const [wdStatusFilter, setWdStatusFilter] = useState<'pending' | 'approved' | 'completed' | 'rejected' | 'all'>('pending');
+  const [wdNoteDrafts, setWdNoteDrafts] = useState<Record<string, string>>({});
+
+  const [manageClient, setManageClient] = useState<UserProfile | null>(null);
+  const [manageClientSubTab, setManageClientSubTab] = useState<'controls' | 'deposits' | 'withdrawals' | 'packages' | 'forex'>('controls');
+  const [balWallet, setBalWallet] = useState<'usdBalance' | 'profitBalance'>('usdBalance');
+  const [balMode, setBalMode] = useState<'credit' | 'debit'>('credit');
+  const [balAmount, setBalAmount] = useState('');
+  const [balReason, setBalReason] = useState('');
+  const [suspendReasonDraft, setSuspendReasonDraft] = useState('');
 
   const [mentorTargetUid, setMentorTargetUid] = useState('');
   const [mentorGiftAmount, setMentorGiftAmount] = useState(
@@ -201,6 +235,14 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
         ),
       (err) => handleFirestoreError(err, OperationType.LIST, 'copyTradeSubscriptions')
     );
+    const u11 = onSnapshot(
+      query(collection(db, 'adminLogs'), orderBy('createdAt', 'desc')),
+      (snap) =>
+        setAllAdminLogs(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AdminActionLog, 'id'>) }))
+        ),
+      (err) => handleFirestoreError(err, OperationType.LIST, 'adminLogs')
+    );
 
     return () => {
       u1();
@@ -213,6 +255,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
       u8();
       u9();
       u10();
+      u11();
     };
   }, []);
 
@@ -240,6 +283,20 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
   );
   const mentorUsers = allUsers.filter((u) => u.isMentor);
 
+  const totalVaultLiquidity = allUsers.reduce((sum, u) => sum + (Number(u.usdBalance) || 0), 0);
+  const totalIncomeLiquidity = allUsers.reduce((sum, u) => sum + (Number(u.profitBalance) || 0), 0);
+  const totalInvestedAll = allUsers.reduce((sum, u) => sum + (Number(u.totalInvested) || 0), 0);
+  const totalWithdrawnAll = allUsers.reduce((sum, u) => sum + (Number(u.totalWithdrawn) || 0), 0);
+  const approvedKycCount = allUsers.filter((u) => u.kycStatus === 'approved').length;
+  const suspendedCount = allUsers.filter((u) => u.suspended).length;
+  const activeInvestmentsCount = allInvestments.filter((i) => i.status === 'active').length;
+  const openForexCount = allForexTrades.filter((t) => t.status === 'open').length;
+  const activeCopyCount = allCopySubs.filter((c) => c.status === 'active').length;
+
+  const filteredWithdrawals = allWithdrawals.filter((w) =>
+    wdStatusFilter === 'all' ? true : w.status === wdStatusFilter
+  );
+
   const filteredClients = allUsers.filter((u) => {
     const matchesKyc = clientKycFilter === 'all' || u.kycStatus === clientKycFilter;
     const q = clientSearch.trim().toLowerCase();
@@ -260,6 +317,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
       'Email',
       'Handle',
       'KYC Status',
+      'Suspended',
       'ID Type',
       'ID Number',
       'USD Vault Balance',
@@ -268,7 +326,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
       'Total Withdrawn',
       'Referred By',
     ];
-    const esc = (v: string | number) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const esc = (v: string | number | boolean) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const rows = filteredClients.map((u) =>
       [
         u.uid,
@@ -276,6 +334,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
         u.email,
         u.handle,
         u.kycStatus,
+        Boolean(u.suspended),
         u.idType || '',
         u.idNumber || '',
         u.usdBalance.toFixed(2),
@@ -297,6 +356,58 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
     URL.revokeObjectURL(url);
   };
 
+  const handleExportFullBackupJson = () => {
+    const backup = {
+      exportedAt: new Date().toISOString(),
+      exportedBy: authUser?.email || 'admin',
+      platformConfig,
+      counts: {
+        users: allUsers.length,
+        investments: allInvestments.length,
+        cryptoDeposits: allDeposits.length,
+        withdrawals: allWithdrawals.length,
+        p2pTransfers: allP2P.length,
+        mlmCommissions: allMlm.length,
+        memeCoinInvestments: allMeme.length,
+        coinMiningStakes: allCoinStakes.length,
+        forexTrades: allForexTrades.length,
+        copyTradeSubscriptions: allCopySubs.length,
+        adminLogs: allAdminLogs.length,
+      },
+      data: {
+        users: allUsers,
+        investments: allInvestments,
+        cryptoDeposits: allDeposits,
+        withdrawals: allWithdrawals,
+        p2pTransfers: allP2P,
+        mlmCommissions: allMlm,
+        memeCoinInvestments: allMeme,
+        coinMiningStakes: allCoinStakes,
+        forexTrades: allForexTrades,
+        copyTradeSubscriptions: allCopySubs,
+        adminLogs: allAdminLogs,
+      },
+    };
+    const json = JSON.stringify(backup, null, 2);
+    const blob = new Blob([json], { type: 'application/json;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `alphatradex-full-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    notify('ok', 'Full platform JSON backup exported.');
+  };
+
+  const formatLogTime = (val: unknown): string => {
+    if (!val) return 'Just now';
+    const secs = (val as { seconds?: number })?.seconds;
+    if (typeof secs === 'number') {
+      return new Date(secs * 1000).toLocaleString();
+    }
+    return String(val);
+  };
+
   const mentorMultiplier = Math.max(1, Number(draftConfig.mentorConfig?.volumeMultiplier) || 4);
 
   const navGroups: {
@@ -306,6 +417,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
     {
       heading: 'OPERATIONS',
       items: [
+        { id: 'overview', label: 'Overview & Kill Switches', Icon: LayoutDashboard },
         {
           id: 'approvals',
           label: `Approvals (${pendingDeposits.length + pendingKyc.length + pendingCapitalWd.length})`,
@@ -318,6 +430,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
     {
       heading: 'PLATFORM CONTROLS',
       items: [
+        { id: 'modules-support', label: 'Module & Front Controls', Icon: Sliders },
         { id: 'announcements', label: 'Dashboard Notice Bar', Icon: Megaphone },
         { id: 'packages', label: 'Packages & Commissions', Icon: Settings },
         { id: 'forex-copy', label: 'Forex Tiers & Copy Trade', Icon: Globe },
@@ -328,7 +441,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
     },
     {
       heading: 'SYSTEM LEDGERS',
-      items: [{ id: 'audit', label: 'Audit & P2P Ledgers', Icon: Activity }],
+      items: [{ id: 'audit', label: 'Audit Logs & Backup', Icon: Activity }],
     },
   ];
 
@@ -519,6 +632,200 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
             </div>
           </section>
 
+          {/* TAB 0: OVERVIEW & GLOBAL KILL SWITCHES */}
+          {tab === 'overview' && (
+            <section className="space-y-6">
+              {/* Financial & Platform Telemetry KPIs */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-white border border-slate-200 rounded-xl p-4">
+                  <div className="text-xs text-slate-500">Total Deposit Wallets</div>
+                  <div className="font-mono font-bold text-xl text-slate-900 tabular-nums mt-1">
+                    ${totalVaultLiquidity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <div className="text-[11px] text-slate-400 mt-1">Client USD vault liquidity</div>
+                </div>
+                <div className="bg-white border border-slate-200 rounded-xl p-4">
+                  <div className="text-xs text-slate-500">Total Income Wallets</div>
+                  <div className="font-mono font-bold text-xl text-emerald-700 tabular-nums mt-1">
+                    ${totalIncomeLiquidity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <div className="text-[11px] text-slate-400 mt-1">Unclaimed profit &amp; commissions</div>
+                </div>
+                <div className="bg-white border border-slate-200 rounded-xl p-4">
+                  <div className="text-xs text-slate-500">Total Capital Invested</div>
+                  <div className="font-mono font-bold text-xl text-sky-700 tabular-nums mt-1">
+                    ${totalInvestedAll.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <div className="text-[11px] text-slate-400 mt-1">{activeInvestmentsCount} active AI packages</div>
+                </div>
+                <div className="bg-white border border-slate-200 rounded-xl p-4">
+                  <div className="text-xs text-slate-500">Total Withdrawn</div>
+                  <div className="font-mono font-bold text-xl text-orange-600 tabular-nums mt-1">
+                    ${totalWithdrawnAll.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <div className="text-[11px] text-slate-400 mt-1">
+                    Approved KYC: {approvedKycCount}/{allUsers.length} · Suspended: {suspendedCount}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-white border border-slate-200 rounded-xl p-4">
+                  <div className="text-xs text-slate-500">Open Forex Trades</div>
+                  <div className="font-mono font-bold text-lg text-slate-900 tabular-nums mt-1">
+                    {openForexCount} <span className="text-xs font-normal text-slate-400">/ {allForexTrades.length} total</span>
+                  </div>
+                </div>
+                <div className="bg-white border border-slate-200 rounded-xl p-4">
+                  <div className="text-xs text-slate-500">Active Copy Subscriptions</div>
+                  <div className="font-mono font-bold text-lg text-slate-900 tabular-nums mt-1">
+                    {activeCopyCount} <span className="text-xs font-normal text-slate-400">/ {allCopySubs.length} total</span>
+                  </div>
+                </div>
+                <div className="bg-white border border-slate-200 rounded-xl p-4">
+                  <div className="text-xs text-slate-500">Coin Mining Stakes</div>
+                  <div className="font-mono font-bold text-lg text-slate-900 tabular-nums mt-1">
+                    {allCoinStakes.filter((s) => s.status === 'active').length}{' '}
+                    <span className="text-xs font-normal text-slate-400">active</span>
+                  </div>
+                </div>
+                <div className="bg-white border border-slate-200 rounded-xl p-4">
+                  <div className="text-xs text-slate-500">Admin Audit Entries</div>
+                  <div className="font-mono font-bold text-lg text-slate-900 tabular-nums mt-1">
+                    {allAdminLogs.length}
+                  </div>
+                </div>
+              </div>
+
+              {/* 1-Click Global Kill Switches */}
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h2 className="font-display font-bold text-slate-900 text-base flex items-center gap-2">
+                      <Power className="w-4 h-4 text-red-600" />
+                      1-Click Global Emergency Kill Switches
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Toggle critical operations instantly across all client sessions and public sign-up flows.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {[
+                    {
+                      key: 'globalPaused' as const,
+                      title: 'AI Trading & Plans',
+                      desc: 'Pauses new package activations, mining & forex opens.',
+                      paused: Boolean(draftConfig.globalPaused),
+                    },
+                    {
+                      key: 'withdrawalsPaused' as const,
+                      title: 'Withdrawals Gate',
+                      desc: 'Stops instant profit & manual capital withdrawal requests.',
+                      paused: Boolean(draftConfig.withdrawalsPaused),
+                    },
+                    {
+                      key: 'signupsPaused' as const,
+                      title: 'New Sign-Ups',
+                      desc: 'Halts new client registrations on the Front Page.',
+                      paused: Boolean(draftConfig.signupsPaused),
+                    },
+                    {
+                      key: 'p2pPaused' as const,
+                      title: 'P2P Transfers',
+                      desc: 'Freezes internal user-to-user USD wallet transfers.',
+                      paused: Boolean(draftConfig.p2pPaused),
+                    },
+                  ].map((sw) => (
+                    <div
+                      key={sw.key}
+                      className={`p-4 rounded-xl border flex flex-col justify-between gap-3 ${
+                        sw.paused
+                          ? 'bg-red-50/70 border-red-200'
+                          : 'bg-emerald-50/40 border-emerald-200'
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold text-xs text-slate-900">{sw.title}</span>
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                              sw.paused ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'
+                            }`}
+                          >
+                            {sw.paused ? 'PAUSED' : 'LIVE'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-600 mt-1.5">{sw.desc}</p>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                          const next = { ...draftConfig, [sw.key]: !sw.paused };
+                          setDraftConfig(next);
+                          handleSaveConfig(next);
+                        }}
+                        className={`w-full py-2 px-3 rounded-lg text-xs font-semibold transition-colors ${
+                          sw.paused
+                            ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                            : 'bg-red-600 hover:bg-red-500 text-white'
+                        }`}
+                      >
+                        {sw.paused ? 'Resume Now' : 'Pause Now'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Quick Jump Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <button
+                  type="button"
+                  onClick={() => setTab('approvals')}
+                  className="bg-white border border-slate-200 hover:border-orange-400 rounded-xl p-4 text-left transition-colors"
+                >
+                  <div className="text-xs font-semibold text-orange-600">Approvals Queue →</div>
+                  <div className="text-sm font-bold text-slate-900 mt-1">
+                    {pendingDeposits.length} Deposits · {pendingKyc.length} KYC · {pendingCapitalWd.length} Payouts
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTab('clients')}
+                  className="bg-white border border-slate-200 hover:border-orange-400 rounded-xl p-4 text-left transition-colors"
+                >
+                  <div className="text-xs font-semibold text-sky-600">Client Controls →</div>
+                  <div className="text-sm font-bold text-slate-900 mt-1">
+                    Balance Credit/Debit &amp; Freeze Accounts
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTab('modules-support')}
+                  className="bg-white border border-slate-200 hover:border-orange-400 rounded-xl p-4 text-left transition-colors"
+                >
+                  <div className="text-xs font-semibold text-emerald-600">Module &amp; Support →</div>
+                  <div className="text-sm font-bold text-slate-900 mt-1">
+                    Toggle Trading Pages &amp; Support Links
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTab('audit')}
+                  className="bg-white border border-slate-200 hover:border-orange-400 rounded-xl p-4 text-left transition-colors"
+                >
+                  <div className="text-xs font-semibold text-slate-700">Audit &amp; Backup →</div>
+                  <div className="text-sm font-bold text-slate-900 mt-1">
+                    Immutable Admin Logs &amp; JSON Export
+                  </div>
+                </button>
+              </div>
+            </section>
+          )}
+
           {/* TAB 1: APPROVAL QUEUES */}
           {tab === 'approvals' && (
             <section className="space-y-6">
@@ -600,147 +907,338 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                 )}
               </div>
 
+              {/* Pending KYC with Bulk Selection & Bulk Verify Phone */}
               <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
-                <h2 className="font-display font-bold text-slate-900 text-base">
-                  Pending KYC Identity Submissions
-                </h2>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h2 className="font-display font-bold text-slate-900 text-base">
+                    Pending KYC Identity Submissions ({pendingKyc.length})
+                  </h2>
+                  {pendingKyc.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <label className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50 cursor-pointer font-semibold text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={
+                            pendingKyc.length > 0 &&
+                            pendingKyc.every((u) => selectedKycUids.includes(u.uid))
+                          }
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedKycUids(pendingKyc.map((u) => u.uid));
+                            } else {
+                              setSelectedKycUids([]);
+                            }
+                          }}
+                        />
+                        <span>Select All ({selectedKycUids.length})</span>
+                      </label>
+                      <button
+                        type="button"
+                        disabled={busy || selectedKycUids.length === 0}
+                        onClick={async () => {
+                          setBusy(true);
+                          try {
+                            const count = await bulkApproveKyc(selectedKycUids);
+                            setSelectedKycUids([]);
+                            notify('ok', `Bulk approved KYC for ${count} client(s).`);
+                          } catch (err) {
+                            notify('err', formatUiError(err));
+                          } finally {
+                            setBusy(false);
+                          }
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold"
+                      >
+                        <CheckSquare className="w-3.5 h-3.5" />
+                        Bulk Approve KYC
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy || selectedKycUids.length === 0}
+                        onClick={async () => {
+                          setBusy(true);
+                          try {
+                            const count = await bulkVerifyPhones(selectedKycUids);
+                            notify('ok', `Marked phone verified for ${count} selected client(s).`);
+                          } catch (err) {
+                            notify('err', formatUiError(err));
+                          } finally {
+                            setBusy(false);
+                          }
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white font-semibold"
+                      >
+                        Bulk Verify Phones
+                      </button>
+                    </div>
+                  )}
+                </div>
                 {pendingKyc.length === 0 ? (
                   <p className="text-xs text-slate-500">No pending KYC submissions.</p>
                 ) : (
                   <div className="space-y-3">
-                    {pendingKyc.map((u) => (
-                      <div
-                        key={u.uid}
-                        className="p-4 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-4 text-xs"
-                      >
-                        <div>
-                          <div className="font-semibold text-slate-900 text-sm">
-                            {u.fullName} ({u.handle})
+                    {pendingKyc.map((u) => {
+                      const checked = selectedKycUids.includes(u.uid);
+                      return (
+                        <div
+                          key={u.uid}
+                          className="p-4 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-4 text-xs"
+                        >
+                          <div className="flex items-start gap-3">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                setSelectedKycUids((prev) =>
+                                  e.target.checked
+                                    ? [...prev, u.uid]
+                                    : prev.filter((id) => id !== u.uid)
+                                );
+                              }}
+                              className="mt-1"
+                              aria-label={`Select ${u.fullName}`}
+                            />
+                            <div>
+                              <div className="font-semibold text-slate-900 text-sm">
+                                {u.fullName} ({u.handle})
+                              </div>
+                              <div className="text-slate-500">
+                                {u.email} · {u.idType}: <span className="font-mono text-slate-800">{u.idNumber}</span>
+                              </div>
+                              {u.phoneNumber && (
+                                <div className="text-[11px] font-mono text-slate-600 mt-0.5">
+                                  {u.countryName || u.countryCode || 'Phone'}: {u.phoneNumber}{' '}
+                                  <span
+                                    className={`ml-1 px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                                      u.phoneVerified
+                                        ? 'bg-emerald-100 text-emerald-800'
+                                        : 'bg-amber-100 text-amber-800'
+                                    }`}
+                                  >
+                                    {u.phoneVerified ? 'Phone Verified' : 'Phone Pending'}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
                           </div>
-                          <div className="text-slate-500">
-                            {u.email} · {u.idType}: <span className="font-mono text-slate-800">{u.idNumber}</span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setPreviewKycUser(u)}
+                              className="px-3 py-1.5 rounded border border-slate-300 font-semibold text-slate-700 hover:bg-slate-50"
+                            >
+                              Inspect Photos
+                            </button>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={async () => {
+                                setBusy(true);
+                                try {
+                                  await approveKyc(u.uid);
+                                  setSelectedKycUids((prev) => prev.filter((id) => id !== u.uid));
+                                  notify('ok', `KYC approved for ${u.fullName}.`);
+                                } catch (err) {
+                                  notify('err', formatUiError(err));
+                                } finally {
+                                  setBusy(false);
+                                }
+                              }}
+                              className="px-3 py-1.5 rounded bg-emerald-600 text-white font-semibold hover:bg-emerald-500"
+                            >
+                              Approve KYC
+                            </button>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={async () => {
+                                setBusy(true);
+                                try {
+                                  await rejectKyc(u.uid);
+                                  setSelectedKycUids((prev) => prev.filter((id) => id !== u.uid));
+                                  notify('ok', `KYC rejected for ${u.fullName}.`);
+                                } catch (err) {
+                                  notify('err', formatUiError(err));
+                                } finally {
+                                  setBusy(false);
+                                }
+                              }}
+                              className="px-3 py-1.5 rounded bg-red-600 text-white font-semibold hover:bg-red-500"
+                            >
+                              Reject
+                            </button>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setPreviewKycUser(u)}
-                            className="px-3 py-1.5 rounded border border-slate-300 font-semibold text-slate-700 hover:bg-slate-50"
-                          >
-                            Inspect Photos
-                          </button>
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={async () => {
-                              setBusy(true);
-                              try {
-                                await approveKyc(u.uid);
-                                notify('ok', `KYC approved for ${u.fullName}.`);
-                              } catch (err) {
-                                notify('err', formatUiError(err));
-                              } finally {
-                                setBusy(false);
-                              }
-                            }}
-                            className="px-3 py-1.5 rounded bg-emerald-600 text-white font-semibold hover:bg-emerald-500"
-                          >
-                            Approve KYC
-                          </button>
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={async () => {
-                              setBusy(true);
-                              try {
-                                await rejectKyc(u.uid);
-                                notify('ok', `KYC rejected for ${u.fullName}.`);
-                              } catch (err) {
-                                notify('err', formatUiError(err));
-                              } finally {
-                                setBusy(false);
-                              }
-                            }}
-                            className="px-3 py-1.5 rounded bg-red-600 text-white font-semibold hover:bg-red-500"
-                          >
-                            Reject
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
 
+              {/* Filterable Withdrawals & TXID / Payout Note Control */}
               <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
-                <h2 className="font-display font-bold text-slate-900 text-base">
-                  Pending Manual Capital Withdrawals (Elite 70-Day &amp; Principal Requests)
-                </h2>
-                {pendingCapitalWd.length === 0 ? (
-                  <p className="text-xs text-slate-500">No pending manual capital withdrawals.</p>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="font-display font-bold text-slate-900 text-base">
+                      Withdrawals &amp; Payout TXID Control ({filteredWithdrawals.length})
+                    </h2>
+                    <p className="text-xs text-slate-500">
+                      Filter instant &amp; manual capital withdrawals, attach payout TXIDs/notes, and approve or reject requests.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 text-xs">
+                    {(['pending', 'approved', 'completed', 'rejected', 'all'] as const).map((f) => (
+                      <button
+                        key={f}
+                        type="button"
+                        onClick={() => setWdStatusFilter(f)}
+                        className={`px-3 py-1.5 rounded-lg font-semibold capitalize border ${
+                          wdStatusFilter === f
+                            ? 'bg-slate-900 text-white border-slate-900'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        {f} (
+                        {f === 'all'
+                          ? allWithdrawals.length
+                          : allWithdrawals.filter((w) => w.status === f).length}
+                        )
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {filteredWithdrawals.length === 0 ? (
+                  <p className="text-xs text-slate-500">No withdrawals match the selected status filter.</p>
                 ) : (
                   <div className="space-y-3">
-                    {pendingCapitalWd.map((w) => (
-                      <div
-                        key={w.id}
-                        className="p-4 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-4 text-xs"
-                      >
-                        <div>
-                          <div className="font-semibold text-slate-900 text-sm">
-                            Package #{w.packageNumber} · {w.userName}
+                    {filteredWithdrawals.map((w) => {
+                      const noteValue = wdNoteDrafts[w.id] ?? (w.adminNote || '');
+                      return (
+                        <div
+                          key={w.id}
+                          className="p-4 rounded-xl border border-slate-200 space-y-3 text-xs"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-semibold text-slate-900 text-sm">
+                                  {w.type === 'manual_capital'
+                                    ? `Manual Capital · Package #${w.packageNumber}`
+                                    : 'Instant Profit Payout'}{' '}
+                                  · {w.userName}
+                                </span>
+                                <span
+                                  className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                    w.status === 'pending'
+                                      ? 'bg-amber-100 text-amber-800'
+                                      : w.status === 'rejected'
+                                      ? 'bg-red-100 text-red-800'
+                                      : 'bg-emerald-100 text-emerald-800'
+                                  }`}
+                                >
+                                  {w.status}
+                                </span>
+                              </div>
+                              <div className="text-slate-600 font-mono mt-1">
+                                Amount: <strong className="text-slate-900">${w.amountUsd.toFixed(2)}</strong>
+                                {w.type === 'manual_capital' && (
+                                  <>
+                                    {' '}
+                                    · Principal: ${w.principalCapital.toFixed(2)} · Profit Gen: $
+                                    {w.totalProfitGenerated.toFixed(2)}
+                                  </>
+                                )}{' '}
+                                · {w.network.replace('_', ' ')} ({w.destinationAddress})
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              {w.type === 'manual_capital' && (
+                                <button
+                                  type="button"
+                                  onClick={() => setBreakdownModalWd(w)}
+                                  className="px-3 py-1.5 rounded border border-slate-300 font-semibold text-slate-700 hover:bg-slate-50"
+                                >
+                                  Breakdown
+                                </button>
+                              )}
+                              {w.status === 'pending' && w.type === 'manual_capital' && (
+                                <>
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={async () => {
+                                      setBusy(true);
+                                      try {
+                                        await approveCapitalWithdrawal(w, noteValue.trim() || undefined);
+                                        notify('ok', `Approved capital withdrawal for Package #${w.packageNumber}.`);
+                                      } catch (err) {
+                                        notify('err', formatUiError(err));
+                                      } finally {
+                                        setBusy(false);
+                                      }
+                                    }}
+                                    className="px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold"
+                                  >
+                                    Approve Payout
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={async () => {
+                                      setBusy(true);
+                                      try {
+                                        await rejectCapitalWithdrawal(
+                                          w,
+                                          noteValue.trim() || 'Capital lock review declined'
+                                        );
+                                        notify('ok', `Rejected capital withdrawal for Package #${w.packageNumber}.`);
+                                      } catch (err) {
+                                        notify('err', formatUiError(err));
+                                      } finally {
+                                        setBusy(false);
+                                      }
+                                    }}
+                                    className="px-3 py-1.5 rounded bg-red-600 hover:bg-red-500 text-white font-semibold"
+                                  >
+                                    Reject
+                                  </button>
+                                </>
+                              )}
+                            </div>
                           </div>
-                          <div className="text-slate-500 font-mono">
-                            Principal: ${w.principalCapital.toFixed(2)} · Profit Gen: ${w.totalProfitGenerated.toFixed(2)} ·{' '}
-                            {w.network.replace('_', ' ')} ({w.destinationAddress})
+
+                          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-2 border-t border-slate-100">
+                            <input
+                              type="text"
+                              value={noteValue}
+                              onChange={(e) =>
+                                setWdNoteDrafts((prev) => ({ ...prev, [w.id]: e.target.value }))
+                              }
+                              placeholder="Enter payout TXID or admin settlement note..."
+                              className="flex-1 px-3 py-1.5 rounded-lg border border-slate-200 font-mono text-xs"
+                            />
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={async () => {
+                                setBusy(true);
+                                try {
+                                  await updateWithdrawalNote(w.id, noteValue);
+                                  notify('ok', 'Saved payout TXID / admin note.');
+                                } catch (err) {
+                                  notify('err', formatUiError(err));
+                                } finally {
+                                  setBusy(false);
+                                }
+                              }}
+                              className="px-3 py-1.5 rounded-lg border border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-800 font-semibold whitespace-nowrap"
+                            >
+                              Save TXID / Note
+                            </button>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setBreakdownModalWd(w)}
-                            className="px-3 py-1.5 rounded border border-slate-300 font-semibold text-slate-700"
-                          >
-                            Breakdown
-                          </button>
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={async () => {
-                              setBusy(true);
-                              try {
-                                await approveCapitalWithdrawal(w);
-                                notify('ok', `Approved capital withdrawal for Package #${w.packageNumber}.`);
-                              } catch (err) {
-                                notify('err', formatUiError(err));
-                              } finally {
-                                setBusy(false);
-                              }
-                            }}
-                            className="px-3 py-1.5 rounded bg-emerald-600 text-white font-semibold"
-                          >
-                            Approve Payout
-                          </button>
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={async () => {
-                              setBusy(true);
-                              try {
-                                await rejectCapitalWithdrawal(w, 'Capital lock review declined');
-                                notify('ok', `Rejected capital withdrawal for Package #${w.packageNumber}.`);
-                              } catch (err) {
-                                notify('err', formatUiError(err));
-                              } finally {
-                                setBusy(false);
-                              }
-                            }}
-                            className="px-3 py-1.5 rounded bg-red-600 text-white font-semibold"
-                          >
-                            Reject
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -841,8 +1339,29 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                       {filteredClients.map((u) => (
                         <tr key={u.uid} className="hover:bg-slate-50/70">
                           <td className="py-2.5 pr-3">
-                            <div className="font-semibold text-slate-900">{u.fullName}</div>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-semibold text-slate-900">{u.fullName}</span>
+                              {u.suspended && (
+                                <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-700 text-[9px] font-bold uppercase">
+                                  SUSPENDED
+                                </span>
+                              )}
+                            </div>
                             <div className="text-slate-500">{u.email}</div>
+                            {u.phoneNumber && (
+                              <div className="text-[11px] font-mono text-slate-600 mt-0.5 flex items-center gap-1.5">
+                                <span>{u.countryName ? `${u.countryName} ` : ''}{u.phoneNumber}</span>
+                                <span
+                                  className={`px-1.5 py-0.5 rounded text-[9px] font-semibold ${
+                                    u.phoneVerified
+                                      ? 'bg-emerald-100 text-emerald-800'
+                                      : 'bg-amber-100 text-amber-800'
+                                  }`}
+                                >
+                                  {u.phoneVerified ? 'VERIFIED' : 'PENDING'}
+                                </span>
+                              </div>
+                            )}
                           </td>
                           <td className="py-2.5 pr-3 font-mono">
                             <div className="text-slate-800">{u.handle}</div>
@@ -886,6 +1405,19 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                           <td className="py-2.5 text-right whitespace-nowrap space-x-1.5">
                             <button
                               type="button"
+                              onClick={() => {
+                                setManageClient(u);
+                                setManageClientSubTab('controls');
+                                setSuspendReasonDraft(u.suspensionReason || '');
+                                setBalAmount('');
+                                setBalReason('');
+                              }}
+                              className="px-2.5 py-1 rounded bg-slate-900 text-white font-semibold hover:bg-slate-800"
+                            >
+                              Manage
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => setPreviewKycUser(u)}
                               className="px-2.5 py-1 rounded border border-slate-200 text-slate-700 font-semibold hover:bg-slate-100"
                             >
@@ -909,6 +1441,26 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                                 className="px-2.5 py-1 rounded bg-emerald-600 text-white font-semibold hover:bg-emerald-500"
                               >
                                 Approve
+                              </button>
+                            )}
+                            {u.phoneNumber && !u.phoneVerified && (
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={async () => {
+                                  setBusy(true);
+                                  try {
+                                    await verifyUserPhone(u.uid, true);
+                                    notify('ok', `Phone ${u.phoneNumber} marked verified for ${u.fullName}.`);
+                                  } catch (err) {
+                                    notify('err', formatUiError(err));
+                                  } finally {
+                                    setBusy(false);
+                                  }
+                                }}
+                                className="px-2.5 py-1 rounded bg-sky-600 text-white font-semibold hover:bg-sky-500"
+                              >
+                                Verify Phone
                               </button>
                             )}
                             {u.kycStatus !== 'rejected' && (
@@ -3581,9 +4133,241 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
             </section>
           )}
 
-          {/* TAB 6: AUDIT & LEDGERS */}
+          {/* TAB: MODULE & SUPPORT CONTROLS */}
+          {tab === 'modules-support' && (
+            <section className="space-y-6">
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-5">
+                <div>
+                  <h2 className="font-display font-bold text-slate-900 text-base">
+                    No-Code Module Visibility &amp; Front Gate Controls
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Enable or hide platform modules across the public Slide Bar drawer and Client Vault sidebar without touching code.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                  {(
+                    [
+                      {
+                        key: 'aiTradingEnabled' as const,
+                        label: 'AI Trading Desk & Plans',
+                        desc: 'Controls AI Trading menu & package activation desk.',
+                      },
+                      {
+                        key: 'forexMarketEnabled' as const,
+                        label: 'Forex Market & Copy Trade',
+                        desc: 'Controls Forex WebTerminal & Copy Trading visibility.',
+                      },
+                      {
+                        key: 'coinMiningEnabled' as const,
+                        label: `${draftConfig.pumpFunToken.name} Coin & Mining Hub`,
+                        desc: 'Controls Coin Launchpad, Tap-to-Mine & Paid Staking.',
+                      },
+                      {
+                        key: 'p2pEnabled' as const,
+                        label: 'P2P User-to-User Transfers',
+                        desc: 'Controls internal USD wallet transfer tab inside Vault.',
+                      },
+                      {
+                        key: 'requireSignupForTradingModules' as const,
+                        label: 'Require Sign-Up Before Viewing Trading Modules',
+                        desc: 'Locks AI Trading, Forex Market & Coin links behind Sign Up / Sign In.',
+                      },
+                    ]
+                  ).map((item) => {
+                    const mods = draftConfig.moduleControls || DEFAULT_PLATFORM_CONFIG.moduleControls!;
+                    const checked = mods[item.key] !== false;
+                    return (
+                      <label
+                        key={item.key}
+                        className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 flex items-start gap-3 cursor-pointer hover:border-orange-300"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            const base = draftConfig.moduleControls || DEFAULT_PLATFORM_CONFIG.moduleControls!;
+                            setDraftConfig({
+                              ...draftConfig,
+                              moduleControls: {
+                                ...base,
+                                [item.key]: e.target.checked,
+                              },
+                            });
+                          }}
+                          className="mt-0.5"
+                        />
+                        <div>
+                          <div className="font-semibold text-slate-900">{item.label}</div>
+                          <div className="text-slate-500 mt-0.5">{item.desc}</div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-5">
+                <div>
+                  <h2 className="font-display font-bold text-slate-900 text-base flex items-center gap-2">
+                    <MessageCircle className="w-4 h-4 text-sky-600" />
+                    Official Support &amp; Community Channels
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Displayed in the public site footer, client Vault footer, and account suspension help box.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Telegram Support URL</label>
+                    <input
+                      type="url"
+                      value={draftConfig.supportLinks?.telegramUrl || ''}
+                      onChange={(e) =>
+                        setDraftConfig({
+                          ...draftConfig,
+                          supportLinks: {
+                            ...(draftConfig.supportLinks || DEFAULT_PLATFORM_CONFIG.supportLinks!),
+                            telegramUrl: e.target.value,
+                          },
+                        })
+                      }
+                      placeholder="https://t.me/your_support"
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">WhatsApp Support URL</label>
+                    <input
+                      type="url"
+                      value={draftConfig.supportLinks?.whatsappUrl || ''}
+                      onChange={(e) =>
+                        setDraftConfig({
+                          ...draftConfig,
+                          supportLinks: {
+                            ...(draftConfig.supportLinks || DEFAULT_PLATFORM_CONFIG.supportLinks!),
+                            whatsappUrl: e.target.value,
+                          },
+                        })
+                      }
+                      placeholder="https://wa.me/1234567890"
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Official Support Email</label>
+                    <input
+                      type="email"
+                      value={draftConfig.supportLinks?.supportEmail || ''}
+                      onChange={(e) =>
+                        setDraftConfig({
+                          ...draftConfig,
+                          supportLinks: {
+                            ...(draftConfig.supportLinks || DEFAULT_PLATFORM_CONFIG.supportLinks!),
+                            supportEmail: e.target.value,
+                          },
+                        })
+                      }
+                      placeholder="support@alphatradex.pro"
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => handleSaveConfig(draftConfig)}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold"
+                  >
+                    <Save className="w-4 h-4" />
+                    Publish Module &amp; Support Controls
+                  </button>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* TAB 6: AUDIT LOGS & BACKUP */}
           {tab === 'audit' && (
             <section className="space-y-6">
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <h2 className="font-display font-bold text-slate-900 text-base flex items-center gap-2">
+                    <Database className="w-4 h-4 text-orange-600" />
+                    Platform Backup &amp; Export Controls
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Download a complete JSON snapshot of all collections &amp; configuration, or export filtered client data to CSV.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={handleExportClientsCsv}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Export Clients CSV
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleExportFullBackupJson}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold"
+                  >
+                    <FileJson className="w-3.5 h-3.5 text-orange-400" />
+                    Export Full Backup (JSON)
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-3">
+                <h2 className="font-display font-bold text-slate-900 text-base">
+                  Immutable Admin Action Activity Log ({allAdminLogs.length})
+                </h2>
+                {allAdminLogs.length === 0 ? (
+                  <p className="text-xs text-slate-500 py-4">No admin audit actions recorded yet.</p>
+                ) : (
+                  <div className="overflow-x-auto max-h-96 overflow-y-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-200 text-slate-500">
+                          <th className="py-2 pr-3">Time</th>
+                          <th className="py-2 pr-3">Admin</th>
+                          <th className="py-2 pr-3">Action</th>
+                          <th className="py-2 pr-3">Target</th>
+                          <th className="py-2 pr-3">Amount</th>
+                          <th className="py-2">Details</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {allAdminLogs.map((log) => (
+                          <tr key={log.id}>
+                            <td className="py-2 pr-3 font-mono text-[11px] text-slate-500 whitespace-nowrap">
+                              {formatLogTime(log.createdAt)}
+                            </td>
+                            <td className="py-2 pr-3 text-slate-700">{log.adminEmail}</td>
+                            <td className="py-2 pr-3">
+                              <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-800 font-mono text-[10px] font-semibold">
+                                {log.action}
+                              </span>
+                            </td>
+                            <td className="py-2 pr-3 font-mono text-slate-700">{log.targetLabel || '—'}</td>
+                            <td className="py-2 pr-3 font-mono tabular-nums font-semibold">
+                              {typeof log.amountUsd === 'number' ? `$${log.amountUsd.toFixed(2)}` : '—'}
+                            </td>
+                            <td className="py-2 text-slate-600">{log.details}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
               <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-3">
                 <h2 className="font-display font-bold text-slate-900 text-base">
                   All Vault Users ({allUsers.length})
@@ -3698,7 +4482,43 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                 Close
               </button>
             </div>
-            <div className="p-5 grid grid-cols-2 gap-4">
+            <div className="p-5 space-y-4">
+              {previewKycUser.phoneNumber && (
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <div>
+                    <span className="text-slate-500">Registered Phone ({previewKycUser.countryName || previewKycUser.countryCode || 'Global'}): </span>
+                    <strong className="font-mono text-slate-900">{previewKycUser.phoneNumber}</strong>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={async () => {
+                      const nextState = !previewKycUser.phoneVerified;
+                      setBusy(true);
+                      try {
+                        await verifyUserPhone(previewKycUser.uid, nextState);
+                        setPreviewKycUser({ ...previewKycUser, phoneVerified: nextState });
+                        notify(
+                          'ok',
+                          `Phone verification ${nextState ? 'approved' : 'reset'} for ${previewKycUser.fullName}.`
+                        );
+                      } catch (err) {
+                        notify('err', formatUiError(err));
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                    className={`px-2.5 py-1 rounded font-semibold ${
+                      previewKycUser.phoneVerified
+                        ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                        : 'bg-sky-600 text-white hover:bg-sky-500'
+                    }`}
+                  >
+                    {previewKycUser.phoneVerified ? 'Phone Verified ✓' : 'Verify Phone'}
+                  </button>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-4">
               <div>
                 <div className="text-xs font-semibold text-slate-600 mb-1.5">Document Photo</div>
                 {previewKycUser.idPhotoData ? (
@@ -3727,6 +4547,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                   </div>
                 )}
               </div>
+              </div>
             </div>
           </div>
         </div>
@@ -3736,6 +4557,415 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
         withdrawal={breakdownModalWd}
         onClose={() => setBreakdownModalWd(null)}
       />
+
+      {/* Client Account & Balance Control Modal */}
+      {manageClient && (() => {
+        const liveClient = allUsers.find((u) => u.uid === manageClient.uid) || manageClient;
+        const cDeposits = allDeposits.filter((d) => d.uid === liveClient.uid);
+        const cWithdrawals = allWithdrawals.filter((w) => w.uid === liveClient.uid);
+        const cInvestments = allInvestments.filter((i) => i.uid === liveClient.uid);
+        const cForex = allForexTrades.filter((t) => t.uid === liveClient.uid);
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/65 p-4 overflow-y-auto">
+            <div className="max-w-3xl w-full bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-2xl my-6">
+              <div className="bg-[#0B111E] px-5 py-4 text-white flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-display font-bold text-sm truncate flex items-center gap-2">
+                    <span>{liveClient.fullName}</span>
+                    <span className="font-mono text-xs text-orange-400">({liveClient.handle})</span>
+                    {liveClient.suspended && (
+                      <span className="px-2 py-0.5 rounded bg-red-600 text-white text-[10px] font-bold">
+                        SUSPENDED
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-slate-400 truncate">{liveClient.email}</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setManageClient(null)}
+                  className="text-xs text-slate-300 hover:text-white px-2.5 py-1 rounded border border-slate-700"
+                >
+                  Close
+                </button>
+              </div>
+
+              {/* Client Summary Bar */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 bg-slate-50 border-b border-slate-200 text-xs">
+                <div>
+                  <div className="text-slate-500">Deposit Wallet</div>
+                  <div className="font-mono font-bold text-sm text-slate-900 tabular-nums">
+                    ${liveClient.usdBalance.toFixed(2)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-slate-500">Income Wallet</div>
+                  <div className="font-mono font-bold text-sm text-emerald-700 tabular-nums">
+                    ${liveClient.profitBalance.toFixed(2)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-slate-500">Total Invested</div>
+                  <div className="font-mono font-bold text-sm text-slate-900 tabular-nums">
+                    ${liveClient.totalInvested.toFixed(2)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-slate-500">Total Withdrawn</div>
+                  <div className="font-mono font-bold text-sm text-orange-600 tabular-nums">
+                    ${liveClient.totalWithdrawn.toFixed(2)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Sub-Tab Selector */}
+              <div className="px-5 pt-3 border-b border-slate-200 flex flex-wrap gap-2 text-xs">
+                {(
+                  [
+                    { id: 'controls', label: 'Balance & Freeze Controls' },
+                    { id: 'deposits', label: `Deposits (${cDeposits.length})` },
+                    { id: 'withdrawals', label: `Withdrawals (${cWithdrawals.length})` },
+                    { id: 'packages', label: `Packages (${cInvestments.length})` },
+                    { id: 'forex', label: `Forex (${cForex.length})` },
+                  ] as const
+                ).map((st) => (
+                  <button
+                    key={st.id}
+                    type="button"
+                    onClick={() => setManageClientSubTab(st.id)}
+                    className={`px-3 py-2 font-semibold border-b-2 transition-colors ${
+                      manageClientSubTab === st.id
+                        ? 'border-orange-600 text-orange-600'
+                        : 'border-transparent text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    {st.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="p-5 max-h-[65vh] overflow-y-auto space-y-5 text-xs">
+                {manageClientSubTab === 'controls' && (
+                  <div className="space-y-5">
+                    {/* Direct Wallet Credit / Debit */}
+                    <form
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        const amt = Number(balAmount);
+                        if (!Number.isFinite(amt) || amt <= 0) {
+                          notify('err', 'Enter a positive USD amount.');
+                          return;
+                        }
+                        if (!balReason.trim()) {
+                          notify('err', 'Provide an audit reason for this adjustment.');
+                          return;
+                        }
+                        setBusy(true);
+                        try {
+                          await adjustUserBalance({
+                            targetUid: liveClient.uid,
+                            wallet: balWallet,
+                            mode: balMode,
+                            amountUsd: amt,
+                            reason: balReason.trim(),
+                          });
+                          setBalAmount('');
+                          setBalReason('');
+                          notify(
+                            'ok',
+                            `${balMode === 'credit' ? 'Credited' : 'Debited'} $${amt.toFixed(2)} (${balWallet}) for ${liveClient.fullName}.`
+                          );
+                        } catch (err) {
+                          notify('err', formatUiError(err));
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                      className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 space-y-3"
+                    >
+                      <div className="font-display font-bold text-slate-900 text-sm flex items-center gap-2">
+                        <Wallet className="w-4 h-4 text-orange-600" />
+                        Direct Balance Credit / Debit
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div>
+                          <label className="block font-semibold text-slate-700 mb-1">Target Wallet</label>
+                          <select
+                            value={balWallet}
+                            onChange={(e) => setBalWallet(e.target.value as 'usdBalance' | 'profitBalance')}
+                            className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white"
+                          >
+                            <option value="usdBalance">Deposit Wallet (usdBalance)</option>
+                            <option value="profitBalance">Income Wallet (profitBalance)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block font-semibold text-slate-700 mb-1">Action</label>
+                          <select
+                            value={balMode}
+                            onChange={(e) => setBalMode(e.target.value as 'credit' | 'debit')}
+                            className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white"
+                          >
+                            <option value="credit">Credit (+ Add USD)</option>
+                            <option value="debit">Debit (- Deduct USD)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block font-semibold text-slate-700 mb-1">Amount (USD)</label>
+                          <input
+                            type="number"
+                            min={0.01}
+                            step="0.01"
+                            required
+                            value={balAmount}
+                            onChange={(e) => setBalAmount(e.target.value)}
+                            placeholder="100.00"
+                            className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono bg-white"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <input
+                          type="text"
+                          required
+                          value={balReason}
+                          onChange={(e) => setBalReason(e.target.value)}
+                          placeholder="Audit reason (e.g. Manual deposit bonus, fee correction)"
+                          className="flex-1 px-3 py-2 rounded-lg border border-slate-200 bg-white"
+                        />
+                        <button
+                          type="submit"
+                          disabled={busy}
+                          className={`px-4 py-2 rounded-lg text-white font-semibold whitespace-nowrap ${
+                            balMode === 'credit'
+                              ? 'bg-emerald-600 hover:bg-emerald-500'
+                              : 'bg-red-600 hover:bg-red-500'
+                          }`}
+                        >
+                          {balMode === 'credit' ? 'Apply Credit (+)' : 'Apply Debit (-)'}
+                        </button>
+                      </div>
+                    </form>
+
+                    {/* Account Suspension / Freeze */}
+                    <div className="p-4 rounded-xl border border-slate-200 space-y-3">
+                      <div className="font-display font-bold text-slate-900 text-sm flex items-center gap-2">
+                        {liveClient.suspended ? (
+                          <Unlock className="w-4 h-4 text-emerald-600" />
+                        ) : (
+                          <Ban className="w-4 h-4 text-red-600" />
+                        )}
+                        Account Freeze / Suspension Control
+                      </div>
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <input
+                          type="text"
+                          value={suspendReasonDraft}
+                          onChange={(e) => setSuspendReasonDraft(e.target.value)}
+                          placeholder="Suspension reason shown to user on login..."
+                          className="flex-1 px-3 py-2 rounded-lg border border-slate-200"
+                        />
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={async () => {
+                            const nextSuspended = !liveClient.suspended;
+                            setBusy(true);
+                            try {
+                              await setUserSuspension(
+                                liveClient.uid,
+                                nextSuspended,
+                                nextSuspended ? suspendReasonDraft.trim() || 'Suspended by administration' : ''
+                              );
+                              notify(
+                                'ok',
+                                `${liveClient.fullName} account ${nextSuspended ? 'frozen/suspended' : 'reactivated'}.`
+                              );
+                            } catch (err) {
+                              notify('err', formatUiError(err));
+                            } finally {
+                              setBusy(false);
+                            }
+                          }}
+                          className={`px-4 py-2 rounded-lg text-white font-semibold whitespace-nowrap inline-flex items-center gap-1.5 ${
+                            liveClient.suspended
+                              ? 'bg-emerald-600 hover:bg-emerald-500'
+                              : 'bg-red-600 hover:bg-red-500'
+                          }`}
+                        >
+                          {liveClient.suspended ? (
+                            <>
+                              <Unlock className="w-3.5 h-3.5" />
+                              Unfreeze Account
+                            </>
+                          ) : (
+                            <>
+                              <Lock className="w-3.5 h-3.5" />
+                              Freeze Account
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Quick Compliance Overrides */}
+                    <div className="p-4 rounded-xl border border-slate-200 space-y-3">
+                      <div className="font-display font-bold text-slate-900 text-sm">
+                        Compliance &amp; Verification Overrides
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-slate-500 mr-1">KYC Status:</span>
+                          {(['approved', 'pending', 'rejected', 'unsubmitted'] as const).map((st) => (
+                            <button
+                              key={st}
+                              type="button"
+                              disabled={busy || liveClient.kycStatus === st}
+                              onClick={async () => {
+                                setBusy(true);
+                                try {
+                                  await setUserKycStatus(liveClient.uid, st);
+                                  notify('ok', `Set KYC status to ${st} for ${liveClient.fullName}.`);
+                                } catch (err) {
+                                  notify('err', formatUiError(err));
+                                } finally {
+                                  setBusy(false);
+                                }
+                              }}
+                              className={`px-2.5 py-1 rounded font-semibold uppercase text-[10px] border ${
+                                liveClient.kycStatus === st
+                                  ? 'bg-slate-900 text-white border-slate-900'
+                                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                              }`}
+                            >
+                              {st}
+                            </button>
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={async () => {
+                            const nextPhone = !liveClient.phoneVerified;
+                            setBusy(true);
+                            try {
+                              await verifyUserPhone(liveClient.uid, nextPhone);
+                              notify(
+                                'ok',
+                                `Phone ${nextPhone ? 'verified' : 'unverified'} for ${liveClient.fullName}.`
+                              );
+                            } catch (err) {
+                              notify('err', formatUiError(err));
+                            } finally {
+                              setBusy(false);
+                            }
+                          }}
+                          className={`px-3 py-1.5 rounded font-semibold ${
+                            liveClient.phoneVerified
+                              ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                              : 'bg-sky-600 text-white hover:bg-sky-500'
+                          }`}
+                        >
+                          {liveClient.phoneVerified ? 'Phone Verified ✓ (Reset)' : 'Verify Phone Now'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {manageClientSubTab === 'deposits' && (
+                  <div className="space-y-2">
+                    {cDeposits.length === 0 ? (
+                      <p className="text-slate-500 py-4 text-center">No deposits for this client.</p>
+                    ) : (
+                      cDeposits.map((d) => (
+                        <div key={d.id} className="p-3 rounded-lg border border-slate-200 flex justify-between items-center">
+                          <div>
+                            <div className="font-semibold text-slate-900">{d.network} · {d.status}</div>
+                            <div className="font-mono text-[11px] text-slate-500">TxID: {d.txId}</div>
+                          </div>
+                          <div className="font-mono font-bold tabular-nums">${d.amountUsd.toFixed(2)}</div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {manageClientSubTab === 'withdrawals' && (
+                  <div className="space-y-2">
+                    {cWithdrawals.length === 0 ? (
+                      <p className="text-slate-500 py-4 text-center">No withdrawals for this client.</p>
+                    ) : (
+                      cWithdrawals.map((w) => (
+                        <div key={w.id} className="p-3 rounded-lg border border-slate-200 flex justify-between items-center gap-3">
+                          <div>
+                            <div className="font-semibold text-slate-900">
+                              {w.type} · {w.status} ({w.network})
+                            </div>
+                            <div className="font-mono text-[11px] text-slate-500">
+                              To: {w.destinationAddress} {w.adminNote ? `· Note: ${w.adminNote}` : ''}
+                            </div>
+                          </div>
+                          <div className="font-mono font-bold tabular-nums">${w.amountUsd.toFixed(2)}</div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {manageClientSubTab === 'packages' && (
+                  <div className="space-y-2">
+                    {cInvestments.length === 0 ? (
+                      <p className="text-slate-500 py-4 text-center">No AI packages for this client.</p>
+                    ) : (
+                      cInvestments.map((inv) => (
+                        <div key={inv.id} className="p-3 rounded-lg border border-slate-200 flex justify-between items-center">
+                          <div>
+                            <div className="font-semibold text-slate-900">
+                              Pkg #{inv.packageNumber} · {inv.packageName} ({inv.status})
+                            </div>
+                            <div className="text-[11px] text-slate-500">
+                              {inv.dailyPercent}%/weekday · Claimed: ${inv.claimedProfit.toFixed(2)}
+                            </div>
+                          </div>
+                          <div className="font-mono font-bold tabular-nums">${inv.capital.toFixed(2)}</div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {manageClientSubTab === 'forex' && (
+                  <div className="space-y-2">
+                    {cForex.length === 0 ? (
+                      <p className="text-slate-500 py-4 text-center">No Forex trades for this client.</p>
+                    ) : (
+                      cForex.map((t) => (
+                        <div key={t.id} className="p-3 rounded-lg border border-slate-200 flex justify-between items-center">
+                          <div>
+                            <div className="font-semibold text-slate-900">
+                              {t.symbol} {t.direction} ({t.lots} lots) · {t.status}
+                            </div>
+                            <div className="font-mono text-[11px] text-slate-500">
+                              Entry: {t.entryPrice} · Margin: ${t.marginUsd.toFixed(2)}
+                            </div>
+                          </div>
+                          <div className="font-mono font-bold tabular-nums">
+                            {typeof t.realizedPnlUsd === 'number'
+                              ? `${t.realizedPnlUsd >= 0 ? '+' : ''}$${t.realizedPnlUsd.toFixed(2)}`
+                              : 'OPEN'}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

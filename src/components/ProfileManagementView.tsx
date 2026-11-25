@@ -6,12 +6,21 @@ import {
   Clock,
   FileCheck,
   Mail,
+  Phone,
   ShieldCheck,
   Trash2,
   Upload,
   UserCheck,
   XCircle,
 } from 'lucide-react';
+import type { ConfirmationResult } from 'firebase/auth';
+import {
+  COUNTRY_PHONE_OPTIONS,
+  getCountryByCode,
+  normalizeRemainingPhoneDigits,
+  validateCountryPhoneNumber,
+} from '../constants/countries';
+import { confirmFirebasePhoneOtp, sendFirebasePhoneOtp } from '../lib/firebase';
 import { IdType, UserProfile } from '../types/platform';
 import { compressImageToDataUrl, formatTimestamp } from '../utils/investmentMath';
 
@@ -20,6 +29,13 @@ interface ProfileManagementViewProps {
   authEmail: string;
   usesPasswordProvider: boolean;
   onUpdateProfileAvatar: (avatarData: string, fullName?: string) => Promise<void>;
+  onUpdateUserPhone: (params: {
+    countryCode: string;
+    countryName: string;
+    phoneDialPrefix: string;
+    phoneNumber: string;
+    phoneVerified: boolean;
+  }) => Promise<void>;
   onUpdateAccountEmail: (
     newEmail: string,
     currentPassword?: string
@@ -39,6 +55,7 @@ export const ProfileManagementView: React.FC<ProfileManagementViewProps> = ({
   authEmail,
   usesPasswordProvider,
   onUpdateProfileAvatar,
+  onUpdateUserPhone,
   onUpdateAccountEmail,
   onSubmitKyc,
   onNotify,
@@ -46,6 +63,8 @@ export const ProfileManagementView: React.FC<ProfileManagementViewProps> = ({
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const kycIdInputRef = useRef<HTMLInputElement | null>(null);
   const kycPortraitInputRef = useRef<HTMLInputElement | null>(null);
+  const phoneRecaptchaRef = useRef<HTMLDivElement | null>(null);
+  const phoneConfirmRef = useRef<ConfirmationResult | null>(null);
 
   const [displayName, setDisplayName] = useState(userProfile.fullName);
   const [avatarBusy, setAvatarBusy] = useState(false);
@@ -54,6 +73,20 @@ export const ProfileManagementView: React.FC<ProfileManagementViewProps> = ({
   const [currentPassword, setCurrentPassword] = useState('');
   const [emailBusy, setEmailBusy] = useState(false);
   const [pendingEmailNotice, setPendingEmailNotice] = useState<string | null>(null);
+
+  const [phoneCountryCode, setPhoneCountryCode] = useState(userProfile.countryCode || 'BD');
+  const initialCountry = getCountryByCode(userProfile.countryCode || 'BD');
+  const [phoneDigits, setPhoneDigits] = useState(() => {
+    if (userProfile.phoneNumber && userProfile.phoneNumber.startsWith(initialCountry.dialPrefix)) {
+      return userProfile.phoneNumber.slice(initialCountry.dialPrefix.length);
+    }
+    return '';
+  });
+  const [phoneOtpStep, setPhoneOtpStep] = useState<'idle' | 'sent' | 'verified'>(
+    userProfile.phoneVerified ? 'verified' : 'idle'
+  );
+  const [phoneOtpCode, setPhoneOtpCode] = useState('');
+  const [phoneBusy, setPhoneBusy] = useState(false);
 
   const [kycName, setKycName] = useState(userProfile.fullName);
   const [kycIdType, setKycIdType] = useState<IdType>(
@@ -68,6 +101,19 @@ export const ProfileManagementView: React.FC<ProfileManagementViewProps> = ({
     setDisplayName(userProfile.fullName);
     setKycName(userProfile.fullName);
   }, [userProfile.fullName]);
+
+  useEffect(() => {
+    const code = userProfile.countryCode || 'BD';
+    const c = getCountryByCode(code);
+    setPhoneCountryCode(code);
+    if (userProfile.phoneNumber && userProfile.phoneNumber.startsWith(c.dialPrefix)) {
+      setPhoneDigits(userProfile.phoneNumber.slice(c.dialPrefix.length));
+    }
+    setPhoneOtpStep(userProfile.phoneVerified ? 'verified' : 'idle');
+  }, [userProfile.countryCode, userProfile.phoneNumber, userProfile.phoneVerified]);
+
+  const activePhoneCountry = getCountryByCode(phoneCountryCode);
+  const phoneCheck = validateCountryPhoneNumber(activePhoneCountry, phoneDigits);
 
   const initials = (userProfile.fullName || userProfile.handle || 'VC')
     .split(/\s+/)
@@ -609,6 +655,222 @@ export const ProfileManagementView: React.FC<ProfileManagementViewProps> = ({
             Updating your email synchronizes both your login credentials and your Vault P2P directory lookup. If email verification is required by security policy, a confirmation link will be delivered to your new inbox.
           </p>
         </div>
+      </div>
+
+      {/* Country & Phone Number Verification Card */}
+      <div className="bg-[#0B111E]/78 backdrop-blur-md border border-slate-700/70 rounded-2xl p-6 space-y-4 shadow-xl">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Phone className="w-5 h-5 text-orange-400" />
+            <div>
+              <h3 className="font-display font-bold text-white text-base">
+                Country &amp; Phone Verification
+              </h3>
+              <p className="text-xs text-slate-400">
+                Registered country dial prefix and SMS phone verification status.
+              </p>
+            </div>
+          </div>
+          <span
+            className={`px-2.5 py-0.5 rounded-md border text-[11px] font-semibold ${
+              userProfile.phoneVerified
+                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/35'
+                : 'bg-amber-500/20 text-amber-300 border-amber-500/35'
+            }`}
+          >
+            {userProfile.phoneVerified ? 'PHONE VERIFIED' : 'VERIFICATION PENDING'}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+          <div className="md:col-span-4 space-y-1">
+            <label className="block text-xs font-semibold text-slate-300">
+              Country &amp; First Digit Prefix
+            </label>
+            <select
+              value={phoneCountryCode}
+              onChange={(e) => {
+                setPhoneCountryCode(e.target.value);
+                setPhoneDigits('');
+                setPhoneOtpStep('idle');
+                setPhoneOtpCode('');
+              }}
+              className="w-full px-3 py-2.5 rounded-xl border border-slate-700 bg-slate-900/90 text-white text-xs sm:text-sm"
+            >
+              {COUNTRY_PHONE_OPTIONS.map((c) => (
+                <option key={c.code} value={c.code}>
+                  {c.flag} {c.name} ({c.dialPrefix})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="md:col-span-5 space-y-1">
+            <label className="block text-xs font-semibold text-slate-300">
+              Phone Number ({activePhoneCountry.dialPrefix}…)
+            </label>
+            <div className="flex items-stretch rounded-xl border border-slate-700 bg-slate-900/90 overflow-hidden">
+              <span className="px-3 bg-slate-800 border-r border-slate-700 font-mono font-bold text-xs sm:text-sm text-orange-300 flex items-center gap-1 shrink-0">
+                <span>{activePhoneCountry.flag}</span>
+                <span>{activePhoneCountry.dialPrefix}</span>
+              </span>
+              <input
+                type="tel"
+                inputMode="numeric"
+                value={phoneDigits}
+                onChange={(e) => {
+                  setPhoneDigits(normalizeRemainingPhoneDigits(activePhoneCountry, e.target.value));
+                  setPhoneOtpStep('idle');
+                }}
+                placeholder={activePhoneCountry.placeholder}
+                className="w-full px-3 py-2.5 bg-transparent font-mono text-sm text-white placeholder:text-slate-500 focus:outline-none"
+              />
+            </div>
+          </div>
+
+          <div className="md:col-span-3 flex gap-2">
+            <button
+              type="button"
+              disabled={phoneBusy || !phoneCheck.valid}
+              onClick={async () => {
+                if (!phoneCheck.valid) {
+                  onNotify('err', phoneCheck.error || 'Enter a valid phone number.');
+                  return;
+                }
+                if (!phoneRecaptchaRef.current) return;
+                setPhoneBusy(true);
+                try {
+                  const { confirmation } = await sendFirebasePhoneOtp(
+                    phoneCheck.fullNumber,
+                    phoneRecaptchaRef.current
+                  );
+                  phoneConfirmRef.current = confirmation;
+                  setPhoneOtpStep('sent');
+                  setPhoneOtpCode('');
+                  onNotify('ok', `SMS verification OTP sent to ${phoneCheck.fullNumber}.`);
+                } catch (err) {
+                  const code = (err as { code?: string })?.code || '';
+                  if (
+                    code === 'auth/operation-not-allowed' ||
+                    code === 'auth/billing-not-enabled' ||
+                    code === 'auth/unauthorized-domain' ||
+                    code === 'auth/captcha-check-failed' ||
+                    code === 'auth/internal-error'
+                  ) {
+                    await onUpdateUserPhone({
+                      countryCode: activePhoneCountry.code,
+                      countryName: activePhoneCountry.name,
+                      phoneDialPrefix: activePhoneCountry.dialPrefix,
+                      phoneNumber: phoneCheck.fullNumber,
+                      phoneVerified: false,
+                    });
+                    onNotify(
+                      'ok',
+                      `Phone number ${phoneCheck.fullNumber} saved and queued for Compliance verification.`
+                    );
+                  } else {
+                    onNotify('err', err instanceof Error ? err.message : 'Failed to send SMS OTP.');
+                  }
+                } finally {
+                  setPhoneBusy(false);
+                }
+              }}
+              className="flex-1 py-2.5 px-3 rounded-xl bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white text-xs font-semibold"
+            >
+              {phoneBusy ? 'Sending...' : 'Verify SMS'}
+            </button>
+            <button
+              type="button"
+              disabled={phoneBusy || !phoneCheck.valid}
+              onClick={async () => {
+                if (!phoneCheck.valid) return;
+                setPhoneBusy(true);
+                try {
+                  await onUpdateUserPhone({
+                    countryCode: activePhoneCountry.code,
+                    countryName: activePhoneCountry.name,
+                    phoneDialPrefix: activePhoneCountry.dialPrefix,
+                    phoneNumber: phoneCheck.fullNumber,
+                    phoneVerified:
+                      userProfile.phoneVerified === true &&
+                      userProfile.phoneNumber === phoneCheck.fullNumber,
+                  });
+                  onNotify('ok', `Phone number ${phoneCheck.fullNumber} saved to profile.`);
+                } catch (err) {
+                  onNotify('err', err instanceof Error ? err.message : 'Failed to save phone number.');
+                } finally {
+                  setPhoneBusy(false);
+                }
+              }}
+              className="py-2.5 px-3 rounded-xl border border-slate-700 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-slate-200 text-xs font-semibold"
+            >
+              Save
+            </button>
+          </div>
+        </div>
+
+        {phoneOtpStep === 'sent' && (
+          <div className="p-3 rounded-xl bg-slate-900/90 border border-orange-500/40 flex flex-wrap items-center gap-2">
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              value={phoneOtpCode}
+              onChange={(e) => setPhoneOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              placeholder="Enter 6-digit SMS OTP"
+              className="flex-1 min-w-[160px] px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 font-mono text-sm text-white"
+            />
+            <button
+              type="button"
+              disabled={phoneBusy || phoneOtpCode.length < 4}
+              onClick={async () => {
+                if (!phoneConfirmRef.current || !phoneCheck.valid) return;
+                setPhoneBusy(true);
+                try {
+                  const ok = await confirmFirebasePhoneOtp(
+                    phoneConfirmRef.current,
+                    phoneOtpCode,
+                    phoneCheck.fullNumber
+                  );
+                  if (!ok) {
+                    onNotify('err', 'OTP verification failed.');
+                    return;
+                  }
+                  await onUpdateUserPhone({
+                    countryCode: activePhoneCountry.code,
+                    countryName: activePhoneCountry.name,
+                    phoneDialPrefix: activePhoneCountry.dialPrefix,
+                    phoneNumber: phoneCheck.fullNumber,
+                    phoneVerified: true,
+                  });
+                  setPhoneOtpStep('verified');
+                  onNotify('ok', `Phone number ${phoneCheck.fullNumber} verified and saved!`);
+                } catch (err) {
+                  onNotify('err', err instanceof Error ? err.message : 'OTP confirmation failed.');
+                } finally {
+                  setPhoneBusy(false);
+                }
+              }}
+              className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold"
+            >
+              Confirm OTP
+            </button>
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400">
+          <span>
+            Saved on File:{' '}
+            <strong className="font-mono text-slate-200">
+              {userProfile.countryName
+                ? `${userProfile.countryName} · ${userProfile.phoneNumber || '—'}`
+                : userProfile.phoneNumber || 'Not set yet'}
+            </strong>
+          </span>
+          <span className="font-mono text-slate-400">Preview: {phoneCheck.fullNumber}</span>
+        </div>
+
+        <div ref={phoneRecaptchaRef} />
       </div>
     </section>
   );

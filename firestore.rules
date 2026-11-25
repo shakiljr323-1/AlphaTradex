@@ -66,7 +66,8 @@ service cloud.firestore {
         'companyName', 'companyTagline', 'companyDescription', 'companyGoal',
         'riskDisclosure', 'trustpilotScore', 'trustpilotReviews', 'nortonScore',
         'isoScore', 'certikScore', 'minWithdrawalUsd', 'eliteCapitalLockDays',
-        'totalProfitDays', 'globalPaused', 'packages', 'mlmRates', 'mentorConfig',
+        'totalProfitDays', 'globalPaused', 'withdrawalsPaused', 'signupsPaused', 'p2pPaused',
+        'moduleControls', 'supportLinks', 'packages', 'mlmRates', 'mentorConfig',
         'depositWallets', 'paymentMethods', 'pumpFunToken', 'dashboardAnnouncement',
         'bannerAds', 'coinMiningSettings', 'coinMiningPlans', 'forexConfig', 'updatedAt'
       ])
@@ -84,6 +85,33 @@ service cloud.firestore {
       && data.eliteCapitalLockDays is number && data.eliteCapitalLockDays >= 1
       && data.totalProfitDays is number && data.totalProfitDays >= 1
       && data.globalPaused is bool
+      && (!('withdrawalsPaused' in data) || data.withdrawalsPaused is bool)
+      && (!('signupsPaused' in data) || data.signupsPaused is bool)
+      && (!('p2pPaused' in data) || data.p2pPaused is bool)
+      && (!('moduleControls' in data) || (
+        data.moduleControls is map &&
+        data.moduleControls.keys().hasAll([
+          'aiTradingEnabled', 'forexMarketEnabled', 'coinMiningEnabled',
+          'p2pEnabled', 'requireSignupForTradingModules'
+        ]) &&
+        data.moduleControls.keys().hasOnly([
+          'aiTradingEnabled', 'forexMarketEnabled', 'coinMiningEnabled',
+          'p2pEnabled', 'requireSignupForTradingModules'
+        ]) &&
+        data.moduleControls.aiTradingEnabled is bool &&
+        data.moduleControls.forexMarketEnabled is bool &&
+        data.moduleControls.coinMiningEnabled is bool &&
+        data.moduleControls.p2pEnabled is bool &&
+        data.moduleControls.requireSignupForTradingModules is bool
+      ))
+      && (!('supportLinks' in data) || (
+        data.supportLinks is map &&
+        data.supportLinks.keys().hasAll(['telegramUrl', 'whatsappUrl', 'supportEmail']) &&
+        data.supportLinks.keys().hasOnly(['telegramUrl', 'whatsappUrl', 'supportEmail']) &&
+        isBoundedString(data.supportLinks.telegramUrl, 250) &&
+        isBoundedString(data.supportLinks.whatsappUrl, 250) &&
+        isBoundedString(data.supportLinks.supportEmail, 254)
+      ))
       && data.packages is list && data.packages.size() >= 1 && data.packages.size() <= 25
       && data.packages[0] is map
       && data.mlmRates is map
@@ -186,7 +214,10 @@ service cloud.firestore {
       ]) && data.keys().hasOnly([
         'uid', 'email', 'fullName', 'handle', 'role', 'referredByUid',
         'referredByHandle', 'uplineChain', 'kycStatus', 'idType', 'idNumber',
-        'idPhotoData', 'portraitPhotoData', 'avatarData', 'usdBalance', 'profitBalance',
+        'idPhotoData', 'portraitPhotoData', 'avatarData',
+        'countryCode', 'countryName', 'phoneDialPrefix', 'phoneNumber', 'phoneVerified',
+        'suspended', 'suspensionReason',
+        'usdBalance', 'profitBalance',
         'totalInvested', 'totalWithdrawn', 'isMentor', 'mentorGiftedCapital',
         'mentorRequiredVolume', 'mentorBroughtVolume', 'createdAt', 'updatedAt'
       ])
@@ -205,6 +236,13 @@ service cloud.firestore {
       && isBoundedString(data.idPhotoData, 300000)
       && isBoundedString(data.portraitPhotoData, 300000)
       && (!('avatarData' in data) || isBoundedString(data.avatarData, 300000))
+      && (!('countryCode' in data) || (isBoundedString(data.countryCode, 8) && data.countryCode.matches('^([A-Z]{2,4})?$')))
+      && (!('countryName' in data) || isBoundedString(data.countryName, 80))
+      && (!('phoneDialPrefix' in data) || (isBoundedString(data.phoneDialPrefix, 12) && data.phoneDialPrefix.matches('^(\\+[0-9]{1,8})?$')))
+      && (!('phoneNumber' in data) || (isBoundedString(data.phoneNumber, 24) && data.phoneNumber.matches('^(\\+[0-9]{6,18})?$')))
+      && (!('phoneVerified' in data) || data.phoneVerified is bool)
+      && (!('suspended' in data) || data.suspended is bool)
+      && (!('suspensionReason' in data) || isBoundedString(data.suspensionReason, 300))
       && data.usdBalance is number && data.usdBalance >= 0
       && data.profitBalance is number && data.profitBalance >= 0
       && data.totalInvested is number && data.totalInvested >= 0
@@ -557,6 +595,24 @@ service cloud.firestore {
       && data.updatedAt is timestamp;
     }
 
+    function isValidAdminActionLog(data) {
+      return data.keys().hasAll([
+        'adminUid', 'adminEmail', 'action', 'targetUid', 'targetLabel',
+        'details', 'amountUsd', 'createdAt'
+      ]) && data.keys().hasOnly([
+        'adminUid', 'adminEmail', 'action', 'targetUid', 'targetLabel',
+        'details', 'amountUsd', 'createdAt'
+      ])
+      && isValidId(data.adminUid) && data.adminUid == request.auth.uid
+      && isNonEmptyString(data.adminEmail, 254)
+      && isNonEmptyString(data.action, 80)
+      && isBoundedString(data.targetUid, 128)
+      && isNonEmptyString(data.targetLabel, 160)
+      && isNonEmptyString(data.details, 500)
+      && data.amountUsd is number
+      && data.createdAt == request.time;
+    }
+
     // =========================================================================
     // Collection Rules
     // =========================================================================
@@ -626,7 +682,9 @@ service cloud.firestore {
             && incoming().mentorRequiredVolume == existing().mentorRequiredVolume
             && incoming().mentorBroughtVolume == existing().mentorBroughtVolume
             && incoming().diff(existing()).affectedKeys().hasOnly([
-              'avatarData', 'email', 'fullName', 'updatedAt'
+              'avatarData', 'email', 'fullName',
+              'countryCode', 'countryName', 'phoneDialPrefix', 'phoneNumber', 'phoneVerified',
+              'updatedAt'
             ])
           )
           || (
@@ -816,9 +874,17 @@ service cloud.firestore {
         && incoming().uid == existing().uid
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
-        && existing().status == 'pending'
-        && incoming().status in ['approved', 'rejected']
-        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'adminNote', 'updatedAt']);
+        && (
+          (
+            existing().status == 'pending'
+            && incoming().status in ['approved', 'rejected']
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'adminNote', 'updatedAt'])
+          )
+          || (
+            incoming().status == existing().status
+            && incoming().diff(existing()).affectedKeys().hasOnly(['adminNote', 'updatedAt'])
+          )
+        );
       allow delete: if false;
     }
 
@@ -1000,6 +1066,15 @@ service cloud.firestore {
           )
         );
       allow delete: if false;
+    }
+
+    match /adminLogs/{logId} {
+      allow get: if isValidId(logId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(logId)
+        && isAdmin()
+        && isValidAdminActionLog(incoming());
+      allow update, delete: if false;
     }
   }
 }

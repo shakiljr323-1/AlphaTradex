@@ -327,18 +327,25 @@ export const AiRobotBackdrop: React.FC = () => {
       ctx.fillStyle = bgGrad;
       ctx.fillRect(0, 0, width, height);
 
-      // 2. Subtle Quantitative Terminal Grid
-      const gridSize = 48;
-      ctx.strokeStyle = 'rgba(148, 163, 184, 0.045)';
+      // 2. Quantitative Terminal Perspective Grid (3D Horizon Depth)
+      const horizonY = height * 0.34;
+      ctx.strokeStyle = 'rgba(148, 163, 184, 0.05)';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      for (let x = 0; x < width; x += gridSize) {
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, height);
-      }
-      for (let y = 0; y < height; y += gridSize) {
+      // Horizontal perspective rings accelerating toward bottom edge
+      for (let row = 0; row <= 10; row++) {
+        const t = row / 10;
+        const y = horizonY + (height - horizonY) * (t * t);
         ctx.moveTo(0, y);
         ctx.lineTo(width, y);
+      }
+      // Radiating perspective meridian lines from horizon vanish point
+      const vanishX = width * 0.5;
+      for (let col = -12; col <= 12; col++) {
+        const topX = vanishX + col * (width * 0.04);
+        const botX = vanishX + col * (width * 0.14);
+        ctx.moveTo(topX, horizonY);
+        ctx.lineTo(botX, height);
       }
       ctx.stroke();
 
@@ -495,9 +502,9 @@ export const AiRobotBackdrop: React.FC = () => {
     >
       <canvas ref={canvasRef} className="block w-full h-full" />
 
-      {/* Subtle corner HUD telemetry labels so AI robot trading context is unmistakable */}
-      <div className="hidden lg:flex items-center justify-between absolute bottom-4 left-6 right-6 text-[10px] font-mono tracking-widest uppercase text-slate-500/70 select-none">
-        <span>ALPHATRADEX NEURAL BOT v4.2 · LIVE EXECUTION ENGINE</span>
+      {/* Subtle corner horizon label */}
+      <div className="hidden lg:flex items-center justify-between absolute bottom-4 left-6 right-6 text-[10px] font-mono tracking-widest uppercase text-slate-500/65 select-none">
+        <span>ALPHATRADEX QUANT EXECUTION DESK</span>
         <span>MON–FRI ALGORITHMIC ROUTING · USDT / SOL SETTLEMENT</span>
       </div>
     </div>

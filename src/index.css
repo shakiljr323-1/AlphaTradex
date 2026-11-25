@@ -1,21 +1,57 @@
 @import "tailwindcss";
 
 @theme {
-  --font-display: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Outfit", "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Cormorant Garamond", Georgia, serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
 @layer base {
   body {
     font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
 
   h1, h2, h3, h4, .font-display {
     font-family: var(--font-display);
+    letter-spacing: -0.025em;
+  }
+
+  .font-editorial {
+    font-family: var(--font-serif);
+  }
+
+  .text-gold-gradient {
+    background: linear-gradient(135deg, #FEF3C7 0%, #FBBF24 45%, #F59E0B 75%, #FDE68A 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
   }
 
   .tabular-nums {
     font-variant-numeric: tabular-nums;
   }
+}
+
+@keyframes ticker-scroll {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+.animate-ticker-scroll {
+  display: flex;
+  width: max-content;
+  animation: ticker-scroll 42s linear infinite;
+  will-change: transform;
+}
+
+.animate-ticker-scroll:hover {
+  animation-play-state: paused;
 }
