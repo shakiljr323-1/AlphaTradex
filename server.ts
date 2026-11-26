@@ -1174,6 +1174,156 @@ async function startServer() {
     });
   });
 
+  // AI Motion Video Studio — generates compliant 4-scene animated storyboards + 4-language captions via gemini-4-hydrogen
+  app.post('/api/ai-motion-guide/generate', async (req, res) => {
+    try {
+      const body = (req.body || {}) as {
+        prompt?: string;
+        videoTitle?: string;
+        existingScript?: string;
+        visualPreset?: string;
+        companyName?: string;
+      };
+
+      const userPrompt = String(body.prompt || '').trim().slice(0, 800);
+      const videoTitle = String(body.videoTitle || 'How AlphaTradex Works').trim().slice(0, 120);
+      const existingScript = String(body.existingScript || '').trim().slice(0, 1000);
+      const visualPreset = ['overview', 'signup', 'package', 'dashboard'].includes(
+        String(body.visualPreset || '')
+      )
+        ? String(body.visualPreset)
+        : 'overview';
+      const companyName = String(body.companyName || 'AlphaTradex').trim().slice(0, 80);
+
+      if (!userPrompt && !existingScript) {
+        res.status(400).json({ error: 'Please provide a motion prompt or tutorial script.' });
+        return;
+      }
+
+      const ai = getGeminiClient();
+
+      const response = await ai.models.generateContent({
+        model: MODEL_NAME,
+        contents: `Generate a crisp 4-scene animated tutorial motion video storyboard and 4-language captions for "${videoTitle}" on ${companyName}.
+
+Admin Prompt: ${userPrompt || 'Refresh the tutorial motion reel with clear onboarding visuals.'}
+Base Script Context: ${existingScript || 'Explain registration, wallet deposit & packages (Starter $100, Growth $300, Pro $500, Elite $1,000; 200 Mon-Fri profit days, Sat-Sun off, 70 calendar days capital withdrawal eligibility for Elite), and transparent dashboard tracking.'}
+Primary Visual Preset: ${visualPreset}
+
+STRICT COMPLIANCE RULES:
+- Never promise guaranteed profits, guaranteed returns, or risk-free income.
+- Clearly frame visuals as illustrative onboarding & demo walkthroughs.
+- Keep every scene headline punchy (3 to 6 words) and each caption concise (under 24 words) so it reads cleanly inside a 16:9 motion canvas.
+- Translate the summary caption accurately into English (en), Bengali (bn), Hindi (hi), and Spanish (es).`,
+        config: {
+          systemInstruction:
+            'You are a fintech motion graphics director creating clean, factual, compliance-safe onboarding tutorial storyboards for a trading and vault platform. Never invent fake guaranteed profit promises.',
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              script: {
+                type: Type.STRING,
+                description: 'Concise 2-4 sentence narration script for the tutorial video.',
+              },
+              caption: {
+                type: Type.OBJECT,
+                properties: {
+                  en: { type: Type.STRING },
+                  bn: { type: Type.STRING },
+                  hi: { type: Type.STRING },
+                  es: { type: Type.STRING },
+                },
+                required: ['en', 'bn', 'hi', 'es'],
+              },
+              scenes: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    title: { type: Type.STRING, description: 'Short chapter label e.g. 01 · Account Setup' },
+                    headline: { type: Type.STRING, description: '3-6 word kinetic canvas headline' },
+                    caption: { type: Type.STRING, description: '1-sentence subtitle shown during this scene' },
+                    metricLabel: { type: Type.STRING, description: 'Short uppercase metric label' },
+                    metricValue: { type: Type.STRING, description: 'Short factual highlight value (no fake ROI promises)' },
+                    durationSec: { type: Type.NUMBER, description: 'Scene duration between 4 and 6 seconds' },
+                    accent: { type: Type.STRING, description: 'One of: amber, emerald, sky, violet' },
+                    visualType: { type: Type.STRING, description: 'One of: overview, signup, package, dashboard' },
+                  },
+                  required: [
+                    'title',
+                    'headline',
+                    'caption',
+                    'metricLabel',
+                    'metricValue',
+                    'durationSec',
+                    'accent',
+                    'visualType',
+                  ],
+                },
+              },
+            },
+            required: ['script', 'caption', 'scenes'],
+          },
+        },
+      });
+
+      const parsed = extractJsonObject(response.text || '{}') as {
+        script?: string;
+        caption?: { en?: string; bn?: string; hi?: string; es?: string };
+        scenes?: Array<Record<string, unknown>>;
+      };
+
+      const validAccents = new Set(['amber', 'emerald', 'sky', 'violet']);
+      const validVisuals = new Set(['overview', 'signup', 'package', 'dashboard']);
+
+      const scenes = (Array.isArray(parsed.scenes) ? parsed.scenes : [])
+        .slice(0, 6)
+        .map((sc, idx) => ({
+          title: String(sc.title || `0${idx + 1} · Scene ${idx + 1}`).trim().slice(0, 80),
+          headline: String(sc.headline || videoTitle).trim().slice(0, 120),
+          caption: String(sc.caption || '').trim().slice(0, 260),
+          metricLabel: String(sc.metricLabel || 'WALKTHROUGH').trim().slice(0, 48),
+          metricValue: String(sc.metricValue || `Step ${idx + 1}`).trim().slice(0, 48),
+          durationSec: Math.max(3, Math.min(8, Number(sc.durationSec) || 4.5)),
+          accent: validAccents.has(String(sc.accent || ''))
+            ? String(sc.accent)
+            : (['amber', 'sky', 'emerald', 'violet'][idx % 4] as string),
+          visualType: validVisuals.has(String(sc.visualType || ''))
+            ? String(sc.visualType)
+            : visualPreset,
+        }));
+
+      if (scenes.length === 0) {
+        res.status(502).json({ error: 'AI returned an empty storyboard. Please refine your prompt and retry.' });
+        return;
+      }
+
+      res.json({
+        script: String(parsed.script || existingScript || userPrompt).trim().slice(0, 1200),
+        caption: {
+          en: String(parsed.caption?.en || scenes[0].caption || videoTitle).trim().slice(0, 320),
+          bn: String(parsed.caption?.bn || parsed.caption?.en || videoTitle).trim().slice(0, 320),
+          hi: String(parsed.caption?.hi || parsed.caption?.en || videoTitle).trim().slice(0, 320),
+          es: String(parsed.caption?.es || parsed.caption?.en || videoTitle).trim().slice(0, 320),
+        },
+        scenes,
+        aiUpdatedAtIso: new Date().toISOString(),
+        model: MODEL_NAME,
+      });
+    } catch (err) {
+      const errorObj = err as Error & { statusCode?: number; code?: string };
+      const status = errorObj.statusCode || 500;
+      res.status(status).json({
+        error:
+          errorObj.message ||
+          'Failed to generate AI motion storyboard. Verify your Gemini API key in Settings > Secrets.',
+        code: errorObj.code || 'AI_MOTION_FAILED',
+      });
+    }
+  });
+
   const isProd = process.env.NODE_ENV === 'production';
 
   if (!isProd) {

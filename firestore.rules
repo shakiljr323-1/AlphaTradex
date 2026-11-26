@@ -268,6 +268,25 @@ service cloud.firestore {
         data.marketingCardsConfig.templates.size() <= 20 &&
         (data.marketingCardsConfig.templates.size() == 0 || data.marketingCardsConfig.templates[0] is map)
       ))
+      && (!('howItWorksConfig' in data) || (
+        data.howItWorksConfig is map &&
+        data.howItWorksConfig.keys().hasAll([
+          'enabled', 'showOnHomepage', 'defaultLanguage', 'disclaimerText', 'steps', 'videos'
+        ]) &&
+        data.howItWorksConfig.keys().hasOnly([
+          'enabled', 'showOnHomepage', 'defaultLanguage', 'disclaimerText', 'steps', 'videos'
+        ]) &&
+        data.howItWorksConfig.enabled is bool &&
+        data.howItWorksConfig.showOnHomepage is bool &&
+        data.howItWorksConfig.defaultLanguage in ['en', 'bn', 'hi', 'es'] &&
+        isBoundedString(data.howItWorksConfig.disclaimerText, 360) &&
+        data.howItWorksConfig.steps is list &&
+        data.howItWorksConfig.steps.size() <= 8 &&
+        (data.howItWorksConfig.steps.size() == 0 || data.howItWorksConfig.steps[0] is map) &&
+        data.howItWorksConfig.videos is list &&
+        data.howItWorksConfig.videos.size() <= 10 &&
+        (data.howItWorksConfig.videos.size() == 0 || data.howItWorksConfig.videos[0] is map)
+      ))
       && data.pumpFunToken is map
       && data.updatedAt == request.time;
     }

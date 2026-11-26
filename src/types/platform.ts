@@ -258,6 +258,7 @@ export interface PlatformConfig {
   supportAutoResponder?: SupportAutoResponderConfig;
   kycSettings?: GlobalKycSettings;
   marketingCardsConfig?: MarketingCardsConfig;
+  howItWorksConfig?: HowItWorksConfig;
   updatedAt?: unknown;
 }
 
@@ -319,6 +320,63 @@ export interface MarketingCardStats {
   totalGenerated: number;
   totalShared: number;
   updatedAt?: unknown;
+}
+
+export type GuideLanguage = 'en' | 'bn' | 'hi' | 'es';
+export type MotionVisualPreset = 'overview' | 'signup' | 'package' | 'dashboard';
+export type MotionAccentColor = 'amber' | 'emerald' | 'sky' | 'violet';
+
+export interface GuideLocalizedText {
+  en: string;
+  bn: string;
+  hi: string;
+  es: string;
+}
+
+export interface MotionSceneBeat {
+  title: string;
+  headline: string;
+  caption: string;
+  metricLabel: string;
+  metricValue: string;
+  durationSec: number;
+  accent: MotionAccentColor;
+  visualType: MotionVisualPreset;
+}
+
+export interface HowItWorksStepConfig {
+  id: string;
+  stepNumber: number;
+  enabled: boolean;
+  title: GuideLocalizedText;
+  description: GuideLocalizedText;
+  highlights: string[];
+  ctaLabel: string;
+  ctaTarget: 'auth' | 'plans' | 'dashboard';
+}
+
+export interface MotionVideoCardConfig {
+  id: string;
+  stepNumber: number;
+  enabled: boolean;
+  title: GuideLocalizedText;
+  subtitle: GuideLocalizedText;
+  caption: GuideLocalizedText;
+  script: string;
+  visualPreset: MotionVisualPreset;
+  customVideoUrl?: string;
+  isDemoVisual: boolean;
+  scenes: MotionSceneBeat[];
+  aiUpdatedAtIso?: string;
+}
+
+export interface HowItWorksConfig {
+  enabled: boolean;
+  showOnHomepage: boolean;
+  defaultLanguage: GuideLanguage;
+  disclaimerText: string;
+  steps: HowItWorksStepConfig[];
+  videos: MotionVideoCardConfig[];
 }
 
 export interface UserProfile {
@@ -680,6 +738,7 @@ export interface TicketConfirmationReceipt {
 
 export type NavSection =
   | 'home'
+  | 'how-it-works'
   | 'plans'
   | 'forex-news'
   | 'ai-trading'

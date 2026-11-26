@@ -38,6 +38,7 @@
         "supportAutoResponder": { "type": "object" },
         "kycSettings": { "type": "object" },
         "marketingCardsConfig": { "type": "object" },
+        "howItWorksConfig": { "type": "object" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": [

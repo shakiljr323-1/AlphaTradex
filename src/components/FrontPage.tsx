@@ -43,6 +43,7 @@ import { ForexMarketView } from './ForexMarketView';
 import { ForexNewsHub } from './ForexNewsHub';
 import { HomepageMarketNewsModule } from './HomepageMarketNewsModule';
 import { HomepageFaqAccordion } from './HomepageFaqAccordion';
+import { HowItWorksGuideModule } from './HowItWorksGuideModule';
 import { AlphatradexLogo3D } from './AlphatradexLogo3D';
 import { TermsAgreementCheckbox, TermsAndConditionsView } from './TermsAndConditionsView';
 
@@ -1832,6 +1833,16 @@ export const FrontPage: React.FC<FrontPageProps> = ({
             </div>
           </div>
 
+          {/* Interactive 3-Step Onboarding & Motion Video Guide */}
+          <HowItWorksGuideModule
+            platformConfig={platformConfig}
+            mode="homepage"
+            isSignedIn={Boolean(authUser)}
+            onSelectSection={onSelectSection}
+            onOpenAuth={onOpenAuth}
+            onOpenDashboard={onOpenDashboard}
+          />
+
           {/* Dynamic Self-Service FAQ Accordion (Vault Deposits & AI Packages) */}
           <HomepageFaqAccordion
             platformConfig={platformConfig}
@@ -1845,6 +1856,28 @@ export const FrontPage: React.FC<FrontPageProps> = ({
             <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
             <p className="text-xs text-amber-100/90 leading-relaxed">{platformConfig.riskDisclosure}</p>
           </div>
+        </div>
+      )}
+
+      {/* 1B. DEDICATED HOW IT WORKS & MOTION VIDEO GUIDE PAGE */}
+      {activeSection === 'how-it-works' && (
+        <div className="space-y-6">
+          <HowItWorksGuideModule
+            platformConfig={platformConfig}
+            mode="page"
+            isSignedIn={Boolean(authUser)}
+            onSelectSection={onSelectSection}
+            onOpenAuth={onOpenAuth}
+            onOpenDashboard={onOpenDashboard}
+          />
+
+          <HomepageFaqAccordion
+            platformConfig={platformConfig}
+            isSignedIn={Boolean(authUser)}
+            onSelectSection={onSelectSection}
+            onOpenAuth={onOpenAuth}
+            onOpenDashboard={onOpenDashboard}
+          />
         </div>
       )}
 

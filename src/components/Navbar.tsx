@@ -12,6 +12,7 @@ import {
   Menu,
   Newspaper,
   PanelLeft,
+  PlayCircle,
   ShieldCheck,
   Users,
   X,
@@ -56,6 +57,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const publicNavItems: { id: NavSection; label: string; Icon: React.ComponentType<{ className?: string }> }[] = [
     { id: 'home', label: 'Home Overview', Icon: Home },
+    { id: 'how-it-works', label: 'How It Works', Icon: PlayCircle },
     { id: 'plans', label: 'Investment Plans', Icon: Layers },
     { id: 'forex-news', label: 'Forex News', Icon: Newspaper },
     { id: 'mentor-referral', label: isMentor ? 'Referrals & Mentor' : 'Referrals', Icon: Users },

@@ -30,6 +30,7 @@ import {
   Menu,
   Network,
   Newspaper,
+  PlayCircle,
   PlusCircle,
   QrCode,
   Receipt,
@@ -82,6 +83,7 @@ import { NotificationBellPanel } from './NotificationBellPanel';
 import { GlobalKycVerificationView } from './GlobalKycVerificationView';
 import { WithdrawalManagementView } from './WithdrawalManagementView';
 import { MarketingCardStudio } from './MarketingCardStudio';
+import { HowItWorksGuideModule } from './HowItWorksGuideModule';
 
 function formatVaultError(raw: string): string {
   if (raw.startsWith('{') && raw.includes('"error"')) {
@@ -117,6 +119,7 @@ type SidebarSection =
   | 'referral-network'
   | 'downline-team'
   | 'marketing-cards'
+  | 'video-guide'
   | 'profile-kyc'
   | 'kyc-verification'
   | 'support-desk'
@@ -660,6 +663,9 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
     {
       heading: 'ACCOUNT & SECURITY',
       items: [
+        ...(platformConfig.howItWorksConfig?.enabled !== false
+          ? [{ id: 'video-guide' as SidebarSection, label: 'Video Guide', Icon: PlayCircle }]
+          : []),
         { id: 'profile-kyc', label: 'Profile Management', Icon: UserCheck },
         { id: 'kyc-verification', label: 'KYC Verification', Icon: ShieldCheck },
         { id: 'support-desk', label: 'Live Support & Tickets', Icon: Headphones },
@@ -3138,6 +3144,16 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
               userProfile={userProfile}
               platformConfig={platformConfig}
               referralLink={referralLink}
+            />
+          )}
+
+          {/* VIEW: HOW IT WORKS & MOTION VIDEO GUIDE */}
+          {activeNav === 'video-guide' && (
+            <HowItWorksGuideModule
+              platformConfig={platformConfig}
+              mode="dashboard"
+              isSignedIn
+              onDashboardNavigate={(target) => selectNav(target)}
             />
           )}
 

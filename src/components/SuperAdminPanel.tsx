@@ -15,6 +15,7 @@ import {
   Download,
   FileCheck,
   FileJson,
+  Film,
   Gift,
   Globe,
   Headphones,
@@ -80,6 +81,7 @@ import { AlphatradexLogo3D } from './AlphatradexLogo3D';
 import { AdminSupportCenter } from './AdminSupportCenter';
 import { AdminKycManagement } from './AdminKycManagement';
 import { AdminMarketingCardsPanel } from './AdminMarketingCardsPanel';
+import { AdminHowItWorksPanel } from './AdminHowItWorksPanel';
 
 function formatUiError(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err || 'Action failed.');
@@ -106,6 +108,7 @@ type AdminTab =
   | 'announcements'
   | 'coin-ads-mining'
   | 'marketing-cards'
+  | 'how-it-works'
   | 'modules-support'
   | 'company'
   | 'wallets-meme'
@@ -486,6 +489,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
         { id: 'forex-copy', label: 'Forex Tiers & Copy Trade', Icon: Globe },
         { id: 'coin-ads-mining', label: 'Banner Ads & Coin Mining', Icon: Sparkles },
         { id: 'marketing-cards', label: 'Marketing Cards', Icon: ImageIcon },
+        { id: 'how-it-works', label: 'How It Works & Video', Icon: Film },
         { id: 'wallets-meme', label: 'Addresses & Meme Coin', Icon: Coins },
         { id: 'company', label: 'Company & Trust Ratings', Icon: Shield },
       ],
@@ -912,6 +916,17 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
               draftConfig={draftConfig}
               setDraftConfig={setDraftConfig}
               marketingCardStats={marketingCardStats}
+              onSaveConfig={handleSaveConfig}
+              busy={busy}
+              onNotify={notify}
+            />
+          )}
+
+          {/* TAB: HOW IT WORKS & MOTION VIDEO GUIDE STUDIO */}
+          {tab === 'how-it-works' && (
+            <AdminHowItWorksPanel
+              draftConfig={draftConfig}
+              setDraftConfig={setDraftConfig}
               onSaveConfig={handleSaveConfig}
               busy={busy}
               onNotify={notify}

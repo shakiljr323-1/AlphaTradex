@@ -53,6 +53,10 @@ import {
   ForexPlatformConfig,
   ForexTrade,
   GlobalKycSettings,
+  GuideLanguage,
+  GuideLocalizedText,
+  HowItWorksConfig,
+  HowItWorksStepConfig,
   IdType,
   Investment,
   InvestmentPackage,
@@ -65,6 +69,10 @@ import {
   MarketingCardThemeId,
   MemeCoinInvestment,
   MlmCommission,
+  MotionAccentColor,
+  MotionSceneBeat,
+  MotionVideoCardConfig,
+  MotionVisualPreset,
   P2PTransfer,
   PackageFundingSource,
   PaymentMethodConfig,
@@ -445,6 +453,20 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                 data.marketingCardsConfig.templates.length > 0
                   ? data.marketingCardsConfig.templates
                   : DEFAULT_PLATFORM_CONFIG.marketingCardsConfig!.templates,
+            },
+            howItWorksConfig: {
+              ...DEFAULT_PLATFORM_CONFIG.howItWorksConfig!,
+              ...(data.howItWorksConfig || {}),
+              steps:
+                Array.isArray(data.howItWorksConfig?.steps) &&
+                data.howItWorksConfig.steps.length > 0
+                  ? data.howItWorksConfig.steps
+                  : DEFAULT_PLATFORM_CONFIG.howItWorksConfig!.steps,
+              videos:
+                Array.isArray(data.howItWorksConfig?.videos) &&
+                data.howItWorksConfig.videos.length > 0
+                  ? data.howItWorksConfig.videos
+                  : DEFAULT_PLATFORM_CONFIG.howItWorksConfig!.videos,
             },
             mlmRates: { ...DEFAULT_PLATFORM_CONFIG.mlmRates, ...(data.mlmRates || {}) },
             mentorConfig: { ...DEFAULT_PLATFORM_CONFIG.mentorConfig, ...(data.mentorConfig || {}) },
@@ -3280,6 +3302,107 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       templates: safeMarketingTemplates,
     };
 
+    const defaultHiw = DEFAULT_PLATFORM_CONFIG.howItWorksConfig!;
+    const rawHiw = next.howItWorksConfig || defaultHiw;
+    const allowedLangs: GuideLanguage[] = ['en', 'bn', 'hi', 'es'];
+    const allowedPresets: MotionVisualPreset[] = ['overview', 'signup', 'package', 'dashboard'];
+    const allowedAccents: MotionAccentColor[] = ['amber', 'emerald', 'sky', 'violet'];
+    const sanitizeLoc = (
+      val: Partial<GuideLocalizedText> | undefined,
+      fallback: GuideLocalizedText,
+      maxLen: number
+    ): GuideLocalizedText => ({
+      en: String(val?.en || fallback.en || '').trim().slice(0, maxLen),
+      bn: String(val?.bn || fallback.bn || val?.en || fallback.en || '').trim().slice(0, maxLen),
+      hi: String(val?.hi || fallback.hi || val?.en || fallback.en || '').trim().slice(0, maxLen),
+      es: String(val?.es || fallback.es || val?.en || fallback.en || '').trim().slice(0, maxLen),
+    });
+
+    const safeHiwSteps: HowItWorksStepConfig[] = (
+      Array.isArray(rawHiw.steps) && rawHiw.steps.length > 0 ? rawHiw.steps : defaultHiw.steps
+    )
+      .slice(0, 8)
+      .map((step, idx) => {
+        const fb = defaultHiw.steps[idx] || defaultHiw.steps[0];
+        const ctaTarget =
+          step.ctaTarget === 'auth' || step.ctaTarget === 'plans' || step.ctaTarget === 'dashboard'
+            ? step.ctaTarget
+            : fb.ctaTarget;
+        return {
+          id: sanitizeRuleId(step.id || `step_${idx + 1}`, `step_${idx + 1}`),
+          stepNumber: Math.max(1, Math.min(20, Math.round(Number(step.stepNumber) || idx + 1))),
+          enabled: step.enabled !== false,
+          title: sanitizeLoc(step.title, fb.title, 120),
+          description: sanitizeLoc(step.description, fb.description, 480),
+          highlights: (Array.isArray(step.highlights) ? step.highlights : fb.highlights)
+            .slice(0, 6)
+            .map((h) => String(h || '').trim().slice(0, 140))
+            .filter(Boolean),
+          ctaLabel: String(step.ctaLabel || fb.ctaLabel).trim().slice(0, 48),
+          ctaTarget,
+        };
+      });
+
+    const safeHiwVideos: MotionVideoCardConfig[] = (
+      Array.isArray(rawHiw.videos) && rawHiw.videos.length > 0 ? rawHiw.videos : defaultHiw.videos
+    )
+      .slice(0, 10)
+      .map((vid, idx) => {
+        const fb = defaultHiw.videos[idx] || defaultHiw.videos[0];
+        const rawUrl = String(vid.customVideoUrl || '').trim().slice(0, 500);
+        const safeVideoUrl =
+          rawUrl && /^https?:\/\//i.test(rawUrl) ? rawUrl : '';
+        const safeScenes: MotionSceneBeat[] = (
+          Array.isArray(vid.scenes) && vid.scenes.length > 0 ? vid.scenes : fb.scenes
+        )
+          .slice(0, 6)
+          .map((sc, sIdx) => {
+            const sFb = fb.scenes[sIdx] || fb.scenes[0];
+            return {
+              title: String(sc.title || sFb.title).trim().slice(0, 80),
+              headline: String(sc.headline || sFb.headline).trim().slice(0, 120),
+              caption: String(sc.caption || sFb.caption).trim().slice(0, 260),
+              metricLabel: String(sc.metricLabel || sFb.metricLabel).trim().slice(0, 48),
+              metricValue: String(sc.metricValue || sFb.metricValue).trim().slice(0, 48),
+              durationSec: Math.max(2, Math.min(12, Number(sc.durationSec) || 4.5)),
+              accent: allowedAccents.includes(sc.accent) ? sc.accent : sFb.accent,
+              visualType: allowedPresets.includes(sc.visualType)
+                ? sc.visualType
+                : sFb.visualType,
+            };
+          });
+        const cleanVid: MotionVideoCardConfig = {
+          id: sanitizeRuleId(vid.id || `video_${idx + 1}`, `video_${idx + 1}`),
+          stepNumber: Math.max(1, Math.min(20, Math.round(Number(vid.stepNumber) || idx + 1))),
+          enabled: vid.enabled !== false,
+          title: sanitizeLoc(vid.title, fb.title, 120),
+          subtitle: sanitizeLoc(vid.subtitle, fb.subtitle, 220),
+          caption: sanitizeLoc(vid.caption, fb.caption, 320),
+          script: String(vid.script || fb.script).trim().slice(0, 1200),
+          visualPreset: allowedPresets.includes(vid.visualPreset)
+            ? vid.visualPreset
+            : fb.visualPreset,
+          customVideoUrl: safeVideoUrl,
+          isDemoVisual: vid.isDemoVisual !== false,
+          scenes: safeScenes,
+        };
+        if (vid.aiUpdatedAtIso) {
+          cleanVid.aiUpdatedAtIso = String(vid.aiUpdatedAtIso).slice(0, 64);
+        }
+        return cleanVid;
+      });
+
+    const safeHowItWorksConfig: HowItWorksConfig = {
+      enabled: rawHiw.enabled !== false,
+      showOnHomepage: rawHiw.showOnHomepage !== false,
+      defaultLanguage: allowedLangs.includes(rawHiw.defaultLanguage) ? rawHiw.defaultLanguage : 'en',
+      disclaimerText: String(rawHiw.disclaimerText || defaultHiw.disclaimerText)
+        .trim()
+        .slice(0, 360),
+      steps: safeHiwSteps,
+      videos: safeHiwVideos,
+    };
+
     const writeAdminLog = async (entry: Omit<AdminActionLog, 'id' | 'adminUid' | 'adminEmail' | 'createdAt'>) => {
       if (!authUser) return;
       try {
@@ -3342,6 +3465,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         supportAutoResponder: safeSupportAutoResponder,
         kycSettings: safeKycSettings,
         marketingCardsConfig: safeMarketingCardsConfig,
+        howItWorksConfig: safeHowItWorksConfig,
         updatedAt: serverTimestamp(),
       });
       await writeAdminLog({

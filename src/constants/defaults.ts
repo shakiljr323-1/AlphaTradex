@@ -444,6 +444,311 @@ export const DEFAULT_PLATFORM_CONFIG: PlatformConfig = {
       },
     ],
   },
+  howItWorksConfig: {
+    enabled: true,
+    showOnHomepage: true,
+    defaultLanguage: 'en',
+    disclaimerText:
+      'Illustrative motion walkthroughs & demo visuals only. Digital asset and forex trading involve market risk; no returns are guaranteed.',
+    steps: [
+      {
+        id: 'step_1_signup',
+        stepNumber: 1,
+        enabled: true,
+        title: {
+          en: 'Sign Up & Account Setup',
+          bn: 'সাইন আপ ও অ্যাকাউন্ট সেটআপ',
+          hi: 'साइन अप और अकाउंट सेटअप',
+          es: 'Registro y Configuración de Cuenta',
+        },
+        description: {
+          en: 'Register your AlphaTradex account, verify your email and profile details, optionally enter a referral code, and unlock full access to your user vault dashboard.',
+          bn: 'আপনার AlphaTradex অ্যাকাউন্ট নিবন্ধন করুন, ইমেইল ও প্রোফাইল তথ্য যাচাই করুন, চাইলে রেফারেল কোড দিন এবং ইউজার ড্যাশবোর্ডে প্রবেশ করুন।',
+          hi: 'अपना AlphaTradex अकाउंट रजिस्टर करें, ईमेल और प्रोफ़ाइल विवरण सत्यापित करें, रेफ़रल कोड (यदि हो) दर्ज करें और यूज़र डैशबोर्ड एक्सेस करें।',
+          es: 'Registra tu cuenta AlphaTradex, verifica tu correo y perfil, ingresa un código de referido si tienes uno y accede a tu panel de bóveda.',
+        },
+        highlights: [
+          'Fast email or Google onboarding with profile verification',
+          'Optional referral code binding on registration',
+          'Immediate access to Vault Dashboard & Security Desk',
+        ],
+        ctaLabel: 'Create Account',
+        ctaTarget: 'auth',
+      },
+      {
+        id: 'step_2_package',
+        stepNumber: 2,
+        enabled: true,
+        title: {
+          en: 'Fund Wallet & Choose Package',
+          bn: 'ওয়ালেট ফান্ড ও প্যাকেজ নির্বাচন',
+          hi: 'वॉलेट फंड करें और पैकेज चुनें',
+          es: 'Deposita Fondos y Elige Paquete',
+        },
+        description: {
+          en: 'Deposit funds into your USD Vault wallet and activate a structured package — Starter ($100), Growth ($300), Pro ($500), or Elite ($1,000) — operating on the 200 Mon–Fri profit-day schedule (Sat–Sun off) with 70 calendar days capital withdrawal eligibility on Elite.',
+          bn: 'আপনার ওয়ালেটে ফান্ড ডিপোজিট করুন এবং Starter ($100), Growth ($300), Pro ($500) বা Elite ($1,000) প্যাকেজ চালু করুন। ২০০টি সোম–শুক্র কার্যদিবস (শনি–রবি বন্ধ) এবং Elite প্যাকেজে ৭০ ক্যালেন্ডার দিন পর মূলধন উত্তোলনের নিয়ম অনুসরণ করে।',
+          hi: 'अपने वॉलेट में फंड जमा करें और Starter ($100), Growth ($300), Pro ($500), या Elite ($1,000) पैकेज चुनें — 200 सोम–शुक्र प्रॉफिट-डे नियम (शनि–रवि अवकाश) और Elite के लिए 70 कैलेंडर दिन कैपिटल निकासी पात्रता के साथ।',
+          es: 'Deposita fondos en tu billetera y elige un paquete — Starter ($100), Growth ($300), Pro ($500) o Elite ($1,000) — bajo las reglas de 200 días hábiles (Lun–Vie, Sáb–Dom libre) y elegibilidad de retiro de capital a los 70 días calendario para Elite.',
+        },
+        highlights: [
+          'Starter $100 · Growth $300 · Pro $500 · Elite $1,000',
+          '200 Profit-Day Cycle (Mon–Fri active · Sat–Sun off)',
+          'Elite Tier: 70 calendar days capital withdrawal eligibility',
+        ],
+        ctaLabel: 'Explore Packages',
+        ctaTarget: 'plans',
+      },
+      {
+        id: 'step_3_track',
+        stepNumber: 3,
+        enabled: true,
+        title: {
+          en: 'Track Progress, Trading & Referrals',
+          bn: 'অগ্রগতি, ট্রেডিং ও রেফারেল ট্র্যাক করুন',
+          hi: 'प्रगति, ट्रेडिंग और रेफ़रल ट्रैक करें',
+          es: 'Sigue Progreso, Trading y Referidos',
+        },
+        description: {
+          en: 'Monitor weekday profit updates, explore AI and Forex/Crypto market tools, track your referral network and team stats, and audit every wallet transaction transparently.',
+          bn: 'প্রতিদিনের (সোম–শুক্র) আপডেট দেখুন, AI ও ফরেক্স/ক্রিপ্টো মার্কেট টুল ব্যবহার করুন, রেফারেল টিম স্ট্যাটাস দেখুন এবং প্রতিটি ওয়ালেট লেনদেন স্বচ্ছভাবে পর্যবেক্ষণ করুন।',
+          hi: 'दैनिक अपडेट मॉनिटर करें, AI और मार्केट टूल्स एक्सप्लोर करें, रेफ़रल/टीम आँकड़े देखें और हर वॉलेट लेनदेन को पारदर्शी रूप से ट्रैक करें।',
+          es: 'Monitorea actualizaciones diarias de lunes a viernes, explora herramientas de IA y mercado, revisa tu red de referidos y consulta cada transacción con transparencia.',
+        },
+        highlights: [
+          'Live weekday progress tracking & transparent transaction history',
+          'AI Trading tools, Crypto Sentiment Heatmap & Forex Market desk',
+          'Multi-tier referral tracking, Promo Card Studio & withdrawal tracker',
+        ],
+        ctaLabel: 'Open Dashboard',
+        ctaTarget: 'dashboard',
+      },
+    ],
+    videos: [
+      {
+        id: 'video_how_it_works',
+        stepNumber: 1,
+        enabled: true,
+        title: {
+          en: 'How AlphaTradex Works',
+          bn: 'AlphaTradex কীভাবে কাজ করে',
+          hi: 'AlphaTradex कैसे काम करता है',
+          es: 'Cómo Funciona AlphaTradex',
+        },
+        subtitle: {
+          en: 'Complete 3-step ecosystem overview from onboarding to transparent ledger tracking.',
+          bn: 'নিবন্ধন থেকে স্বচ্ছ লেনদেন ট্র্যাকিং পর্যন্ত সম্পূর্ণ ৩-ধাপের পরিচিতি।',
+          hi: 'पंजीकरण से लेकर पारदर्शी वॉलेट ट्रैकिंग तक पूरा 3-चरण ओवरव्यू।',
+          es: 'Resumen completo en 3 pasos desde el registro hasta el seguimiento transparente.',
+        },
+        caption: {
+          en: 'Watch the 3-step lifecycle: Register & verify, fund & choose a Mon–Fri package, and track activity live in your dashboard.',
+          bn: '৩-ধাপের প্রক্রিয়া দেখুন: অ্যাকাউন্ট তৈরি ও যাচাই, ওয়ালেট ফান্ড ও প্যাকেজ নির্বাচন এবং ড্যাশবোর্ডে লাইভ ট্র্যাকিং।',
+          hi: '3-चरणीय प्रक्रिया देखें: साइन अप और सत्यापन, वॉलेट फंड व पैकेज चयन, और डैशबोर्ड पर लाइव ट्रैकिंग।',
+          es: 'Mira el ciclo de 3 pasos: registro y verificación, depósito y selección de paquete Lun–Vie, y seguimiento en tiempo real.',
+        },
+        script:
+          'Welcome to AlphaTradex. Step 1: Create your account and complete profile verification. Step 2: Deposit funds and activate Starter, Growth, Pro, or Elite under our 200 weekday cycle rules. Step 3: Monitor progress, market sentiment tools, referrals, and every wallet record transparently. Demo visuals are illustrative only.',
+        visualPreset: 'overview',
+        customVideoUrl: '',
+        isDemoVisual: true,
+        scenes: [
+          {
+            title: '01 · Ecosystem Overview',
+            headline: 'Unified Vault, AI & Market Tools',
+            caption:
+              'AlphaTradex brings account security, structured packages, market intelligence, and referral tools into one dashboard.',
+            metricLabel: 'PLATFORM STRUCTURE',
+            metricValue: '3 Core Steps',
+            durationSec: 4.5,
+            accent: 'amber',
+            visualType: 'overview',
+          },
+          {
+            title: '02 · Verified Onboarding',
+            headline: 'Register & Secure Your Profile',
+            caption:
+              'Sign up with email or Google, verify your profile, and link an optional referral code in minutes.',
+            metricLabel: 'ONBOARDING',
+            metricValue: 'Verified Access',
+            durationSec: 4.5,
+            accent: 'sky',
+            visualType: 'signup',
+          },
+          {
+            title: '03 · 200 Weekday Cycle',
+            headline: 'Starter $100 to Elite $1,000',
+            caption:
+              'Packages follow Mon–Fri execution (Sat–Sun off) for 200 profit days, with 70-day capital withdrawal eligibility for Elite.',
+            metricLabel: 'ACTIVE SCHEDULE',
+            metricValue: 'Mon–Fri · 200 Days',
+            durationSec: 5,
+            accent: 'emerald',
+            visualType: 'package',
+          },
+          {
+            title: '04 · Full Transparency',
+            headline: 'Track Every Transaction Live',
+            caption:
+              'Inspect deposits, package logs, referral commissions, and withdrawal statuses anytime. Trading involves market risk.',
+            metricLabel: 'LEDGER AUDIT',
+            metricValue: 'Real-Time Sync',
+            durationSec: 4.5,
+            accent: 'violet',
+            visualType: 'dashboard',
+          },
+        ],
+      },
+      {
+        id: 'video_signup',
+        stepNumber: 2,
+        enabled: true,
+        title: {
+          en: 'How to Sign Up',
+          bn: 'কীভাবে সাইন আপ করবেন',
+          hi: 'साइन अप कैसे करें',
+          es: 'Cómo Registrarse',
+        },
+        subtitle: {
+          en: 'Step-by-step walkthrough of account creation, email/KYC verification, and referral codes.',
+          bn: 'অ্যাকাউন্ট তৈরি, ইমেইল/কেওয়াইসি যাচাই এবং রেফারেল কোড ব্যবহারের ধাপসমূহ।',
+          hi: 'अकाउंट बनाने, ईमेल/KYC सत्यापन और रेफ़रल कोड जोड़ने की पूरी गाइड।',
+          es: 'Guía paso a paso para crear cuenta, verificar perfil/KYC y usar un código de referido.',
+        },
+        caption: {
+          en: 'Register with your email, apply a team referral code if invited, verify your identity details, and enter your personal Vault Dashboard.',
+          bn: 'ইমেইল দিয়ে নিবন্ধন করুন, রেফারেল কোড থাকলে যুক্ত করুন, প্রোফাইল যাচাই করুন এবং আপনার ভল্ট ড্যাশবোর্ডে প্রবেশ করুন।',
+          hi: 'ईमेल से रजिस्टर करें, आमंत्रित होने पर रेफ़रल कोड डालें, पहचान सत्यापित करें और अपने वॉलेट डैशबोर्ड में प्रवेश करें।',
+          es: 'Regístrate con tu correo, añade tu código de referido si aplica, verifica tu perfil y accede a tu Vault Dashboard.',
+        },
+        script:
+          'Open the Sign Up screen from the top bar. Enter your full name, email, and strong password, or continue with Google. Add your inviter referral code if you have one, review platform terms, and verify your profile inside Account & Security.',
+        visualPreset: 'signup',
+        customVideoUrl: '',
+        isDemoVisual: true,
+        scenes: [
+          {
+            title: '01 · Open Registration',
+            headline: 'Click Register in the Top Bar',
+            caption:
+              'Choose standard email registration or quick Google sign-in directly from the AlphaTradex portal.',
+            metricLabel: 'STEP 1 OF 4',
+            metricValue: 'Account Form',
+            durationSec: 4.5,
+            accent: 'sky',
+            visualType: 'signup',
+          },
+          {
+            title: '02 · Referral Code',
+            headline: 'Attach Optional Referral ID',
+            caption:
+              'If a team leader invited you, your referral code auto-fills via link or can be typed before submitting.',
+            metricLabel: 'REFERRAL LINK',
+            metricValue: 'Auto-Detected',
+            durationSec: 4.5,
+            accent: 'amber',
+            visualType: 'signup',
+          },
+          {
+            title: '03 · Email & Profile KYC',
+            headline: 'Verify Identity & Security',
+            caption:
+              'Confirm your email and complete country-supported KYC verification inside Account & Security.',
+            metricLabel: 'SECURITY CHECK',
+            metricValue: 'Global KYC',
+            durationSec: 4.5,
+            accent: 'emerald',
+            visualType: 'signup',
+          },
+          {
+            title: '04 · Dashboard Ready',
+            headline: 'Access Your Vault Workspace',
+            caption:
+              'Once registered, review your wallet balances, market charts, and onboarding checklist inside the dashboard.',
+            metricLabel: 'ACCESS',
+            metricValue: 'Vault Unlocked',
+            durationSec: 4.5,
+            accent: 'violet',
+            visualType: 'dashboard',
+          },
+        ],
+      },
+      {
+        id: 'video_buy_package',
+        stepNumber: 3,
+        enabled: true,
+        title: {
+          en: 'How to Buy a Package',
+          bn: 'কীভাবে প্যাকেজ কিনবেন',
+          hi: 'पैकेज कैसे खरीदें',
+          es: 'Cómo Activar un Paquete',
+        },
+        subtitle: {
+          en: 'Deposit funds, compare Starter $100 to Elite $1,000 tiers, and understand the 200-day Mon–Fri rules.',
+          bn: 'ফান্ড ডিপোজিট, Starter $100 থেকে Elite $1,000 তুলনা এবং ২০০ কার্যদিবসের নিয়ম জানুন।',
+          hi: 'फंड जमा करें, Starter $100 से Elite $1,000 की तुलना करें और 200-दिवसीय सोम–शुक्र नियम समझें।',
+          es: 'Deposita fondos, compara Starter $100 hasta Elite $1,000 y comprende las reglas de 200 días Lun–Vie.',
+        },
+        caption: {
+          en: 'Fund your USD Vault wallet, choose Starter ($100), Growth ($300), Pro ($500), or Elite ($1,000), and review the Mon–Fri 200 profit-day and 70-day Elite capital rules.',
+          bn: 'আপনার USD ভল্ট ওয়ালেটে ডিপোজিট করুন, Starter ($100), Growth ($300), Pro ($500) বা Elite ($1,000) নির্বাচন করুন এবং সোম–শুক্র ২০০ দিনের নিয়ম ও Elite ৭০ দিনের নিয়ম দেখুন।',
+          hi: 'अपना USD वॉलेट फंड करें, Starter ($100), Growth ($300), Pro ($500), या Elite ($1,000) चुनें और सोम–शुक्र 200-दिन व Elite 70-दिन के नियम देखें।',
+          es: 'Fondea tu billetera USD, elige Starter ($100), Growth ($300), Pro ($500) o Elite ($1,000), y revisa el ciclo de 200 días Lun–Vie y la regla de 70 días en Elite.',
+        },
+        script:
+          'Go to Deposit Funds in your dashboard and submit a supported network deposit. Once approved into your USD Vault, open Activate Trading Package and compare Starter $100, Growth $300, Pro $500, and Elite $1,000. All packages follow the 200 Mon–Fri profit-day calendar (Sat–Sun off). Elite capital withdrawal eligibility opens after 70 calendar days. Market performance involves risk.',
+        visualPreset: 'package',
+        customVideoUrl: '',
+        isDemoVisual: true,
+        scenes: [
+          {
+            title: '01 · Fund Your Vault',
+            headline: 'Deposit via Supported Networks',
+            caption:
+              'Open Deposit Funds, select your preferred payment channel, submit your transaction reference, and wait for approval.',
+            metricLabel: 'VAULT WALLET',
+            metricValue: 'Verified Deposit',
+            durationSec: 4.5,
+            accent: 'amber',
+            visualType: 'package',
+          },
+          {
+            title: '02 · Compare 4 Tiers',
+            headline: 'Starter · Growth · Pro · Elite',
+            caption:
+              'Select Starter ($100), Growth ($300), Pro ($500), or Elite ($1,000) based on your personal allocation plan.',
+            metricLabel: 'PACKAGE RANGE',
+            metricValue: '$100 – $1,000',
+            durationSec: 5,
+            accent: 'emerald',
+            visualType: 'package',
+          },
+          {
+            title: '03 · Weekday & Capital Rules',
+            headline: '200 Mon–Fri Days · Sat–Sun Off',
+            caption:
+              'Activity tracks across 200 Mon–Fri days with weekends off. Elite tier includes 70 calendar-day capital withdrawal eligibility.',
+            metricLabel: 'ELITE CAPITAL RULE',
+            metricValue: '70 Calendar Days',
+            durationSec: 5,
+            accent: 'sky',
+            visualType: 'package',
+          },
+          {
+            title: '04 · Monitor & Withdraw',
+            headline: 'Transparent Wallet & Payouts',
+            caption:
+              'Track package schedules, request eligible payouts in Withdrawals, and review risk disclosures anytime.',
+            metricLabel: 'TRANSPARENCY',
+            metricValue: 'Full Audit Log',
+            durationSec: 4.5,
+            accent: 'violet',
+            visualType: 'dashboard',
+          },
+        ],
+      },
+    ],
+  },
 };
 
 
