@@ -33,6 +33,7 @@ import {
   DEFAULT_GLOBAL_KYC_SETTINGS,
   DEFAULT_PLATFORM_CONFIG,
   DEFAULT_SUPPORT_AUTO_RESPONDER,
+  DEFAULT_WEB3_PAYMENT_CONFIG,
   SUPER_ADMIN_EMAIL,
 } from '../constants/defaults';
 import { auth, db, googleProvider, handleFirestoreError, OperationType } from '../lib/firebase';
@@ -62,6 +63,12 @@ import {
   InvestmentPackage,
   KycApiVerificationStatus,
   KycProviderId,
+  LeaderboardCategory,
+  LeaderboardConfig,
+  LeaderboardEntry,
+  LeaderboardEntrySource,
+  LeaderboardTimeframe,
+  LoginActivityRecord,
   MarketingCardCategory,
   MarketingCardStats,
   MarketingCardsConfig,
@@ -88,10 +95,14 @@ import {
   SupportTicketPriority,
   SupportTicketStatus,
   TicketConfirmationReceipt,
+  UserMissionProfile,
   UserNotification,
   UserPaymentMethod,
   UserProfile,
   WalletTransfer,
+  Web3ChainKey,
+  Web3PaymentConfig,
+  WhitelistedWallet,
   Withdrawal,
 } from '../types/platform';
 import {
@@ -142,6 +153,9 @@ interface PlatformContextValue {
   supportChatMessages: SupportChatMessage[];
   supportTickets: SupportTicket[];
   userNotifications: UserNotification[];
+  whitelistedWallets: WhitelistedWallet[];
+  loginActivities: LoginActivityRecord[];
+  missionProfile: UserMissionProfile | null;
   // Auth & KYC
   signInWithGoogle: (
     referralCode?: string,
@@ -203,6 +217,48 @@ interface PlatformContextValue {
     amountUsd: number;
     txId: string;
   }) => Promise<void>;
+  verifyWeb3AutoDeposit: (params: {
+    network: Web3ChainKey;
+    txHash: string;
+  }) => Promise<{
+    status: 'pending_mining' | 'confirming' | 'credited';
+    confirmations: number;
+    requiredConfirmations: number;
+    verifiedAmountUsd?: number;
+    newDepositBalance?: number;
+    depositId?: string;
+    blockNumber?: number;
+    fromAddress?: string;
+    toAddress?: string;
+    tokenContract?: string;
+    txHash: string;
+    network: Web3ChainKey;
+    explorerUrl?: string;
+    message: string;
+  }>;
+  requestWithdrawalOtp: (params: {
+    amountUsd: number;
+    network: CryptoNetwork;
+    destinationAddress: string;
+  }) => Promise<{
+    ok: boolean;
+    emailMasked: string;
+    expiresInSeconds: number;
+    deliveryMode: string;
+    previewCode?: string;
+    message: string;
+  }>;
+  verifyWithdrawalOtp: (params: {
+    code: string;
+    amountUsd: number;
+    network: CryptoNetwork;
+    destinationAddress: string;
+  }) => Promise<{
+    ok: boolean;
+    verified: boolean;
+    otpVerificationToken: string;
+    expiresAtIso: string;
+  }>;
   activatePackage: (pkg: InvestmentPackage, fundingSource?: PackageFundingSource) => Promise<void>;
   transferIncomeToDepositWallet: (amountUsd: number) => Promise<void>;
   claimInvestmentProfit: (investment: Investment) => Promise<number>;
@@ -212,6 +268,7 @@ interface PlatformContextValue {
     destinationAddress: string;
     source: 'package_profit' | 'mlm_commission' | 'mentor_profit';
     settlementMode?: 'pending' | 'completed';
+    otpVerificationToken?: string;
   }) => Promise<void>;
   requestManualCapitalWithdrawal: (params: {
     investment: Investment;
@@ -292,9 +349,17 @@ interface PlatformContextValue {
   verifyUserPhone: (targetUid: string, verified: boolean) => Promise<void>;
   bulkApproveKyc: (targetUids: string[]) => Promise<number>;
   bulkVerifyPhones: (targetUids: string[]) => Promise<number>;
-  approveCapitalWithdrawal: (withdrawal: Withdrawal, adminNote?: string) => Promise<void>;
+  approveCapitalWithdrawal: (
+    withdrawal: Withdrawal,
+    adminNote?: string,
+    payoutTxHash?: string
+  ) => Promise<void>;
   rejectCapitalWithdrawal: (withdrawal: Withdrawal, adminNote: string) => Promise<void>;
-  updateWithdrawalNote: (withdrawalId: string, adminNote: string) => Promise<void>;
+  updateWithdrawalNote: (
+    withdrawalId: string,
+    adminNote: string,
+    payoutTxHash?: string
+  ) => Promise<void>;
   giftMentorAccount: (params: {
     targetUid: string;
     giftedCapital: number;
@@ -335,6 +400,18 @@ interface PlatformContextValue {
   // Marketing Photo Card Studio stats & telemetry
   marketingCardStats: MarketingCardStats;
   trackMarketingCardEvent: (event: 'generated' | 'shared') => Promise<void>;
+  // Security Whitelist & Engagement Missions
+  toggleWhitelistStrictMode: (enabled: boolean) => Promise<void>;
+  toggleWhitelist24hLock: (enabled: boolean) => Promise<void>;
+  addWhitelistedWallet: (params: {
+    label: string;
+    network: 'BEP20' | 'POLYGON' | 'TRC20' | 'ERC20';
+    address: string;
+    verifiedViaOtp: boolean;
+  }) => Promise<void>;
+  removeWhitelistedWallet: (walletId: string) => Promise<void>;
+  claimDailyCheckIn: () => Promise<{ streak: number; xpEarned: number }>;
+  claimMissionReward: (missionId: string, xpReward: number, badgeName: string) => Promise<void>;
 }
 
 const PlatformContext = createContext<PlatformContextValue | null>(null);
@@ -393,6 +470,55 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [supportChatMessages, setSupportChatMessages] = useState<SupportChatMessage[]>([]);
   const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([]);
   const [userNotifications, setUserNotifications] = useState<UserNotification[]>([]);
+  const [whitelistedWallets, setWhitelistedWallets] = useState<WhitelistedWallet[]>([]);
+  const [loginActivities, setLoginActivities] = useState<LoginActivityRecord[]>([]);
+  const [loginActivitiesLoaded, setLoginActivitiesLoaded] = useState(false);
+  const [missionProfile, setMissionProfile] = useState<UserMissionProfile | null>(null);
+
+  const dispatchNotificationEvent = useCallback(
+    async (
+      payload: {
+        eventType:
+          | 'welcome'
+          | 'deposit_submitted'
+          | 'deposit_confirmed'
+          | 'withdrawal_requested'
+          | 'withdrawal_approved'
+          | 'withdrawal_rejected'
+          | 'kyc_submitted'
+          | 'kyc_approved'
+          | 'kyc_rejected'
+          | 'login_new_device';
+        userEmail?: string;
+        userName?: string;
+        amountUsd?: number;
+        network?: string;
+        txHash?: string;
+        destinationAddress?: string;
+        reason?: string;
+        deviceSummary?: string;
+        sourceLabel?: string;
+      },
+      explicitUser?: User | null
+    ) => {
+      try {
+        const caller = explicitUser || auth.currentUser;
+        if (!caller) return;
+        const token = await caller.getIdToken();
+        await fetch('/api/notifications/dispatch', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(payload),
+        });
+      } catch {
+        // Non-blocking notification trigger
+      }
+    },
+    []
+  );
 
   const isAdminUser = Boolean(
     authUser &&
@@ -467,6 +593,18 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                 data.howItWorksConfig.videos.length > 0
                   ? data.howItWorksConfig.videos
                   : DEFAULT_PLATFORM_CONFIG.howItWorksConfig!.videos,
+            },
+            leaderboardConfig: {
+              ...DEFAULT_PLATFORM_CONFIG.leaderboardConfig!,
+              ...(data.leaderboardConfig || {}),
+              entries: Array.isArray(data.leaderboardConfig?.entries)
+                ? data.leaderboardConfig.entries
+                : DEFAULT_PLATFORM_CONFIG.leaderboardConfig!.entries,
+            },
+            depositsPaused: Boolean(data.depositsPaused),
+            web3PaymentConfig: {
+              ...DEFAULT_WEB3_PAYMENT_CONFIG,
+              ...(data.web3PaymentConfig || {}),
             },
             mlmRates: { ...DEFAULT_PLATFORM_CONFIG.mlmRates, ...(data.mlmRates || {}) },
             mentorConfig: { ...DEFAULT_PLATFORM_CONFIG.mentorConfig, ...(data.mentorConfig || {}) },
@@ -834,6 +972,16 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       } catch {
         // Ignore storage errors
       }
+      if (email) {
+        void dispatchNotificationEvent(
+          {
+            eventType: 'welcome',
+            userEmail: email,
+            userName: fullName,
+          },
+          user
+        );
+      }
       setAuthSyncTick((t) => t + 1);
     })();
 
@@ -872,6 +1020,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setSupportChatMessages([]);
         setSupportTickets([]);
         setUserNotifications([]);
+        setWhitelistedWallets([]);
+        setLoginActivities([]);
+        setLoginActivitiesLoaded(false);
+        setMissionProfile(null);
         return;
       }
 
@@ -1135,6 +1287,45 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       (err) => handleFirestoreError(err, OperationType.LIST, `users/${uid}/notifications`)
     );
 
+    const unsubWhitelisted = onSnapshot(
+      query(collection(db, 'users', uid, 'whitelistedWallets'), where('uid', '==', uid)),
+      (snap) => {
+        const list = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<WhitelistedWallet, 'id'>),
+        }));
+        list.sort((a, b) => (b.createdAtMs || 0) - (a.createdAtMs || 0));
+        setWhitelistedWallets(list);
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, `users/${uid}/whitelistedWallets`)
+    );
+
+    const unsubLogins = onSnapshot(
+      query(collection(db, 'users', uid, 'loginActivities'), where('uid', '==', uid)),
+      (snap) => {
+        const list = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<LoginActivityRecord, 'id'>),
+        }));
+        list.sort((a, b) => (b.loginAtMs || 0) - (a.loginAtMs || 0));
+        setLoginActivities(list);
+        setLoginActivitiesLoaded(true);
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, `users/${uid}/loginActivities`)
+    );
+
+    const unsubMissions = onSnapshot(
+      doc(db, 'userMissions', uid),
+      (snap) => {
+        if (snap.exists()) {
+          setMissionProfile(snap.data() as UserMissionProfile);
+        } else {
+          setMissionProfile(null);
+        }
+      },
+      (err) => handleFirestoreError(err, OperationType.GET, `userMissions/${uid}`)
+    );
+
     return () => {
       unsubUser();
       unsubInv();
@@ -1155,8 +1346,86 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       unsubSupportMessages();
       unsubSupportTickets();
       unsubNotifications();
+      unsubWhitelisted();
+      unsubLogins();
+      unsubMissions();
     };
   }, [authUser, authSyncTick]);
+
+  // Record login & device fingerprint once per browser session and alert on unrecognized devices
+  useEffect(() => {
+    if (!authUser || !authUser.emailVerified || !userProfile || !loginActivitiesLoaded) return;
+    const sessionKey = `atx_login_logged_${authUser.uid}`;
+    try {
+      if (sessionStorage.getItem(sessionKey)) return;
+      sessionStorage.setItem(sessionKey, '1');
+    } catch {
+      // Continue if sessionStorage is restricted
+    }
+
+    const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+    const browser = /Edg\//i.test(ua)
+      ? 'Microsoft Edge'
+      : /OPR\//i.test(ua)
+      ? 'Opera'
+      : /Chrome\//i.test(ua)
+      ? 'Chrome'
+      : /Firefox\//i.test(ua)
+      ? 'Firefox'
+      : /Safari\//i.test(ua)
+      ? 'Safari'
+      : 'Web Browser';
+    const os = /Windows/i.test(ua)
+      ? 'Windows'
+      : /Mac OS X|Macintosh/i.test(ua)
+      ? 'macOS'
+      : /Android/i.test(ua)
+      ? 'Android'
+      : /iPhone|iPad|iPod/i.test(ua)
+      ? 'iOS'
+      : /Linux/i.test(ua)
+      ? 'Linux'
+      : 'Unknown OS';
+    const deviceType: 'Desktop' | 'Mobile' | 'Tablet' = /iPad|Tablet/i.test(ua)
+      ? 'Tablet'
+      : /Mobi|Android|iPhone/i.test(ua)
+      ? 'Mobile'
+      : 'Desktop';
+    const timezone =
+      (typeof Intl !== 'undefined' && Intl.DateTimeFormat().resolvedOptions().timeZone) || 'UTC';
+    const locale = (typeof navigator !== 'undefined' && navigator.language) || 'en-US';
+    const deviceSignature = `${browser}|${os}|${deviceType}|${timezone}`.slice(0, 120);
+
+    const hadPreviousLogins = loginActivities.length > 0;
+    const isNewDevice = !loginActivities.some((l) => l.deviceSignature === deviceSignature);
+    const actId = makeId('lgn');
+
+    void setDoc(doc(db, 'users', authUser.uid, 'loginActivities', actId), {
+      uid: authUser.uid,
+      deviceSignature,
+      browser,
+      os,
+      deviceType,
+      timezone: timezone.slice(0, 80),
+      locale: locale.slice(0, 32),
+      isNewDevice,
+      loginAtMs: Date.now(),
+      createdAt: serverTimestamp(),
+    })
+      .then(() => {
+        if (isNewDevice && hadPreviousLogins && userProfile.email) {
+          void dispatchNotificationEvent({
+            eventType: 'login_new_device',
+            userEmail: userProfile.email,
+            userName: userProfile.fullName,
+            deviceSummary: `${browser} on ${os} (${deviceType}) · ${timezone}`,
+          });
+        }
+      })
+      .catch(() => {
+        // Non-blocking activity logging
+      });
+  }, [authUser, userProfile, loginActivitiesLoaded, loginActivities, dispatchNotificationEvent]);
 
   // Subscribe to live referral link click stats for the authenticated user's handle
   useEffect(() => {
@@ -1374,6 +1643,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         kycSubmittedAtMs: Date.now(),
         kycStatus: 'pending',
         updatedAt: serverTimestamp(),
+      });
+      void dispatchNotificationEvent({
+        eventType: 'kyc_submitted',
+        userEmail: userProfile?.email || authUser.email || '',
+        userName: cleanName,
       });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `users/${authUser.uid}`);
@@ -1613,6 +1887,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (userProfile.suspended) {
       throw new Error(`Account suspended: ${userProfile.suspensionReason || 'Contact compliance support.'}`);
     }
+    if (platformConfig.globalPaused || platformConfig.depositsPaused) {
+      throw new Error('Deposits are temporarily paused by platform administration.');
+    }
     assertKycPolicyAllowed('deposits', userProfile);
     const methodId = sanitizeRuleId(params.network, 'USDT_TRC20');
     const amount = Number(params.amountUsd);
@@ -1623,17 +1900,26 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (configuredMethod && (!configuredMethod.enabled || !configuredMethod.allowDeposit)) {
       throw new Error(`${configuredMethod.name} deposits are currently disabled.`);
     }
-    const minDeposit = configuredMethod?.minDepositUsd || 1;
+    const web3Cfg = platformConfig.web3PaymentConfig || DEFAULT_WEB3_PAYMENT_CONFIG;
+    const minDeposit = Math.max(configuredMethod?.minDepositUsd || 1, web3Cfg.minDepositUsd || 1);
+    const maxDeposit = Math.max(minDeposit, web3Cfg.maxDepositUsd || 50000);
     if (amount < minDeposit) {
       throw new Error(`Minimum deposit for ${configuredMethod?.name || methodId} is $${minDeposit.toFixed(2)}.`);
+    }
+    if (amount > maxDeposit) {
+      throw new Error(`Maximum single deposit limit is $${maxDeposit.toFixed(2)}.`);
     }
     if (!params.txId.trim()) {
       throw new Error('Transaction ID / reference hash is required.');
     }
 
     const fallbackWallet =
-      methodId === 'USDT_TRC20'
-        ? platformConfig.depositWallets.usdtTrc20
+      methodId === 'USDT_BEP20'
+        ? web3Cfg.bep20ReceivingAddress || platformConfig.depositWallets.usdtErc20
+        : methodId === 'USDT_POLYGON'
+        ? web3Cfg.polygonReceivingAddress || platformConfig.depositWallets.usdtErc20
+        : methodId === 'USDT_TRC20'
+        ? web3Cfg.trc20ReceivingAddress || platformConfig.depositWallets.usdtTrc20
         : methodId === 'USDT_ERC20'
         ? platformConfig.depositWallets.usdtErc20
         : platformConfig.depositWallets.sol;
@@ -1651,12 +1937,145 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         txId: params.txId.trim().slice(0, 160),
         status: 'pending',
         adminNote: '',
+        verificationSource: 'manual',
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
+      });
+      void dispatchNotificationEvent({
+        eventType: 'deposit_submitted',
+        userEmail: userProfile.email,
+        userName: userProfile.fullName,
+        amountUsd: Number(amount.toFixed(2)),
+        network: methodId,
+        txHash: params.txId.trim().slice(0, 160),
+        sourceLabel: 'Manual Deposit Submission',
       });
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, `cryptoDeposits/${depId}`);
     }
+  };
+
+  const verifyWeb3AutoDeposit = async (params: { network: Web3ChainKey; txHash: string }) => {
+    if (!authUser || !userProfile) throw new Error('Authentication required.');
+    const idToken = await authUser.getIdToken(true);
+    const res = await fetch('/api/web3/verify-deposit', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: JSON.stringify({
+        network: params.network,
+        txHash: params.txHash.trim(),
+      }),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      status?: 'pending_mining' | 'confirming' | 'credited';
+      confirmations?: number;
+      requiredConfirmations?: number;
+      verifiedAmountUsd?: number;
+      newDepositBalance?: number;
+      depositId?: string;
+      blockNumber?: number;
+      fromAddress?: string;
+      toAddress?: string;
+      tokenContract?: string;
+      txHash?: string;
+      network?: Web3ChainKey;
+      explorerUrl?: string;
+      message?: string;
+    };
+    if (!res.ok && res.status !== 202) {
+      throw new Error(data.error || 'On-chain deposit verification failed.');
+    }
+    return {
+      status: data.status || 'pending_mining',
+      confirmations: Number(data.confirmations || 0),
+      requiredConfirmations: Number(data.requiredConfirmations || 3),
+      verifiedAmountUsd: data.verifiedAmountUsd,
+      newDepositBalance: data.newDepositBalance,
+      depositId: data.depositId,
+      blockNumber: data.blockNumber,
+      fromAddress: data.fromAddress,
+      toAddress: data.toAddress,
+      tokenContract: data.tokenContract,
+      txHash: data.txHash || params.txHash.trim(),
+      network: data.network || params.network,
+      explorerUrl: data.explorerUrl,
+      message: data.message || 'Verification status updated.',
+    };
+  };
+
+  const requestWithdrawalOtp = async (params: {
+    amountUsd: number;
+    network: CryptoNetwork;
+    destinationAddress: string;
+  }) => {
+    if (!authUser) throw new Error('Authentication required.');
+    const idToken = await authUser.getIdToken(true);
+    const res = await fetch('/api/withdrawals/otp/request', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: JSON.stringify(params),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      error?: string;
+      emailMasked?: string;
+      expiresInSeconds?: number;
+      deliveryMode?: string;
+      previewCode?: string;
+      message?: string;
+    };
+    if (!res.ok || !data.ok) {
+      throw new Error(data.error || 'Failed to dispatch 2FA security code.');
+    }
+    return {
+      ok: true,
+      emailMasked: data.emailMasked || '',
+      expiresInSeconds: Number(data.expiresInSeconds || 300),
+      deliveryMode: data.deliveryMode || 'security_inbox_preview',
+      previewCode: data.previewCode,
+      message: data.message || '2FA code sent.',
+    };
+  };
+
+  const verifyWithdrawalOtp = async (params: {
+    code: string;
+    amountUsd: number;
+    network: CryptoNetwork;
+    destinationAddress: string;
+  }) => {
+    if (!authUser) throw new Error('Authentication required.');
+    const idToken = await authUser.getIdToken(true);
+    const res = await fetch('/api/withdrawals/otp/verify', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: JSON.stringify(params),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      verified?: boolean;
+      otpVerificationToken?: string;
+      expiresAtIso?: string;
+      error?: string;
+    };
+    if (!res.ok || !data.ok || !data.otpVerificationToken) {
+      throw new Error(data.error || 'Invalid or expired 2FA code.');
+    }
+    return {
+      ok: true,
+      verified: true,
+      otpVerificationToken: data.otpVerificationToken,
+      expiresAtIso: data.expiresAtIso || '',
+    };
   };
 
   const addUserPaymentMethod = async (params: {
@@ -2032,29 +2451,39 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     destinationAddress: string;
     source: 'package_profit' | 'mlm_commission' | 'mentor_profit';
     settlementMode?: 'pending' | 'completed';
+    otpVerificationToken?: string;
   }) => {
     if (!authUser || !userProfile) throw new Error('Authentication required.');
     if (userProfile.suspended) {
       throw new Error(`Account suspended: ${userProfile.suspensionReason || 'Contact compliance support.'}`);
     }
     assertKycPolicyAllowed('withdrawals', userProfile);
-    if (platformConfig.withdrawalsPaused) {
+    if (platformConfig.globalPaused || platformConfig.withdrawalsPaused) {
       throw new Error('Withdrawals are temporarily paused for scheduled maintenance by administration.');
     }
     const amount = Number(params.amountUsd);
     if (!Number.isFinite(amount) || amount <= 0) {
       throw new Error('Enter a valid withdrawal USD amount.');
     }
-    const cleanNetwork = sanitizeRuleId(params.network, 'USDT_TRC20');
+    const cleanNetwork = sanitizeRuleId(params.network, 'USDT_BEP20');
     const activeMethod = (platformConfig.paymentMethods || []).find((m) => m.id === cleanNetwork);
     if (activeMethod && (!activeMethod.enabled || !activeMethod.allowWithdrawal)) {
       throw new Error(`Withdrawals are currently disabled for ${activeMethod.name}.`);
     }
-    const effectiveMinWd = Math.max(platformConfig.minWithdrawalUsd, activeMethod?.minWithdrawalUsd || 0);
+    const web3Cfg = platformConfig.web3PaymentConfig || DEFAULT_WEB3_PAYMENT_CONFIG;
+    const effectiveMinWd = Math.max(
+      platformConfig.minWithdrawalUsd,
+      web3Cfg.minWithdrawalUsd || 10,
+      activeMethod?.minWithdrawalUsd || 0
+    );
+    const effectiveMaxWd = Math.max(effectiveMinWd, web3Cfg.maxWithdrawalUsd || 25000);
     if (amount < effectiveMinWd) {
       throw new Error(
         `Minimum withdrawal${activeMethod ? ` for ${activeMethod.name}` : ''} is $${effectiveMinWd.toFixed(2)}.`
       );
+    }
+    if (amount > effectiveMaxWd) {
+      throw new Error(`Maximum single withdrawal request is $${effectiveMaxWd.toFixed(2)}.`);
     }
     if (!params.destinationAddress.trim()) {
       throw new Error('Destination payout address or account number is required.');
@@ -2062,63 +2491,26 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (amount > userProfile.profitBalance) {
       throw new Error('Insufficient withdrawable profit balance.');
     }
-    if (
-      userProfile.isMentor &&
-      userProfile.mentorGiftedCapital > 0 &&
-      userProfile.mentorBroughtVolume < userProfile.mentorRequiredVolume
-    ) {
-      const remaining = (userProfile.mentorRequiredVolume - userProfile.mentorBroughtVolume).toFixed(2);
-      throw new Error(
-        `Mentor Volume Rule Active: Bring $${remaining} more in referred investment volume ($${userProfile.mentorBroughtVolume.toFixed(
-          2
-        )} / $${userProfile.mentorRequiredVolume.toFixed(2)}) to unlock profit withdrawals.`
-      );
-    }
 
-    const targetStatus = params.settlementMode === 'completed' ? 'completed' : 'pending';
-    const withId = makeId('wdp');
-    try {
-      await runTransaction(db, async (tx) => {
-        const userRef = doc(db, 'users', authUser.uid);
-        const userSnap = await tx.get(userRef);
-        if (!userSnap.exists()) throw new Error('Profile missing.');
-        const cur = userSnap.data() as UserProfile;
-        if (cur.profitBalance < amount) throw new Error('Insufficient profit balance.');
-
-        const nextProfitBalance = Number((cur.profitBalance - amount).toFixed(2));
-        const nextTotalWithdrawn =
-          targetStatus === 'completed'
-            ? Number((cur.totalWithdrawn + amount).toFixed(2))
-            : cur.totalWithdrawn;
-
-        tx.update(userRef, {
-          profitBalance: nextProfitBalance,
-          totalWithdrawn: nextTotalWithdrawn,
-          updatedAt: serverTimestamp(),
-        });
-
-        tx.set(doc(db, 'withdrawals', withId), {
-          uid: authUser.uid,
-          userEmail: cur.email,
-          userName: cur.fullName,
-          type: 'instant_profit',
-          source: params.source,
-          investmentId: '',
-          packageNumber: 0,
-          investmentDate: '',
-          principalCapital: 0,
-          totalProfitGenerated: 0,
-          amountUsd: Number(amount.toFixed(2)),
-          network: cleanNetwork,
-          destinationAddress: params.destinationAddress.trim().slice(0, 160),
-          status: targetStatus,
-          adminNote: '',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-      });
-    } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, `withdrawals/${withId}`);
+    // Route through secure server-side endpoint (validates 2FA OTP, KYC, limits, fees, and atomically locks balance in Pending Admin Approval state)
+    const idToken = await authUser.getIdToken(true);
+    const res = await fetch('/api/withdrawals/submit', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: JSON.stringify({
+        amountUsd: Number(amount.toFixed(2)),
+        network: cleanNetwork,
+        destinationAddress: params.destinationAddress.trim().slice(0, 160),
+        source: params.source,
+        otpVerificationToken: params.otpVerificationToken || '',
+      }),
+    });
+    const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+    if (!res.ok || !data.ok) {
+      throw new Error(data.error || 'Failed to submit withdrawal request.');
     }
   };
 
@@ -3304,7 +3696,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     const defaultHiw = DEFAULT_PLATFORM_CONFIG.howItWorksConfig!;
     const rawHiw = next.howItWorksConfig || defaultHiw;
-    const allowedLangs: GuideLanguage[] = ['en', 'bn', 'hi', 'es'];
+    const allowedLangs: GuideLanguage[] = ['en', 'hi', 'es'];
     const allowedPresets: MotionVisualPreset[] = ['overview', 'signup', 'package', 'dashboard'];
     const allowedAccents: MotionAccentColor[] = ['amber', 'emerald', 'sky', 'violet'];
     const sanitizeLoc = (
@@ -3313,7 +3705,6 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       maxLen: number
     ): GuideLocalizedText => ({
       en: String(val?.en || fallback.en || '').trim().slice(0, maxLen),
-      bn: String(val?.bn || fallback.bn || val?.en || fallback.en || '').trim().slice(0, maxLen),
       hi: String(val?.hi || fallback.hi || val?.en || fallback.en || '').trim().slice(0, maxLen),
       es: String(val?.es || fallback.es || val?.en || fallback.en || '').trim().slice(0, maxLen),
     });
@@ -3403,6 +3794,75 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       videos: safeHiwVideos,
     };
 
+    const defaultLb = DEFAULT_PLATFORM_CONFIG.leaderboardConfig!;
+    const rawLb = next.leaderboardConfig || defaultLb;
+    const allowedLbTimeframes: LeaderboardTimeframe[] = ['weekly', 'monthly', 'all_time'];
+    const allowedLbCats: LeaderboardCategory[] = ['referrals', 'traders'];
+    const allowedLbSources: LeaderboardEntrySource[] = ['live_sync', 'demo_sample'];
+    const safeLbEntries: LeaderboardEntry[] = (
+      Array.isArray(rawLb.entries) ? rawLb.entries : defaultLb.entries
+    )
+      .slice(0, 40)
+      .map((entry, idx) => ({
+        id: sanitizeRuleId(entry.id || `lb_${idx + 1}`, `lb_${idx + 1}`),
+        category: allowedLbCats.includes(entry.category) ? entry.category : 'referrals',
+        displayName:
+          String(entry.displayName || `Member ${idx + 1}`).trim().slice(0, 64) ||
+          `Member ${idx + 1}`,
+        handle:
+          String(entry.handle || `ALPHA_${idx + 1}`)
+            .trim()
+            .toUpperCase()
+            .replace(/[^A-Z0-9_-]/g, '')
+            .slice(0, 28) || `ALPHA_${idx + 1}`,
+        countryCode:
+          String(entry.countryCode || 'US')
+            .trim()
+            .toUpperCase()
+            .replace(/[^A-Z]/g, '')
+            .slice(0, 2) || 'US',
+        tierLabel: String(entry.tierLabel || 'Pro').trim().slice(0, 28) || 'Pro',
+        primaryMetricUsd: Math.max(
+          0,
+          Math.min(10_000_000, Number(Number(entry.primaryMetricUsd || 0).toFixed(2)))
+        ),
+        secondaryMetricValue: Math.max(
+          0,
+          Math.min(100_000, Math.round(Number(entry.secondaryMetricValue) || 0))
+        ),
+        winRatePercent: Math.max(
+          0,
+          Math.min(100, Number(Number(entry.winRatePercent || 0).toFixed(1)))
+        ),
+        trendDeltaPercent: Math.max(
+          -100,
+          Math.min(999, Number(Number(entry.trendDeltaPercent || 0).toFixed(1)))
+        ),
+        source: allowedLbSources.includes(entry.source) ? entry.source : 'demo_sample',
+        enabled: entry.enabled !== false,
+        pinnedRank: Math.max(0, Math.min(40, Math.round(Number(entry.pinnedRank) || 0))),
+      }));
+
+    const safeLeaderboardConfig: LeaderboardConfig = {
+      enabled: rawLb.enabled !== false,
+      title: String(rawLb.title || defaultLb.title).trim().slice(0, 120) || defaultLb.title,
+      subtitle: String(rawLb.subtitle || defaultLb.subtitle).trim().slice(0, 220),
+      activeTimeframe: allowedLbTimeframes.includes(rawLb.activeTimeframe)
+        ? rawLb.activeTimeframe
+        : 'monthly',
+      maxVisibleRows: Math.max(3, Math.min(25, Math.round(Number(rawLb.maxVisibleRows) || 8))),
+      showReferralTab: rawLb.showReferralTab !== false,
+      showTradersTab: rawLb.showTradersTab !== false,
+      allowClientSelfRank: rawLb.allowClientSelfRank !== false,
+      disclaimerText: String(rawLb.disclaimerText || defaultLb.disclaimerText)
+        .trim()
+        .slice(0, 360),
+      entries: safeLbEntries,
+    };
+    if (rawLb.lastLiveSyncAtIso) {
+      safeLeaderboardConfig.lastLiveSyncAtIso = String(rawLb.lastLiveSyncAtIso).slice(0, 64);
+    }
+
     const writeAdminLog = async (entry: Omit<AdminActionLog, 'id' | 'adminUid' | 'adminEmail' | 'createdAt'>) => {
       if (!authUser) return;
       try {
@@ -3420,6 +3880,50 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       } catch (err) {
         console.warn('Admin audit log write skipped:', err instanceof Error ? err.message : String(err));
       }
+    };
+
+    const rawWeb3 = next.web3PaymentConfig || DEFAULT_WEB3_PAYMENT_CONFIG;
+    const cleanEvmAddr = (val: unknown, fallback: string) => {
+      const s = String(val || '').trim();
+      if (!s) return '';
+      if (/^0x[a-fA-F0-9]{40}$/.test(s)) return s;
+      return /^0x[a-fA-F0-9]{40}$/.test(fallback) ? fallback : '';
+    };
+    const minDepW3 = Math.max(1, Number(rawWeb3.minDepositUsd) || 10);
+    const maxDepW3 = Math.max(minDepW3, Number(rawWeb3.maxDepositUsd) || 50000);
+    const minWdW3 = Math.max(1, Number(rawWeb3.minWithdrawalUsd) || Number(next.minWithdrawalUsd) || 10);
+    const maxWdW3 = Math.max(minWdW3, Number(rawWeb3.maxWithdrawalUsd) || 25000);
+
+    const safeWeb3PaymentConfig: Web3PaymentConfig = {
+      autoDepositEnabled: rawWeb3.autoDepositEnabled !== false,
+      bep20Enabled: rawWeb3.bep20Enabled !== false,
+      polygonEnabled: rawWeb3.polygonEnabled !== false,
+      bep20ReceivingAddress: cleanEvmAddr(
+        rawWeb3.bep20ReceivingAddress,
+        DEFAULT_WEB3_PAYMENT_CONFIG.bep20ReceivingAddress
+      ),
+      polygonReceivingAddress: cleanEvmAddr(
+        rawWeb3.polygonReceivingAddress,
+        DEFAULT_WEB3_PAYMENT_CONFIG.polygonReceivingAddress
+      ),
+      trc20ReceivingAddress: String(rawWeb3.trc20ReceivingAddress || safeDepositWallets.usdtTrc20 || '')
+        .trim()
+        .slice(0, 64),
+      minConfirmationsBsc: Math.max(1, Math.min(30, Math.round(Number(rawWeb3.minConfirmationsBsc) || 3))),
+      minConfirmationsPolygon: Math.max(
+        1,
+        Math.min(60, Math.round(Number(rawWeb3.minConfirmationsPolygon) || 5))
+      ),
+      minDepositUsd: minDepW3,
+      maxDepositUsd: maxDepW3,
+      minWithdrawalUsd: minWdW3,
+      maxWithdrawalUsd: maxWdW3,
+      withdrawalFeePercent: Math.max(0, Math.min(15, Number(rawWeb3.withdrawalFeePercent) || 0)),
+      withdrawalFlatFeeUsd: Math.max(0, Math.min(50, Number(rawWeb3.withdrawalFlatFeeUsd) || 0)),
+      require2faForWithdrawals: rawWeb3.require2faForWithdrawals !== false,
+      requireKycForWithdrawals: Boolean(rawWeb3.requireKycForWithdrawals),
+      requirePayoutTxHashOnApprove: rawWeb3.requirePayoutTxHashOnApprove !== false,
+      walletConnectProjectId: String(rawWeb3.walletConnectProjectId || '').trim().slice(0, 80),
     };
 
     try {
@@ -3441,6 +3945,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         eliteCapitalLockDays: Math.max(1, Math.round(Number(next.eliteCapitalLockDays) || 70)),
         totalProfitDays: Math.max(1, Math.round(Number(next.totalProfitDays) || 200)),
         globalPaused: Boolean(next.globalPaused),
+        depositsPaused: Boolean(next.depositsPaused),
         withdrawalsPaused: Boolean(next.withdrawalsPaused),
         signupsPaused: Boolean(next.signupsPaused),
         p2pPaused: Boolean(next.p2pPaused),
@@ -3466,13 +3971,15 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         kycSettings: safeKycSettings,
         marketingCardsConfig: safeMarketingCardsConfig,
         howItWorksConfig: safeHowItWorksConfig,
+        leaderboardConfig: safeLeaderboardConfig,
+        web3PaymentConfig: safeWeb3PaymentConfig,
         updatedAt: serverTimestamp(),
       });
       await writeAdminLog({
         action: 'CONFIG_PUBLISHED',
         targetUid: '',
         targetLabel: 'config/platform',
-        details: `Global Pause=${Boolean(next.globalPaused)} · Withdrawals Paused=${Boolean(next.withdrawalsPaused)} · Signups Paused=${Boolean(next.signupsPaused)} · P2P Paused=${Boolean(next.p2pPaused)}`,
+        details: `Global Pause=${Boolean(next.globalPaused)} · Deposits Paused=${Boolean(next.depositsPaused)} · Withdrawals Paused=${Boolean(next.withdrawalsPaused)} · Web3 Auto-Deposit=${safeWeb3PaymentConfig.autoDepositEnabled}`,
         amountUsd: 0,
       });
     } catch (err) {
@@ -3531,6 +4038,15 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         details: `Approved ${deposit.network} deposit (TxID: ${deposit.txId})`,
         amountUsd: deposit.amountUsd,
       });
+      void dispatchNotificationEvent({
+        eventType: 'deposit_confirmed',
+        userEmail: deposit.userEmail,
+        userName: deposit.userName || deposit.userEmail,
+        amountUsd: deposit.amountUsd,
+        network: deposit.network,
+        txHash: deposit.txId,
+        sourceLabel: 'Super Admin Verified Deposit',
+      });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `cryptoDeposits/${deposit.id}`);
     }
@@ -3579,6 +4095,13 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         details: `KYC approved (${targetUser?.kycCountryName || targetUser?.countryName || 'Global'} · ${targetUser?.idType || 'ID'})${hasPhone ? ' + phone verified' : ''}${note.trim() ? ` · Note: ${note.trim()}` : ''}`.slice(0, 500),
         amountUsd: 0,
       });
+      if (targetUser?.email) {
+        void dispatchNotificationEvent({
+          eventType: 'kyc_approved',
+          userEmail: targetUser.email,
+          userName: targetUser.fullName,
+        });
+      }
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `users/${targetUid}`);
     }
@@ -3607,6 +4130,14 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         details: `KYC rejected: ${cleanReason}`.slice(0, 500),
         amountUsd: 0,
       });
+      if (targetUser?.email) {
+        void dispatchNotificationEvent({
+          eventType: 'kyc_rejected',
+          userEmail: targetUser.email,
+          userName: targetUser.fullName,
+          reason: cleanReason,
+        });
+      }
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `users/${targetUid}`);
     }
@@ -3766,14 +4297,28 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  const approveCapitalWithdrawal = async (withdrawal: Withdrawal, adminNote?: string) => {
+  const approveCapitalWithdrawal = async (
+    withdrawal: Withdrawal,
+    adminNote?: string,
+    payoutTxHash?: string
+  ) => {
+    const cleanTxHash = (payoutTxHash || '').trim().slice(0, 160);
+    const web3Cfg = platformConfig.web3PaymentConfig || DEFAULT_WEB3_PAYMENT_CONFIG;
+    if (web3Cfg.requirePayoutTxHashOnApprove && !cleanTxHash) {
+      throw new Error(
+        'Payout Transaction Hash (txHash) is required before marking a withdrawal as Paid. Send the payout from your cold/Web3 wallet and paste the txHash.'
+      );
+    }
     const defaultNote =
       withdrawal.type === 'manual_capital'
         ? 'Manual capital payout released'
         : withdrawal.source === 'mlm_commission'
         ? 'Referral commission payout processed'
         : 'Trading profit payout processed';
-    const cleanNote = (adminNote || '').trim().slice(0, 300) || defaultNote;
+    const cleanNote = (adminNote || '').trim().slice(0, 300) || (cleanTxHash ? `Paid · TxHash: ${cleanTxHash}` : defaultNote);
+    const adminUid = authUser?.uid || 'admin';
+    const adminEmail = (authUser?.email || SUPER_ADMIN_EMAIL).trim().slice(0, 254);
+
     try {
       await runTransaction(db, async (tx) => {
         const wdRef = doc(db, 'withdrawals', withdrawal.id);
@@ -3809,7 +4354,45 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         tx.update(wdRef, {
           status: 'approved',
           adminNote: cleanNote,
+          payoutTxHash: cleanTxHash,
+          reviewedByUid: adminUid,
+          reviewedByEmail: adminEmail,
           updatedAt: serverTimestamp(),
+        });
+
+        const wtId = makeId('wtx');
+        tx.set(doc(db, 'walletTransactions', wtId), {
+          uid: withdrawal.uid,
+          userEmail: withdrawal.userEmail,
+          userName: withdrawal.userName,
+          type: 'withdrawal_paid',
+          wallet: 'income_wallet',
+          direction: 'debit',
+          amountUsd: withdrawal.amountUsd,
+          feeUsd: Number(withdrawal.feeUsd || 0),
+          netAmountUsd: Number(withdrawal.netPayoutUsd ?? withdrawal.amountUsd),
+          network: withdrawal.network,
+          txHash: cleanTxHash,
+          referenceId: withdrawal.id,
+          status: 'approved',
+          details: `Super Admin (${adminEmail}) approved & marked paid -> ${withdrawal.destinationAddress}`,
+          createdAt: serverTimestamp(),
+        });
+
+        const audId = makeId('aud');
+        tx.set(doc(db, 'auditLogs', audId), {
+          actorUid: adminUid,
+          actorEmail: adminEmail,
+          actorRole: 'admin',
+          eventType: 'WITHDRAWAL_APPROVED_PAID',
+          targetUid: withdrawal.uid,
+          network: withdrawal.network,
+          txHash: cleanTxHash,
+          amountUsd: withdrawal.amountUsd,
+          details: `Approved withdrawal ${withdrawal.id} ($${withdrawal.amountUsd.toFixed(2)} gross, net $${Number(
+            withdrawal.netPayoutUsd ?? withdrawal.amountUsd
+          ).toFixed(2)}) -> ${withdrawal.destinationAddress} · ${cleanNote}`.slice(0, 500),
+          createdAt: serverTimestamp(),
         });
       });
       await recordAdminAudit({
@@ -3819,11 +4402,21 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             : 'PROFIT_WITHDRAWAL_APPROVED',
         targetUid: withdrawal.uid,
         targetLabel: withdrawal.userName || withdrawal.userEmail,
-        details:
+        details: `${
           withdrawal.type === 'manual_capital'
-            ? `Released Package #${withdrawal.packageNumber} capital payout · ${cleanNote}`
-            : `Processed ${withdrawal.source === 'mlm_commission' ? 'Referral Commission' : 'Trading Profit'} payout · ${cleanNote}`,
+            ? `Released Package #${withdrawal.packageNumber} capital payout`
+            : `Processed ${withdrawal.source === 'mlm_commission' ? 'Referral Commission' : 'Trading Profit'} payout`
+        }${cleanTxHash ? ` · TxHash: ${cleanTxHash}` : ''} · ${cleanNote}`.slice(0, 500),
         amountUsd: withdrawal.amountUsd,
+      });
+      void dispatchNotificationEvent({
+        eventType: 'withdrawal_approved',
+        userEmail: withdrawal.userEmail,
+        userName: withdrawal.userName || withdrawal.userEmail,
+        amountUsd: withdrawal.amountUsd,
+        network: withdrawal.network,
+        destinationAddress: withdrawal.destinationAddress,
+        txHash: cleanTxHash,
       });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `withdrawals/${withdrawal.id}`);
@@ -3832,6 +4425,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const rejectCapitalWithdrawal = async (withdrawal: Withdrawal, adminNote: string) => {
     const note = adminNote.trim().slice(0, 300) || 'Rejected by administration';
+    const adminUid = authUser?.uid || 'admin';
+    const adminEmail = (authUser?.email || SUPER_ADMIN_EMAIL).trim().slice(0, 254);
+
     try {
       await runTransaction(db, async (tx) => {
         const wdRef = doc(db, 'withdrawals', withdrawal.id);
@@ -3868,7 +4464,48 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         tx.update(wdRef, {
           status: 'rejected',
           adminNote: note,
+          payoutTxHash: '',
+          reviewedByUid: adminUid,
+          reviewedByEmail: adminEmail,
           updatedAt: serverTimestamp(),
+        });
+
+        const wtId = makeId('wtx');
+        tx.set(doc(db, 'walletTransactions', wtId), {
+          uid: withdrawal.uid,
+          userEmail: withdrawal.userEmail,
+          userName: withdrawal.userName,
+          type: 'withdrawal_refund',
+          wallet: 'income_wallet',
+          direction: 'release',
+          amountUsd: withdrawal.amountUsd,
+          feeUsd: 0,
+          netAmountUsd: withdrawal.amountUsd,
+          network: withdrawal.network,
+          txHash: '',
+          referenceId: withdrawal.id,
+          status: 'refunded',
+          details: `Withdrawal ${withdrawal.id} rejected by Super Admin (${adminEmail}) & balance refunded: ${note}`.slice(
+            0,
+            500
+          ),
+          createdAt: serverTimestamp(),
+        });
+
+        const audId = makeId('aud');
+        tx.set(doc(db, 'auditLogs', audId), {
+          actorUid: adminUid,
+          actorEmail: adminEmail,
+          actorRole: 'admin',
+          eventType: 'WITHDRAWAL_REJECTED_REFUNDED',
+          targetUid: withdrawal.uid,
+          network: withdrawal.network,
+          txHash: '',
+          amountUsd: withdrawal.amountUsd,
+          details: `Rejected withdrawal ${withdrawal.id} & refunded $${withdrawal.amountUsd.toFixed(
+            2
+          )} to user balance. Reason: ${note}`.slice(0, 500),
+          createdAt: serverTimestamp(),
         });
       });
       await recordAdminAudit({
@@ -3884,23 +4521,40 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             : `Rejected ${withdrawal.source === 'mlm_commission' ? 'Referral Commission' : 'Trading Profit'} payout (refunded to Income Wallet): ${note}`,
         amountUsd: withdrawal.amountUsd,
       });
+      void dispatchNotificationEvent({
+        eventType: 'withdrawal_rejected',
+        userEmail: withdrawal.userEmail,
+        userName: withdrawal.userName || withdrawal.userEmail,
+        amountUsd: withdrawal.amountUsd,
+        network: withdrawal.network,
+        destinationAddress: withdrawal.destinationAddress,
+        reason: note,
+      });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `withdrawals/${withdrawal.id}`);
     }
   };
 
-  const updateWithdrawalNote = async (withdrawalId: string, adminNote: string) => {
+  const updateWithdrawalNote = async (
+    withdrawalId: string,
+    adminNote: string,
+    payoutTxHash?: string
+  ) => {
     const cleanNote = adminNote.trim().slice(0, 300);
+    const patch: Record<string, unknown> = {
+      adminNote: cleanNote,
+      updatedAt: serverTimestamp(),
+    };
+    if (payoutTxHash !== undefined) {
+      patch.payoutTxHash = payoutTxHash.trim().slice(0, 160);
+    }
     try {
-      await updateDoc(doc(db, 'withdrawals', withdrawalId), {
-        adminNote: cleanNote,
-        updatedAt: serverTimestamp(),
-      });
+      await updateDoc(doc(db, 'withdrawals', withdrawalId), patch);
       await recordAdminAudit({
         action: 'WITHDRAWAL_NOTE_UPDATED',
         targetUid: '',
         targetLabel: withdrawalId,
-        details: `Updated payout TXID / reference: ${cleanNote || '(cleared)'}`,
+        details: `Updated payout TXID / reference: ${payoutTxHash?.trim() || cleanNote || '(cleared)'}`,
         amountUsd: 0,
       });
     } catch (err) {
@@ -4503,6 +5157,193 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
+  // --- Security Whitelist & Engagement Missions ---
+  const toggleWhitelistStrictMode = async (enabled: boolean) => {
+    if (!authUser) throw new Error('Authentication required.');
+    try {
+      await updateDoc(doc(db, 'users', authUser.uid), {
+        whitelistStrictMode: Boolean(enabled),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `users/${authUser.uid}`);
+    }
+  };
+
+  const toggleWhitelist24hLock = async (enabled: boolean) => {
+    if (!authUser) throw new Error('Authentication required.');
+    try {
+      await updateDoc(doc(db, 'users', authUser.uid), {
+        whitelist24hLockEnabled: Boolean(enabled),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `users/${authUser.uid}`);
+    }
+  };
+
+  const addWhitelistedWallet = async (params: {
+    label: string;
+    network: 'BEP20' | 'POLYGON' | 'TRC20' | 'ERC20';
+    address: string;
+    verifiedViaOtp: boolean;
+  }) => {
+    if (!authUser) throw new Error('Authentication required.');
+    const cleanLabel = params.label.trim().slice(0, 80);
+    const cleanAddr = params.address.trim().slice(0, 160);
+    if (!cleanLabel || !cleanAddr) {
+      throw new Error('Wallet label and destination address are required.');
+    }
+    const nowMs = Date.now();
+    const unlockAtMs = params.verifiedViaOtp ? nowMs : nowMs + 24 * 60 * 60 * 1000;
+    const wlId = makeId('wl');
+    try {
+      await setDoc(doc(db, 'users', authUser.uid, 'whitelistedWallets', wlId), {
+        uid: authUser.uid,
+        label: cleanLabel,
+        network: params.network,
+        address: cleanAddr,
+        verifiedViaOtp: Boolean(params.verifiedViaOtp),
+        createdAtMs: nowMs,
+        unlockAtMs,
+        createdAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(
+        err,
+        OperationType.CREATE,
+        `users/${authUser.uid}/whitelistedWallets/${wlId}`
+      );
+    }
+  };
+
+  const removeWhitelistedWallet = async (walletId: string) => {
+    if (!authUser) throw new Error('Authentication required.');
+    try {
+      await deleteDoc(doc(db, 'users', authUser.uid, 'whitelistedWallets', walletId));
+    } catch (err) {
+      handleFirestoreError(
+        err,
+        OperationType.DELETE,
+        `users/${authUser.uid}/whitelistedWallets/${walletId}`
+      );
+    }
+  };
+
+  const claimDailyCheckIn = async (): Promise<{ streak: number; xpEarned: number }> => {
+    if (!authUser) throw new Error('Authentication required.');
+    const todayKey = getTodayDayKey();
+    const yesterdayKey = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const missionRef = doc(db, 'userMissions', authUser.uid);
+
+    let result = { streak: 1, xpEarned: 25 };
+    try {
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(missionRef);
+        const cur: UserMissionProfile = snap.exists()
+          ? (snap.data() as UserMissionProfile)
+          : {
+              uid: authUser.uid,
+              currentStreak: 0,
+              longestStreak: 0,
+              lastCheckInDayKey: '',
+              totalCheckIns: 0,
+              totalXp: 0,
+              claimedMissionIds: [],
+              badges: [],
+            };
+
+        if (cur.lastCheckInDayKey === todayKey) {
+          throw new Error('You have already claimed today’s daily check-in reward. Come back tomorrow!');
+        }
+
+        const continued = cur.lastCheckInDayKey === yesterdayKey;
+        const nextStreak = continued ? cur.currentStreak + 1 : 1;
+        const cycleDay = ((nextStreak - 1) % 7) + 1;
+        const xpEarned = cycleDay === 7 ? 100 : 25 + (cycleDay - 1) * 5;
+        const nextLongest = Math.max(cur.longestStreak || 0, nextStreak);
+        const nextBadges = Array.from(
+          new Set([
+            ...(Array.isArray(cur.badges) ? cur.badges : []),
+            ...(nextStreak >= 7 ? ['7-Day Streak'] : []),
+          ])
+        ).slice(0, 30);
+
+        tx.set(missionRef, {
+          uid: authUser.uid,
+          currentStreak: nextStreak,
+          longestStreak: nextLongest,
+          lastCheckInDayKey: todayKey,
+          totalCheckIns: Math.min(3650, (cur.totalCheckIns || 0) + 1),
+          totalXp: Math.min(1000000, (cur.totalXp || 0) + xpEarned),
+          claimedMissionIds: Array.isArray(cur.claimedMissionIds) ? cur.claimedMissionIds.slice(0, 30) : [],
+          badges: nextBadges,
+          updatedAt: serverTimestamp(),
+        });
+        result = { streak: nextStreak, xpEarned };
+      });
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('already claimed')) {
+        throw err;
+      }
+      handleFirestoreError(err, OperationType.WRITE, `userMissions/${authUser.uid}`);
+    }
+    return result;
+  };
+
+  const claimMissionReward = async (missionId: string, xpReward: number, badgeName: string) => {
+    if (!authUser) throw new Error('Authentication required.');
+    const cleanMissionId = missionId.trim().slice(0, 64);
+    const cleanBadge = badgeName.trim().slice(0, 64);
+    const safeXp = Math.max(10, Math.min(5000, Math.round(Number(xpReward) || 50)));
+    const missionRef = doc(db, 'userMissions', authUser.uid);
+
+    try {
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(missionRef);
+        const cur: UserMissionProfile = snap.exists()
+          ? (snap.data() as UserMissionProfile)
+          : {
+              uid: authUser.uid,
+              currentStreak: 0,
+              longestStreak: 0,
+              lastCheckInDayKey: '',
+              totalCheckIns: 0,
+              totalXp: 0,
+              claimedMissionIds: [],
+              badges: [],
+            };
+
+        const existingClaimed = Array.isArray(cur.claimedMissionIds) ? cur.claimedMissionIds : [];
+        if (existingClaimed.includes(cleanMissionId)) {
+          throw new Error('This mission reward has already been claimed.');
+        }
+
+        const nextClaimed = [...existingClaimed, cleanMissionId].slice(0, 30);
+        const nextBadges = Array.from(
+          new Set([...(Array.isArray(cur.badges) ? cur.badges : []), cleanBadge])
+        ).slice(0, 30);
+
+        tx.set(missionRef, {
+          uid: authUser.uid,
+          currentStreak: cur.currentStreak || 0,
+          longestStreak: Math.max(cur.longestStreak || 0, cur.currentStreak || 0),
+          lastCheckInDayKey: cur.lastCheckInDayKey || '',
+          totalCheckIns: cur.totalCheckIns || 0,
+          totalXp: Math.min(1000000, (cur.totalXp || 0) + safeXp),
+          claimedMissionIds: nextClaimed,
+          badges: nextBadges,
+          updatedAt: serverTimestamp(),
+        });
+      });
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('already been claimed')) {
+        throw err;
+      }
+      handleFirestoreError(err, OperationType.WRITE, `userMissions/${authUser.uid}`);
+    }
+  };
+
   return (
     <PlatformContext.Provider
       value={{
@@ -4532,6 +5373,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         supportChatMessages,
         supportTickets,
         userNotifications,
+        whitelistedWallets,
+        loginActivities,
+        missionProfile,
         signInWithGoogle,
         signInWithEmail,
         signUpWithKyc,
@@ -4543,6 +5387,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         refreshAuthVerification,
         signOutUser,
         submitCryptoDeposit,
+        verifyWeb3AutoDeposit,
+        requestWithdrawalOtp,
+        verifyWithdrawalOtp,
         activatePackage,
         transferIncomeToDepositWallet,
         claimInvestmentProfit,
@@ -4590,6 +5437,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         updateSupportTicket,
         marketingCardStats,
         trackMarketingCardEvent,
+        toggleWhitelistStrictMode,
+        toggleWhitelist24hLock,
+        addWhitelistedWallet,
+        removeWhitelistedWallet,
+        claimDailyCheckIn,
+        claimMissionReward,
       }}
     >
       {children}

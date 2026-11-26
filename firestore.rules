@@ -66,11 +66,12 @@ service cloud.firestore {
         'companyName', 'companyTagline', 'companyDescription', 'companyGoal',
         'riskDisclosure', 'trustpilotScore', 'trustpilotReviews', 'nortonScore',
         'isoScore', 'certikScore', 'minWithdrawalUsd', 'eliteCapitalLockDays',
-        'totalProfitDays', 'globalPaused', 'withdrawalsPaused', 'signupsPaused', 'p2pPaused',
+        'totalProfitDays', 'globalPaused', 'depositsPaused', 'withdrawalsPaused', 'signupsPaused', 'p2pPaused',
         'moduleControls', 'supportLinks', 'packages', 'mlmRates', 'mentorConfig',
         'depositWallets', 'paymentMethods', 'pumpFunToken', 'dashboardAnnouncement',
         'bannerAds', 'coinMiningSettings', 'coinMiningPlans', 'forexConfig',
-        'supportAutoResponder', 'kycSettings', 'marketingCardsConfig', 'updatedAt'
+        'supportAutoResponder', 'kycSettings', 'marketingCardsConfig', 'howItWorksConfig',
+        'leaderboardConfig', 'web3PaymentConfig', 'updatedAt'
       ])
       && isNonEmptyString(data.companyName, 120)
       && isBoundedString(data.companyTagline, 200)
@@ -86,6 +87,7 @@ service cloud.firestore {
       && data.eliteCapitalLockDays is number && data.eliteCapitalLockDays >= 1
       && data.totalProfitDays is number && data.totalProfitDays >= 1
       && data.globalPaused is bool
+      && (!('depositsPaused' in data) || data.depositsPaused is bool)
       && (!('withdrawalsPaused' in data) || data.withdrawalsPaused is bool)
       && (!('signupsPaused' in data) || data.signupsPaused is bool)
       && (!('p2pPaused' in data) || data.p2pPaused is bool)
@@ -278,7 +280,7 @@ service cloud.firestore {
         ]) &&
         data.howItWorksConfig.enabled is bool &&
         data.howItWorksConfig.showOnHomepage is bool &&
-        data.howItWorksConfig.defaultLanguage in ['en', 'bn', 'hi', 'es'] &&
+        data.howItWorksConfig.defaultLanguage in ['en', 'hi', 'es'] &&
         isBoundedString(data.howItWorksConfig.disclaimerText, 360) &&
         data.howItWorksConfig.steps is list &&
         data.howItWorksConfig.steps.size() <= 8 &&
@@ -286,6 +288,77 @@ service cloud.firestore {
         data.howItWorksConfig.videos is list &&
         data.howItWorksConfig.videos.size() <= 10 &&
         (data.howItWorksConfig.videos.size() == 0 || data.howItWorksConfig.videos[0] is map)
+      ))
+      && (!('leaderboardConfig' in data) || (
+        data.leaderboardConfig is map &&
+        data.leaderboardConfig.keys().hasAll([
+          'enabled', 'title', 'subtitle', 'activeTimeframe', 'maxVisibleRows',
+          'showReferralTab', 'showTradersTab', 'allowClientSelfRank', 'disclaimerText', 'entries'
+        ]) &&
+        data.leaderboardConfig.keys().hasOnly([
+          'enabled', 'title', 'subtitle', 'activeTimeframe', 'maxVisibleRows',
+          'showReferralTab', 'showTradersTab', 'allowClientSelfRank', 'disclaimerText',
+          'lastLiveSyncAtIso', 'entries'
+        ]) &&
+        data.leaderboardConfig.enabled is bool &&
+        isBoundedString(data.leaderboardConfig.title, 120) &&
+        isBoundedString(data.leaderboardConfig.subtitle, 220) &&
+        data.leaderboardConfig.activeTimeframe in ['weekly', 'monthly', 'all_time'] &&
+        data.leaderboardConfig.maxVisibleRows is number &&
+        data.leaderboardConfig.maxVisibleRows >= 3 &&
+        data.leaderboardConfig.maxVisibleRows <= 25 &&
+        data.leaderboardConfig.showReferralTab is bool &&
+        data.leaderboardConfig.showTradersTab is bool &&
+        data.leaderboardConfig.allowClientSelfRank is bool &&
+        isBoundedString(data.leaderboardConfig.disclaimerText, 360) &&
+        (!('lastLiveSyncAtIso' in data.leaderboardConfig) || isBoundedString(data.leaderboardConfig.lastLiveSyncAtIso, 64)) &&
+        data.leaderboardConfig.entries is list &&
+        data.leaderboardConfig.entries.size() <= 40 &&
+        (data.leaderboardConfig.entries.size() == 0 || data.leaderboardConfig.entries[0] is map)
+      ))
+      && (!('web3PaymentConfig' in data) || (
+        data.web3PaymentConfig is map &&
+        data.web3PaymentConfig.keys().hasAll([
+          'autoDepositEnabled', 'bep20Enabled', 'polygonEnabled',
+          'bep20ReceivingAddress', 'polygonReceivingAddress', 'trc20ReceivingAddress',
+          'minConfirmationsBsc', 'minConfirmationsPolygon',
+          'minDepositUsd', 'maxDepositUsd', 'minWithdrawalUsd', 'maxWithdrawalUsd',
+          'withdrawalFeePercent', 'withdrawalFlatFeeUsd',
+          'require2faForWithdrawals', 'requireKycForWithdrawals', 'requirePayoutTxHashOnApprove'
+        ]) &&
+        data.web3PaymentConfig.keys().hasOnly([
+          'autoDepositEnabled', 'bep20Enabled', 'polygonEnabled',
+          'bep20ReceivingAddress', 'polygonReceivingAddress', 'trc20ReceivingAddress',
+          'minConfirmationsBsc', 'minConfirmationsPolygon',
+          'minDepositUsd', 'maxDepositUsd', 'minWithdrawalUsd', 'maxWithdrawalUsd',
+          'withdrawalFeePercent', 'withdrawalFlatFeeUsd',
+          'require2faForWithdrawals', 'requireKycForWithdrawals', 'requirePayoutTxHashOnApprove',
+          'walletConnectProjectId'
+        ]) &&
+        data.web3PaymentConfig.autoDepositEnabled is bool &&
+        data.web3PaymentConfig.bep20Enabled is bool &&
+        data.web3PaymentConfig.polygonEnabled is bool &&
+        isBoundedString(data.web3PaymentConfig.bep20ReceivingAddress, 64) &&
+        data.web3PaymentConfig.bep20ReceivingAddress.matches('^(0x[a-fA-F0-9]{40})?$') &&
+        isBoundedString(data.web3PaymentConfig.polygonReceivingAddress, 64) &&
+        data.web3PaymentConfig.polygonReceivingAddress.matches('^(0x[a-fA-F0-9]{40})?$') &&
+        isBoundedString(data.web3PaymentConfig.trc20ReceivingAddress, 64) &&
+        data.web3PaymentConfig.minConfirmationsBsc is number &&
+        data.web3PaymentConfig.minConfirmationsBsc >= 1 && data.web3PaymentConfig.minConfirmationsBsc <= 30 &&
+        data.web3PaymentConfig.minConfirmationsPolygon is number &&
+        data.web3PaymentConfig.minConfirmationsPolygon >= 1 && data.web3PaymentConfig.minConfirmationsPolygon <= 60 &&
+        data.web3PaymentConfig.minDepositUsd is number && data.web3PaymentConfig.minDepositUsd >= 1 &&
+        data.web3PaymentConfig.maxDepositUsd is number && data.web3PaymentConfig.maxDepositUsd >= data.web3PaymentConfig.minDepositUsd &&
+        data.web3PaymentConfig.minWithdrawalUsd is number && data.web3PaymentConfig.minWithdrawalUsd >= 1 &&
+        data.web3PaymentConfig.maxWithdrawalUsd is number && data.web3PaymentConfig.maxWithdrawalUsd >= data.web3PaymentConfig.minWithdrawalUsd &&
+        data.web3PaymentConfig.withdrawalFeePercent is number &&
+        data.web3PaymentConfig.withdrawalFeePercent >= 0 && data.web3PaymentConfig.withdrawalFeePercent <= 15 &&
+        data.web3PaymentConfig.withdrawalFlatFeeUsd is number &&
+        data.web3PaymentConfig.withdrawalFlatFeeUsd >= 0 && data.web3PaymentConfig.withdrawalFlatFeeUsd <= 50 &&
+        data.web3PaymentConfig.require2faForWithdrawals is bool &&
+        data.web3PaymentConfig.requireKycForWithdrawals is bool &&
+        data.web3PaymentConfig.requirePayoutTxHashOnApprove is bool &&
+        (!('walletConnectProjectId' in data.web3PaymentConfig) || isBoundedString(data.web3PaymentConfig.walletConnectProjectId, 80))
       ))
       && data.pumpFunToken is map
       && data.updatedAt == request.time;
@@ -316,6 +389,7 @@ service cloud.firestore {
         'kycOcrConfidence', 'kycLivenessPassed', 'kycSubmittedAtMs',
         'kycReviewedAtMs', 'kycReviewedBy',
         'countryCode', 'countryName', 'phoneDialPrefix', 'phoneNumber', 'phoneVerified',
+        'whitelistStrictMode', 'whitelist24hLockEnabled',
         'suspended', 'suspensionReason',
         'usdBalance', 'profitBalance',
         'totalInvested', 'totalWithdrawn', 'isMentor', 'mentorGiftedCapital',
@@ -358,6 +432,8 @@ service cloud.firestore {
       && (!('phoneDialPrefix' in data) || (isBoundedString(data.phoneDialPrefix, 12) && data.phoneDialPrefix.matches('^(\\+[0-9]{1,8})?$')))
       && (!('phoneNumber' in data) || (isBoundedString(data.phoneNumber, 24) && data.phoneNumber.matches('^(\\+[0-9]{6,18})?$')))
       && (!('phoneVerified' in data) || data.phoneVerified is bool)
+      && (!('whitelistStrictMode' in data) || data.whitelistStrictMode is bool)
+      && (!('whitelist24hLockEnabled' in data) || data.whitelist24hLockEnabled is bool)
       && (!('suspended' in data) || data.suspended is bool)
       && (!('suspensionReason' in data) || isBoundedString(data.suspensionReason, 300))
       && data.usdBalance is number && data.usdBalance >= 0
@@ -445,7 +521,9 @@ service cloud.firestore {
         'amountUsd', 'txId', 'status', 'adminNote', 'createdAt', 'updatedAt'
       ]) && data.keys().hasOnly([
         'uid', 'userEmail', 'userName', 'network', 'walletAddress',
-        'amountUsd', 'txId', 'status', 'adminNote', 'createdAt', 'updatedAt'
+        'amountUsd', 'txId', 'status', 'adminNote',
+        'verificationSource', 'web3TxKey', 'confirmations', 'tokenContract', 'senderAddress',
+        'createdAt', 'updatedAt'
       ])
       && isValidId(data.uid)
       && isNonEmptyString(data.userEmail, 254)
@@ -456,6 +534,11 @@ service cloud.firestore {
       && isNonEmptyString(data.txId, 160)
       && data.status in ['pending', 'approved', 'rejected']
       && isBoundedString(data.adminNote, 300)
+      && (!('verificationSource' in data) || data.verificationSource in ['manual', 'web3_auto'])
+      && (!('web3TxKey' in data) || isValidId(data.web3TxKey))
+      && (!('confirmations' in data) || (data.confirmations is number && data.confirmations >= 0))
+      && (!('tokenContract' in data) || isBoundedString(data.tokenContract, 80))
+      && (!('senderAddress' in data) || isBoundedString(data.senderAddress, 80))
       && data.createdAt is timestamp
       && data.updatedAt is timestamp;
     }
@@ -488,7 +571,8 @@ service cloud.firestore {
       ]) && data.keys().hasOnly([
         'uid', 'userEmail', 'userName', 'type', 'source', 'investmentId',
         'packageNumber', 'investmentDate', 'principalCapital', 'totalProfitGenerated',
-        'amountUsd', 'network', 'destinationAddress', 'status', 'adminNote',
+        'amountUsd', 'feeUsd', 'netPayoutUsd', 'network', 'destinationAddress', 'status',
+        'adminNote', 'payoutTxHash', 'twoFactorVerified', 'reviewedByUid', 'reviewedByEmail',
         'createdAt', 'updatedAt'
       ])
       && isValidId(data.uid)
@@ -502,12 +586,229 @@ service cloud.firestore {
       && data.principalCapital is number && data.principalCapital >= 0
       && data.totalProfitGenerated is number && data.totalProfitGenerated >= 0
       && data.amountUsd is number && data.amountUsd > 0
+      && (!('feeUsd' in data) || (data.feeUsd is number && data.feeUsd >= 0))
+      && (!('netPayoutUsd' in data) || (data.netPayoutUsd is number && data.netPayoutUsd >= 0))
       && isValidId(data.network) && data.network.size() <= 64
       && isNonEmptyString(data.destinationAddress, 160)
       && data.status in ['completed', 'pending', 'approved', 'rejected']
       && isBoundedString(data.adminNote, 300)
+      && (!('payoutTxHash' in data) || isBoundedString(data.payoutTxHash, 160))
+      && (!('twoFactorVerified' in data) || data.twoFactorVerified is bool)
+      && (!('reviewedByUid' in data) || isBoundedString(data.reviewedByUid, 128))
+      && (!('reviewedByEmail' in data) || isBoundedString(data.reviewedByEmail, 254))
       && data.createdAt is timestamp
       && data.updatedAt is timestamp;
+    }
+
+    function isValidWeb3VerifiedTx(data, txKey) {
+      return data.keys().hasAll([
+        'txKey', 'txHash', 'network', 'chainId', 'uid', 'userEmail',
+        'fromAddress', 'toAddress', 'tokenContract', 'amountUsd',
+        'confirmations', 'blockNumber', 'depositId', 'verifiedAtIso', 'createdAt'
+      ]) && data.keys().hasOnly([
+        'txKey', 'txHash', 'network', 'chainId', 'uid', 'userEmail',
+        'fromAddress', 'toAddress', 'tokenContract', 'amountUsd',
+        'confirmations', 'blockNumber', 'depositId', 'verifiedAtIso', 'createdAt'
+      ])
+      && isValidId(data.txKey) && data.txKey == txKey
+      && isNonEmptyString(data.txHash, 100) && data.txHash.matches('^0x[a-fA-F0-9]{64}$')
+      && data.network in ['BEP20', 'POLYGON']
+      && data.chainId in [56, 137]
+      && isValidId(data.uid) && data.uid == request.auth.uid
+      && isNonEmptyString(data.userEmail, 254)
+      && isNonEmptyString(data.fromAddress, 80) && data.fromAddress.matches('^0x[a-fA-F0-9]{40}$')
+      && isNonEmptyString(data.toAddress, 80) && data.toAddress.matches('^0x[a-fA-F0-9]{40}$')
+      && isNonEmptyString(data.tokenContract, 80) && data.tokenContract.matches('^0x[a-fA-F0-9]{40}$')
+      && data.amountUsd is number && data.amountUsd > 0 && data.amountUsd <= 10000000
+      && data.confirmations is number && data.confirmations >= 1
+      && data.blockNumber is number && data.blockNumber >= 1
+      && isValidId(data.depositId)
+      && isNonEmptyString(data.verifiedAtIso, 64)
+      && data.createdAt == request.time;
+    }
+
+    function isValidWalletTransaction(data) {
+      return data.keys().hasAll([
+        'uid', 'userEmail', 'userName', 'type', 'wallet', 'direction',
+        'amountUsd', 'feeUsd', 'netAmountUsd', 'network', 'txHash',
+        'referenceId', 'status', 'details', 'createdAt'
+      ]) && data.keys().hasOnly([
+        'uid', 'userEmail', 'userName', 'type', 'wallet', 'direction',
+        'amountUsd', 'feeUsd', 'netAmountUsd', 'network', 'txHash',
+        'referenceId', 'status', 'details', 'createdAt'
+      ])
+      && isValidId(data.uid)
+      && isNonEmptyString(data.userEmail, 254)
+      && isNonEmptyString(data.userName, 120)
+      && data.type in ['web3_auto_deposit', 'manual_deposit_approved', 'withdrawal_hold', 'withdrawal_paid', 'withdrawal_refund']
+      && data.wallet in ['deposit_wallet', 'income_wallet']
+      && data.direction in ['credit', 'debit', 'hold', 'release']
+      && data.amountUsd is number && data.amountUsd > 0 && data.amountUsd <= 10000000
+      && data.feeUsd is number && data.feeUsd >= 0
+      && data.netAmountUsd is number && data.netAmountUsd >= 0
+      && isBoundedString(data.network, 64)
+      && isBoundedString(data.txHash, 160)
+      && isBoundedString(data.referenceId, 128)
+      && data.status in ['confirmed', 'pending', 'approved', 'rejected', 'refunded']
+      && isBoundedString(data.details, 500)
+      && data.createdAt == request.time;
+    }
+
+    function isValidSecurityAuditLog(data) {
+      return data.keys().hasAll([
+        'actorUid', 'actorEmail', 'actorRole', 'eventType', 'targetUid',
+        'network', 'txHash', 'amountUsd', 'details', 'createdAt'
+      ]) && data.keys().hasOnly([
+        'actorUid', 'actorEmail', 'actorRole', 'eventType', 'targetUid',
+        'network', 'txHash', 'amountUsd', 'details', 'createdAt'
+      ])
+      && isValidId(data.actorUid)
+      && isNonEmptyString(data.actorEmail, 254)
+      && data.actorRole in ['user', 'admin', 'system_web3_verifier']
+      && data.eventType in [
+        'WEB3_AUTO_DEPOSIT_CREDITED',
+        'WITHDRAWAL_REQUESTED_2FA',
+        'WITHDRAWAL_APPROVED_PAID',
+        'WITHDRAWAL_REJECTED_REFUNDED',
+        'PAYMENT_SECURITY_CONFIG_UPDATED',
+        'EMAIL_API_CONFIG_UPDATED',
+        'EMAIL_API_TEST_SENT',
+        'TELEGRAM_CONFIG_UPDATED',
+        'TELEGRAM_TEST_SENT',
+        'BULK_EMAIL_BROADCAST_SENT',
+        'WHITELIST_WALLET_ADDED',
+        'WHITELIST_WALLET_UPDATED',
+        'WHITELIST_WALLET_REMOVED',
+        'WHITELIST_POLICY_UPDATED'
+      ]
+      && isBoundedString(data.targetUid, 128)
+      && isBoundedString(data.network, 64)
+      && isBoundedString(data.txHash, 160)
+      && data.amountUsd is number && data.amountUsd >= 0
+      && isBoundedString(data.details, 500)
+      && data.createdAt == request.time;
+    }
+
+    function isValidAdminEmailSecretConfig(data) {
+      return data.keys().hasAll([
+        'resendApiKey', 'resendApiKeyLast4', 'resendFromEmail',
+        'updatedByUid', 'updatedByEmail', 'updatedAtIso', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'providerMode',
+        'resendApiKey', 'resendApiKeyLast4', 'resendFromEmail',
+        'smtpHost', 'smtpPort', 'smtpSecure', 'smtpUser',
+        'smtpPass', 'smtpPassLast4', 'smtpFromName', 'smtpFromEmail',
+        'welcomeEmailEnabled', 'depositConfirmedEmailEnabled',
+        'withdrawalStatusEmailEnabled', 'kycStatusEmailEnabled', 'loginAlertEmailEnabled',
+        'updatedByUid', 'updatedByEmail', 'updatedAtIso', 'updatedAt'
+      ])
+      && (!('providerMode' in data) || data.providerMode in ['auto', 'smtp', 'resend'])
+      && isBoundedString(data.resendApiKey, 256)
+      && isBoundedString(data.resendApiKeyLast4, 8)
+      && isBoundedString(data.resendFromEmail, 254)
+      && (!('smtpHost' in data) || isBoundedString(data.smtpHost, 160))
+      && (!('smtpPort' in data) || (data.smtpPort is number && data.smtpPort >= 1 && data.smtpPort <= 65535))
+      && (!('smtpSecure' in data) || data.smtpSecure is bool)
+      && (!('smtpUser' in data) || isBoundedString(data.smtpUser, 254))
+      && (!('smtpPass' in data) || isBoundedString(data.smtpPass, 256))
+      && (!('smtpPassLast4' in data) || isBoundedString(data.smtpPassLast4, 8))
+      && (!('smtpFromName' in data) || isBoundedString(data.smtpFromName, 120))
+      && (!('smtpFromEmail' in data) || isBoundedString(data.smtpFromEmail, 254))
+      && (!('welcomeEmailEnabled' in data) || data.welcomeEmailEnabled is bool)
+      && (!('depositConfirmedEmailEnabled' in data) || data.depositConfirmedEmailEnabled is bool)
+      && (!('withdrawalStatusEmailEnabled' in data) || data.withdrawalStatusEmailEnabled is bool)
+      && (!('kycStatusEmailEnabled' in data) || data.kycStatusEmailEnabled is bool)
+      && (!('loginAlertEmailEnabled' in data) || data.loginAlertEmailEnabled is bool)
+      && isValidId(data.updatedByUid) && data.updatedByUid == request.auth.uid
+      && isNonEmptyString(data.updatedByEmail, 254)
+      && isNonEmptyString(data.updatedAtIso, 64)
+      && data.updatedAt == request.time;
+    }
+
+    function isValidAdminTelegramSecretConfig(data) {
+      return data.keys().hasAll([
+        'enabled', 'botToken', 'botTokenLast4', 'adminChatId',
+        'alertOnDeposits', 'largeDepositThresholdUsd', 'alertOnKyc', 'alertOnWithdrawals',
+        'updatedByUid', 'updatedByEmail', 'updatedAtIso', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'enabled', 'botToken', 'botTokenLast4', 'adminChatId',
+        'alertOnDeposits', 'largeDepositThresholdUsd', 'alertOnKyc', 'alertOnWithdrawals',
+        'updatedByUid', 'updatedByEmail', 'updatedAtIso', 'updatedAt'
+      ])
+      && data.enabled is bool
+      && isBoundedString(data.botToken, 256)
+      && isBoundedString(data.botTokenLast4, 8)
+      && isBoundedString(data.adminChatId, 64)
+      && data.alertOnDeposits is bool
+      && data.largeDepositThresholdUsd is number && data.largeDepositThresholdUsd >= 0 && data.largeDepositThresholdUsd <= 10000000
+      && data.alertOnKyc is bool
+      && data.alertOnWithdrawals is bool
+      && isValidId(data.updatedByUid) && data.updatedByUid == request.auth.uid
+      && isNonEmptyString(data.updatedByEmail, 254)
+      && isNonEmptyString(data.updatedAtIso, 64)
+      && data.updatedAt == request.time;
+    }
+
+    function isValidWhitelistedWallet(data, userId) {
+      return data.keys().hasAll([
+        'uid', 'label', 'network', 'address', 'verifiedViaOtp',
+        'createdAtMs', 'unlockAtMs', 'createdAt'
+      ]) && data.keys().hasOnly([
+        'uid', 'label', 'network', 'address', 'verifiedViaOtp',
+        'lockDelayHours', 'createdAtMs', 'updatedAtMs', 'unlockAtMs', 'createdAt', 'updatedAt'
+      ])
+      && isValidId(data.uid) && data.uid == userId
+      && isNonEmptyString(data.label, 80)
+      && data.network in ['BEP20', 'POLYGON', 'TRC20', 'ERC20']
+      && isNonEmptyString(data.address, 160)
+      && data.verifiedViaOtp is bool
+      && (!('lockDelayHours' in data) || (data.lockDelayHours is number && data.lockDelayHours >= 0 && data.lockDelayHours <= 168))
+      && data.createdAtMs is number && data.createdAtMs > 0
+      && (!('updatedAtMs' in data) || (data.updatedAtMs is number && data.updatedAtMs >= data.createdAtMs))
+      && data.unlockAtMs is number && data.unlockAtMs >= data.createdAtMs
+      && data.createdAt is timestamp
+      && (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidLoginActivity(data, userId) {
+      return data.keys().hasAll([
+        'uid', 'deviceSignature', 'browser', 'os', 'deviceType',
+        'timezone', 'locale', 'isNewDevice', 'loginAtMs', 'createdAt'
+      ]) && data.keys().hasOnly([
+        'uid', 'deviceSignature', 'browser', 'os', 'deviceType',
+        'timezone', 'locale', 'isNewDevice', 'loginAtMs', 'createdAt'
+      ])
+      && isValidId(data.uid) && data.uid == userId
+      && isNonEmptyString(data.deviceSignature, 128)
+      && isNonEmptyString(data.browser, 64)
+      && isNonEmptyString(data.os, 64)
+      && data.deviceType in ['Desktop', 'Mobile', 'Tablet']
+      && isBoundedString(data.timezone, 80)
+      && isBoundedString(data.locale, 32)
+      && data.isNewDevice is bool
+      && data.loginAtMs is number && data.loginAtMs > 0
+      && data.createdAt == request.time;
+    }
+
+    function isValidUserMissionProfile(data, userId) {
+      return data.keys().hasAll([
+        'uid', 'currentStreak', 'longestStreak', 'lastCheckInDayKey',
+        'totalCheckIns', 'totalXp', 'claimedMissionIds', 'badges', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'uid', 'currentStreak', 'longestStreak', 'lastCheckInDayKey',
+        'totalCheckIns', 'totalXp', 'claimedMissionIds', 'badges', 'updatedAt'
+      ])
+      && isValidId(data.uid) && data.uid == userId
+      && data.currentStreak is number && data.currentStreak >= 0 && data.currentStreak <= 3650
+      && data.longestStreak is number && data.longestStreak >= data.currentStreak && data.longestStreak <= 3650
+      && isBoundedString(data.lastCheckInDayKey, 16)
+      && data.totalCheckIns is number && data.totalCheckIns >= 0 && data.totalCheckIns <= 3650
+      && data.totalXp is number && data.totalXp >= 0 && data.totalXp <= 1000000
+      && data.claimedMissionIds is list && data.claimedMissionIds.size() <= 30
+      && (data.claimedMissionIds.size() == 0 || data.claimedMissionIds[0] is string)
+      && data.badges is list && data.badges.size() <= 30
+      && (data.badges.size() == 0 || data.badges[0] is string)
+      && data.updatedAt == request.time;
     }
 
     function isValidP2PTransfer(data) {
@@ -903,6 +1204,7 @@ service cloud.firestore {
             && incoming().diff(existing()).affectedKeys().hasOnly([
               'avatarData', 'email', 'fullName',
               'countryCode', 'countryName', 'phoneDialPrefix', 'phoneNumber', 'phoneVerified',
+              'whitelistStrictMode', 'whitelist24hLockEnabled',
               'updatedAt'
             ])
           )
@@ -953,6 +1255,48 @@ service cloud.firestore {
             'label', 'methodId', 'methodName', 'accountAddress', 'accountHolder', 'isDefault', 'updatedAt'
           ]);
         allow delete: if isValidId(userId) && isValidId(methodDocId) && isVerifiedUser() && (isOwner(userId) || isAdmin());
+      }
+
+      match /whitelistedWallets/{walletId} {
+        allow get: if isValidId(userId) && isValidId(walletId) && (isOwner(userId) || isAdmin());
+        allow list: if isValidId(userId) && isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+        allow create: if isValidId(userId)
+          && isValidId(walletId)
+          && isVerifiedUser()
+          && isOwner(userId)
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && isValidWhitelistedWallet(incoming(), userId)
+          && incoming().verifiedViaOtp == true
+          && incoming().createdAt == request.time
+          && (!('updatedAt' in incoming()) || incoming().updatedAt == request.time);
+        allow update: if isValidId(userId)
+          && isValidId(walletId)
+          && isVerifiedUser()
+          && isOwner(userId)
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && isValidWhitelistedWallet(incoming(), userId)
+          && incoming().uid == existing().uid
+          && incoming().createdAt == existing().createdAt
+          && incoming().createdAtMs == existing().createdAtMs
+          && incoming().verifiedViaOtp == true
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'label', 'network', 'address', 'verifiedViaOtp',
+            'lockDelayHours', 'unlockAtMs', 'updatedAtMs', 'updatedAt'
+          ]);
+        allow delete: if isValidId(userId) && isValidId(walletId) && isVerifiedUser() && (isOwner(userId) || isAdmin());
+      }
+
+      match /loginActivities/{activityId} {
+        allow get: if isValidId(userId) && isValidId(activityId) && (isOwner(userId) || isAdmin());
+        allow list: if isValidId(userId) && isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+        allow create: if isValidId(userId)
+          && isValidId(activityId)
+          && isSignedIn()
+          && isOwner(userId)
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && isValidLoginActivity(incoming(), userId);
+        allow update, delete: if false;
       }
 
       match /notifications/{notificationId} {
@@ -1117,10 +1461,18 @@ service cloud.firestore {
         && isVerifiedUser()
         && isValidCryptoDeposit(incoming())
         && incoming().uid == request.auth.uid
-        && incoming().status == 'pending'
-        && incoming().adminNote == ''
         && incoming().createdAt == request.time
-        && incoming().updatedAt == request.time;
+        && incoming().updatedAt == request.time
+        && (
+          (incoming().status == 'pending' && incoming().adminNote == '')
+          || (
+            incoming().status == 'approved'
+            && ('verificationSource' in incoming())
+            && incoming().verificationSource == 'web3_auto'
+            && ('web3TxKey' in incoming())
+            && existsAfter(/databases/$(database)/documents/web3VerifiedTxs/$(incoming().web3TxKey))
+          )
+        );
       allow update: if isValidId(depositId)
         && isAdmin()
         && isValidCryptoDeposit(incoming())
@@ -1141,12 +1493,9 @@ service cloud.firestore {
         && isValidWithdrawal(incoming())
         && incoming().uid == request.auth.uid
         && incoming().adminNote == ''
+        && incoming().status == 'pending'
         && incoming().createdAt == request.time
-        && incoming().updatedAt == request.time
-        && (
-          (incoming().type == 'instant_profit' && incoming().status in ['pending', 'completed']) ||
-          (incoming().type == 'manual_capital' && incoming().status == 'pending')
-        );
+        && incoming().updatedAt == request.time;
       allow update: if isValidId(withdrawalId)
         && isAdmin()
         && isValidWithdrawal(incoming())
@@ -1157,11 +1506,15 @@ service cloud.firestore {
           (
             existing().status == 'pending'
             && incoming().status in ['approved', 'rejected']
-            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'adminNote', 'updatedAt'])
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'adminNote', 'payoutTxHash', 'reviewedByUid', 'reviewedByEmail', 'updatedAt'
+            ])
           )
           || (
             incoming().status == existing().status
-            && incoming().diff(existing()).affectedKeys().hasOnly(['adminNote', 'updatedAt'])
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'adminNote', 'payoutTxHash', 'updatedAt'
+            ])
           )
         );
       allow delete: if false;
@@ -1425,6 +1778,64 @@ service cloud.firestore {
         && incoming().ticketNumber == existing().ticketNumber
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    match /web3VerifiedTxs/{txKey} {
+      allow get: if isValidId(txKey) && isSignedIn() && (existing().uid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow create: if isValidId(txKey)
+        && isVerifiedUser()
+        && isValidWeb3VerifiedTx(incoming(), txKey);
+      allow update, delete: if false;
+    }
+
+    match /walletTransactions/{txId} {
+      allow get: if isValidId(txId) && isSignedIn() && (existing().uid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow create: if isValidId(txId)
+        && isVerifiedUser()
+        && isValidWalletTransaction(incoming())
+        && (incoming().uid == request.auth.uid || isAdmin());
+      allow update, delete: if false;
+    }
+
+    match /auditLogs/{logId} {
+      allow get: if isValidId(logId) && isSignedIn() && (existing().actorUid == request.auth.uid || existing().targetUid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.actorUid == request.auth.uid || resource.data.targetUid == request.auth.uid || isAdmin());
+      allow create: if isValidId(logId)
+        && isVerifiedUser()
+        && isValidSecurityAuditLog(incoming())
+        && (
+          isAdmin()
+          || (
+            incoming().actorUid == request.auth.uid
+            && incoming().actorRole in ['user', 'system_web3_verifier']
+          )
+        );
+      allow update, delete: if false;
+    }
+
+    match /userMissions/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow create, update: if isValidId(userId)
+        && isVerifiedUser()
+        && isOwner(userId)
+        && exists(/databases/$(database)/documents/users/$(userId))
+        && isValidUserMissionProfile(incoming(), userId);
+      allow delete: if false;
+    }
+
+    match /adminSecrets/{docId} {
+      allow get: if isValidId(docId) && docId in ['emailConfig', 'telegramConfig'] && isAdmin();
+      allow list: if false;
+      allow create, update: if isValidId(docId)
+        && isAdmin()
+        && (
+          (docId == 'emailConfig' && isValidAdminEmailSecretConfig(incoming()))
+          || (docId == 'telegramConfig' && isValidAdminTelegramSecretConfig(incoming()))
+        );
       allow delete: if false;
     }
   }

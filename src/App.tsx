@@ -11,6 +11,7 @@ import { FrontPage } from './components/FrontPage';
 import { MentorDashboard } from './components/MentorDashboard';
 import { Navbar } from './components/Navbar';
 import { UserVaultDashboard } from './components/UserVaultDashboard';
+import { LanguageProvider } from './context/LanguageContext';
 import { PlatformProvider, usePlatform } from './context/PlatformContext';
 import { NavSection } from './types/platform';
 
@@ -335,9 +336,11 @@ const AppRouter: React.FC = () => {
 export default function App() {
   return (
     <ErrorBoundary>
-      <PlatformProvider>
-        <AppRouter />
-      </PlatformProvider>
+      <LanguageProvider>
+        <PlatformProvider>
+          <AppRouter />
+        </PlatformProvider>
+      </LanguageProvider>
     </ErrorBoundary>
   );
 }

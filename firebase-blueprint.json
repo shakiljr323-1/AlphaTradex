@@ -19,6 +19,7 @@
         "eliteCapitalLockDays": { "type": "number" },
         "totalProfitDays": { "type": "number" },
         "globalPaused": { "type": "boolean" },
+        "depositsPaused": { "type": "boolean" },
         "withdrawalsPaused": { "type": "boolean" },
         "signupsPaused": { "type": "boolean" },
         "p2pPaused": { "type": "boolean" },
@@ -39,6 +40,8 @@
         "kycSettings": { "type": "object" },
         "marketingCardsConfig": { "type": "object" },
         "howItWorksConfig": { "type": "object" },
+        "leaderboardConfig": { "type": "object" },
+        "web3PaymentConfig": { "type": "object" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": [
@@ -96,6 +99,8 @@
         "phoneDialPrefix": { "type": "string", "maxLength": 12, "pattern": "^(\\+[0-9]{1,8})?$" },
         "phoneNumber": { "type": "string", "maxLength": 24, "pattern": "^(\\+[0-9]{6,18})?$" },
         "phoneVerified": { "type": "boolean" },
+        "whitelistStrictMode": { "type": "boolean" },
+        "whitelist24hLockEnabled": { "type": "boolean" },
         "suspended": { "type": "boolean" },
         "suspensionReason": { "type": "string", "maxLength": 300 },
         "usdBalance": { "type": "number" },
@@ -205,6 +210,11 @@
         "txId": { "type": "string", "maxLength": 160 },
         "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
         "adminNote": { "type": "string", "maxLength": 300 },
+        "verificationSource": { "type": "string", "enum": ["manual", "web3_auto"] },
+        "web3TxKey": { "type": "string", "maxLength": 128 },
+        "confirmations": { "type": "number" },
+        "tokenContract": { "type": "string", "maxLength": 80 },
+        "senderAddress": { "type": "string", "maxLength": 80 },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -223,7 +233,7 @@
     },
     "Withdrawal": {
       "title": "Withdrawal",
-      "description": "Instant profit withdrawals ($10 min) and manual capital withdrawal requests.",
+      "description": "Admin-approved profit, commission, and capital withdrawal requests with 2FA verification and balance hold.",
       "type": "object",
       "properties": {
         "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
@@ -237,10 +247,16 @@
         "principalCapital": { "type": "number" },
         "totalProfitGenerated": { "type": "number" },
         "amountUsd": { "type": "number" },
+        "feeUsd": { "type": "number" },
+        "netPayoutUsd": { "type": "number" },
         "network": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "destinationAddress": { "type": "string", "maxLength": 160 },
         "status": { "type": "string", "enum": ["completed", "pending", "approved", "rejected"] },
         "adminNote": { "type": "string", "maxLength": 300 },
+        "payoutTxHash": { "type": "string", "maxLength": 160 },
+        "twoFactorVerified": { "type": "boolean" },
+        "reviewedByUid": { "type": "string", "maxLength": 128 },
+        "reviewedByEmail": { "type": "string", "maxLength": 254 },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -730,6 +746,221 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["totalGenerated", "totalShared", "updatedAt"]
+    },
+    "Web3VerifiedTx": {
+      "title": "Web3VerifiedTx",
+      "description": "Unique idempotency registry keyed by chain + txHash so the same on-chain deposit hash can never be credited twice.",
+      "type": "object",
+      "properties": {
+        "txKey": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "txHash": { "type": "string", "maxLength": 100 },
+        "network": { "type": "string", "enum": ["BEP20", "POLYGON"] },
+        "chainId": { "type": "number" },
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userEmail": { "type": "string", "maxLength": 254 },
+        "fromAddress": { "type": "string", "maxLength": 80 },
+        "toAddress": { "type": "string", "maxLength": 80 },
+        "tokenContract": { "type": "string", "maxLength": 80 },
+        "amountUsd": { "type": "number" },
+        "confirmations": { "type": "number" },
+        "blockNumber": { "type": "number" },
+        "depositId": { "type": "string", "maxLength": 128 },
+        "verifiedAtIso": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "txKey", "txHash", "network", "chainId", "uid", "userEmail",
+        "fromAddress", "toAddress", "tokenContract", "amountUsd",
+        "confirmations", "blockNumber", "depositId", "verifiedAtIso", "createdAt"
+      ]
+    },
+    "WalletTransaction": {
+      "title": "WalletTransaction",
+      "description": "Immutable wallet transaction ledger logging verified Web3 deposits, withdrawal holds, approvals, and refunds.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userEmail": { "type": "string", "maxLength": 254 },
+        "userName": { "type": "string", "maxLength": 120 },
+        "type": {
+          "type": "string",
+          "enum": ["web3_auto_deposit", "manual_deposit_approved", "withdrawal_hold", "withdrawal_paid", "withdrawal_refund"]
+        },
+        "wallet": { "type": "string", "enum": ["deposit_wallet", "income_wallet"] },
+        "direction": { "type": "string", "enum": ["credit", "debit", "hold", "release"] },
+        "amountUsd": { "type": "number" },
+        "feeUsd": { "type": "number" },
+        "netAmountUsd": { "type": "number" },
+        "network": { "type": "string", "maxLength": 64 },
+        "txHash": { "type": "string", "maxLength": 160 },
+        "referenceId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["confirmed", "pending", "approved", "rejected", "refunded"] },
+        "details": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid", "userEmail", "userName", "type", "wallet", "direction",
+        "amountUsd", "feeUsd", "netAmountUsd", "network", "txHash",
+        "referenceId", "status", "details", "createdAt"
+      ]
+    },
+    "SecurityAuditLog": {
+      "title": "SecurityAuditLog",
+      "description": "Immutable security audit log capturing verified Web3 deposits, 2FA withdrawal submissions, and Super Admin payout decisions.",
+      "type": "object",
+      "properties": {
+        "actorUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "actorEmail": { "type": "string", "maxLength": 254 },
+        "actorRole": { "type": "string", "enum": ["user", "admin", "system_web3_verifier"] },
+        "eventType": {
+          "type": "string",
+          "enum": [
+            "WEB3_AUTO_DEPOSIT_CREDITED",
+            "WITHDRAWAL_REQUESTED_2FA",
+            "WITHDRAWAL_APPROVED_PAID",
+            "WITHDRAWAL_REJECTED_REFUNDED",
+            "PAYMENT_SECURITY_CONFIG_UPDATED",
+            "EMAIL_API_CONFIG_UPDATED",
+            "EMAIL_API_TEST_SENT",
+            "TELEGRAM_CONFIG_UPDATED",
+            "TELEGRAM_TEST_SENT",
+            "BULK_EMAIL_BROADCAST_SENT",
+            "WHITELIST_WALLET_ADDED",
+            "WHITELIST_WALLET_UPDATED",
+            "WHITELIST_WALLET_REMOVED",
+            "WHITELIST_POLICY_UPDATED"
+          ]
+        },
+        "targetUid": { "type": "string", "maxLength": 128 },
+        "network": { "type": "string", "maxLength": 64 },
+        "txHash": { "type": "string", "maxLength": 160 },
+        "amountUsd": { "type": "number" },
+        "details": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "actorUid", "actorEmail", "actorRole", "eventType", "targetUid",
+        "network", "txHash", "amountUsd", "details", "createdAt"
+      ]
+    },
+    "AdminEmailSecretConfig": {
+      "title": "AdminEmailSecretConfig",
+      "description": "Strictly Super-Admin-only server email configuration supporting Company Email SMTP + Pass Key, Resend API key, and automation event toggles.",
+      "type": "object",
+      "properties": {
+        "providerMode": { "type": "string", "enum": ["auto", "smtp", "resend"] },
+        "resendApiKey": { "type": "string", "maxLength": 256 },
+        "resendApiKeyLast4": { "type": "string", "maxLength": 8 },
+        "resendFromEmail": { "type": "string", "maxLength": 254 },
+        "smtpHost": { "type": "string", "maxLength": 160 },
+        "smtpPort": { "type": "number" },
+        "smtpSecure": { "type": "boolean" },
+        "smtpUser": { "type": "string", "maxLength": 254 },
+        "smtpPass": { "type": "string", "maxLength": 256 },
+        "smtpPassLast4": { "type": "string", "maxLength": 8 },
+        "smtpFromName": { "type": "string", "maxLength": 120 },
+        "smtpFromEmail": { "type": "string", "maxLength": 254 },
+        "welcomeEmailEnabled": { "type": "boolean" },
+        "depositConfirmedEmailEnabled": { "type": "boolean" },
+        "withdrawalStatusEmailEnabled": { "type": "boolean" },
+        "kycStatusEmailEnabled": { "type": "boolean" },
+        "loginAlertEmailEnabled": { "type": "boolean" },
+        "updatedByUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "updatedByEmail": { "type": "string", "maxLength": 254 },
+        "updatedAtIso": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "resendApiKey", "resendApiKeyLast4", "resendFromEmail",
+        "updatedByUid", "updatedByEmail", "updatedAtIso", "updatedAt"
+      ]
+    },
+    "AdminTelegramSecretConfig": {
+      "title": "AdminTelegramSecretConfig",
+      "description": "Strictly Super-Admin-only Telegram Bot alert credentials and trigger rules.",
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "botToken": { "type": "string", "maxLength": 256 },
+        "botTokenLast4": { "type": "string", "maxLength": 8 },
+        "adminChatId": { "type": "string", "maxLength": 64 },
+        "alertOnDeposits": { "type": "boolean" },
+        "largeDepositThresholdUsd": { "type": "number" },
+        "alertOnKyc": { "type": "boolean" },
+        "alertOnWithdrawals": { "type": "boolean" },
+        "updatedByUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "updatedByEmail": { "type": "string", "maxLength": 254 },
+        "updatedAtIso": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "enabled", "botToken", "botTokenLast4", "adminChatId",
+        "alertOnDeposits", "largeDepositThresholdUsd", "alertOnKyc", "alertOnWithdrawals",
+        "updatedByUid", "updatedByEmail", "updatedAtIso", "updatedAt"
+      ]
+    },
+    "WhitelistedWallet": {
+      "title": "WhitelistedWallet",
+      "description": "User-saved trusted USDT withdrawal address requiring Email OTP verification and optional 24-hour new-address security lock.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "label": { "type": "string", "maxLength": 80 },
+        "network": { "type": "string", "enum": ["BEP20", "POLYGON", "TRC20", "ERC20"] },
+        "address": { "type": "string", "maxLength": 160 },
+        "verifiedViaOtp": { "type": "boolean" },
+        "lockDelayHours": { "type": "number" },
+        "createdAtMs": { "type": "number" },
+        "updatedAtMs": { "type": "number" },
+        "unlockAtMs": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid", "label", "network", "address", "verifiedViaOtp",
+        "createdAtMs", "unlockAtMs", "createdAt"
+      ]
+    },
+    "LoginActivity": {
+      "title": "LoginActivity",
+      "description": "Per-user recent sign-in & device fingerprint activity log for account security auditing.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "deviceSignature": { "type": "string", "maxLength": 128 },
+        "browser": { "type": "string", "maxLength": 64 },
+        "os": { "type": "string", "maxLength": 64 },
+        "deviceType": { "type": "string", "enum": ["Desktop", "Mobile", "Tablet"] },
+        "timezone": { "type": "string", "maxLength": 80 },
+        "locale": { "type": "string", "maxLength": 32 },
+        "isNewDevice": { "type": "boolean" },
+        "loginAtMs": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid", "deviceSignature", "browser", "os", "deviceType",
+        "timezone", "locale", "isNewDevice", "loginAtMs", "createdAt"
+      ]
+    },
+    "UserMissionProfile": {
+      "title": "UserMissionProfile",
+      "description": "Daily check-in streak, mission rewards, earned XP, and milestone badges per user.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "currentStreak": { "type": "number" },
+        "longestStreak": { "type": "number" },
+        "lastCheckInDayKey": { "type": "string", "maxLength": 16 },
+        "totalCheckIns": { "type": "number" },
+        "totalXp": { "type": "number" },
+        "claimedMissionIds": { "type": "array" },
+        "badges": { "type": "array" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid", "currentStreak", "longestStreak", "lastCheckInDayKey",
+        "totalCheckIns", "totalXp", "claimedMissionIds", "badges", "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -828,6 +1059,34 @@
     "/supportTickets/{ticketId}": {
       "schema": { "$ref": "#/entities/SupportTicket" },
       "description": "Client complaint and support tickets managed in the Super Admin desk."
+    },
+    "/web3VerifiedTxs/{txKey}": {
+      "schema": { "$ref": "#/entities/Web3VerifiedTx" },
+      "description": "Unique idempotency lock collection keyed by network_txHash preventing double-crediting of Web3 deposits."
+    },
+    "/walletTransactions/{txId}": {
+      "schema": { "$ref": "#/entities/WalletTransaction" },
+      "description": "Immutable wallet ledger for verified Web3 auto-deposits, withdrawal holds, approvals, and refunds."
+    },
+    "/auditLogs/{logId}": {
+      "schema": { "$ref": "#/entities/SecurityAuditLog" },
+      "description": "Immutable security and payment audit log recording Web3 verifications, email API config updates, and admin withdrawal decisions."
+    },
+    "/users/{userId}/whitelistedWallets/{walletId}": {
+      "schema": { "$ref": "#/entities/WhitelistedWallet" },
+      "description": "User whitelisted USDT withdrawal wallet addresses protected by 24h cooldown or Email OTP."
+    },
+    "/users/{userId}/loginActivities/{activityId}": {
+      "schema": { "$ref": "#/entities/LoginActivity" },
+      "description": "Per-user recent sign-in & device history for security monitoring."
+    },
+    "/userMissions/{userId}": {
+      "schema": { "$ref": "#/entities/UserMissionProfile" },
+      "description": "Daily check-in streaks, mission progress, XP points, and badges per user."
+    },
+    "/adminSecrets/{docId}": {
+      "schema": { "$ref": "#/entities/AdminEmailSecretConfig" },
+      "description": "Strictly Super-Admin-only integration secrets (emailConfig for SMTP/Resend and telegramConfig for Admin Bot alerts)."
     }
   }
 }

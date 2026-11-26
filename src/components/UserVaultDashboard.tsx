@@ -17,7 +17,9 @@ import {
   CreditCard,
   ExternalLink,
   FileCheck,
+  FileDown,
   FileSearch,
+  Flame,
   Globe,
   Headphones,
   History,
@@ -37,10 +39,12 @@ import {
   RefreshCw,
   Rocket,
   Send,
+  ShieldAlert,
   ShieldCheck,
   Star,
   Trash2,
   TrendingUp,
+  Trophy,
   Upload,
   UserCheck,
   Users,
@@ -48,6 +52,7 @@ import {
   X,
   Zap,
 } from 'lucide-react';
+import { LanguageSwitcher, useLanguage } from '../context/LanguageContext';
 import { usePlatform } from '../context/PlatformContext';
 import {
   CryptoNetwork,
@@ -84,6 +89,14 @@ import { GlobalKycVerificationView } from './GlobalKycVerificationView';
 import { WithdrawalManagementView } from './WithdrawalManagementView';
 import { MarketingCardStudio } from './MarketingCardStudio';
 import { HowItWorksGuideModule } from './HowItWorksGuideModule';
+import { TopPerformersLeaderboard } from './TopPerformersLeaderboard';
+import { Web3AutoDepositPanel } from './Web3AutoDepositPanel';
+import { UserSecurityCenter } from './UserSecurityCenter';
+import { UserRewardsMissionsPanel } from './UserRewardsMissionsPanel';
+import {
+  downloadAccountStatementPdf,
+  downloadProfitCertificatePdf,
+} from '../utils/pdfStatementGenerator';
 
 function formatVaultError(raw: string): string {
   if (raw.startsWith('{') && raw.includes('"error"')) {
@@ -118,8 +131,11 @@ type SidebarSection =
   | 'referral-mentor-desk'
   | 'referral-network'
   | 'downline-team'
+  | 'leaderboard'
+  | 'rewards-missions'
   | 'marketing-cards'
   | 'video-guide'
+  | 'security-center'
   | 'profile-kyc'
   | 'kyc-verification'
   | 'support-desk'
@@ -154,6 +170,9 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
     downlineReferrals,
     referralLinkClicks,
     savedPaymentMethods,
+    whitelistedWallets,
+    loginActivities,
+    missionProfile,
     forexTrades,
     copyTradeSubscriptions,
     submitKycUpdate,
@@ -164,6 +183,9 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
     refreshAuthVerification,
     signOutUser,
     submitCryptoDeposit,
+    verifyWeb3AutoDeposit,
+    requestWithdrawalOtp,
+    verifyWithdrawalOtp,
     activatePackage,
     transferIncomeToDepositWallet,
     claimInvestmentProfit,
@@ -174,7 +196,14 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
     addUserPaymentMethod,
     setDefaultUserPaymentMethod,
     deleteUserPaymentMethod,
+    toggleWhitelistStrictMode,
+    toggleWhitelist24hLock,
+    addWhitelistedWallet,
+    removeWhitelistedWallet,
+    claimDailyCheckIn,
+    claimMissionReward,
   } = usePlatform();
+  const { t } = useLanguage();
 
   const [activeNav, setActiveNav] = useState<SidebarSection>(initialSection);
   const [focusedTicketId, setFocusedTicketId] = useState<string>('');
@@ -195,6 +224,7 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
   const [walletTransferAmount, setWalletTransferAmount] = useState('10');
   const [showWalletTransferBar, setShowWalletTransferBar] = useState(false);
   const [showDepositModal, setShowDepositModal] = useState(false);
+  const [depositMode, setDepositMode] = useState<'web3' | 'manual'>('web3');
   const [copiedText, setCopiedText] = useState('');
   const [selectedBreakdown, setSelectedBreakdown] = useState<Withdrawal | null>(null);
   const [retryingSync, setRetryingSync] = useState(false);
@@ -606,18 +636,25 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
   }[] = [
     {
       heading: 'OVERVIEW',
-      items: [{ id: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard }],
+      items: [
+        { id: 'dashboard', label: t('dash.overview', 'Dashboard'), Icon: LayoutDashboard },
+        {
+          id: 'rewards-missions',
+          label: t('dash.rewardsMissions', 'Daily Check-In & Missions'),
+          Icon: Flame,
+        },
+      ],
     },
     {
       heading: 'WALLETS',
       items: [
-        { id: 'deposit', label: 'Deposit Funds', Icon: PlusCircle },
+        { id: 'deposit', label: t('dash.deposit', 'Deposit Funds'), Icon: PlusCircle },
         { id: 'deposit-report', label: 'Deposit Wallet Report', Icon: Receipt },
-        { id: 'income-wallet', label: 'Income Wallet', Icon: Wallet },
+        { id: 'income-wallet', label: t('dash.incomeWallet', 'Income Wallet'), Icon: Wallet },
         ...(moduleControls?.p2pEnabled !== false
           ? [{ id: 'p2p-transfers' as SidebarSection, label: 'P2P Transfers', Icon: Send }]
           : []),
-        { id: 'withdraw', label: 'Withdrawal Management', Icon: ArrowUpRight },
+        { id: 'withdraw', label: t('dash.withdraw', 'Withdrawal Management'), Icon: ArrowUpRight },
         { id: 'payment-methods', label: 'Payment Methods', Icon: CreditCard },
         { id: 'transaction-history', label: 'Transaction History', Icon: History },
       ],
@@ -626,16 +663,28 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
       heading: 'AI TRADING & LAUNCHPAD',
       items: [
         ...(moduleControls?.aiTradingEnabled !== false
-          ? [{ id: 'activate-trading' as SidebarSection, label: 'Activate Trading', Icon: Zap }]
+          ? [
+              {
+                id: 'activate-trading' as SidebarSection,
+                label: t('dash.activateTrading', 'Activate Trading'),
+                Icon: Zap,
+              },
+            ]
           : []),
-        { id: 'my-packages', label: 'My Packages', Icon: Bot },
+        { id: 'my-packages', label: t('dash.myPackages', 'My Packages'), Icon: Bot },
         { id: 'trade-history', label: 'Trade History', Icon: Activity },
         { id: 'capital-withdraw', label: 'Capital Withdraw', Icon: Lock },
         ...(moduleControls?.coinMiningEnabled !== false
           ? [{ id: 'pump-fun' as SidebarSection, label: `${platformConfig.pumpFunToken.name} Coin`, Icon: Rocket }]
           : []),
         ...(moduleControls?.forexMarketEnabled !== false
-          ? [{ id: 'forex-market' as SidebarSection, label: 'Forex Market', Icon: Globe }]
+          ? [
+              {
+                id: 'forex-market' as SidebarSection,
+                label: t('dash.forexMarket', 'Forex Market'),
+                Icon: Globe,
+              },
+            ]
           : []),
         { id: 'forex-news', label: 'Forex News', Icon: Newspaper },
       ],
@@ -653,10 +702,25 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
     {
       heading: 'MY TEAM',
       items: [
-        { id: 'referral-network', label: 'Referral Dashboard', Icon: Network },
+        { id: 'referral-network', label: t('dash.referralNetwork', 'Referral Dashboard'), Icon: Network },
         { id: 'downline-team', label: 'Downline Team', Icon: Users },
+        ...(platformConfig.leaderboardConfig?.enabled !== false
+          ? [
+              {
+                id: 'leaderboard' as SidebarSection,
+                label: t('dash.leaderboard', 'Top Performers'),
+                Icon: Trophy,
+              },
+            ]
+          : []),
         ...(platformConfig.marketingCardsConfig?.enabled !== false
-          ? [{ id: 'marketing-cards' as SidebarSection, label: 'Promo Studio', Icon: ImageIcon }]
+          ? [
+              {
+                id: 'marketing-cards' as SidebarSection,
+                label: t('dash.marketingCards', 'Promo Studio'),
+                Icon: ImageIcon,
+              },
+            ]
           : []),
       ],
     },
@@ -664,11 +728,22 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
       heading: 'ACCOUNT & SECURITY',
       items: [
         ...(platformConfig.howItWorksConfig?.enabled !== false
-          ? [{ id: 'video-guide' as SidebarSection, label: 'Video Guide', Icon: PlayCircle }]
+          ? [
+              {
+                id: 'video-guide' as SidebarSection,
+                label: t('dash.videoGuide', 'Video Guide'),
+                Icon: PlayCircle,
+              },
+            ]
           : []),
-        { id: 'profile-kyc', label: 'Profile Management', Icon: UserCheck },
+        {
+          id: 'security-center',
+          label: t('dash.securityWhitelist', 'Security & Whitelist'),
+          Icon: ShieldAlert,
+        },
+        { id: 'profile-kyc', label: t('dash.profileKyc', 'Profile Management'), Icon: UserCheck },
         { id: 'kyc-verification', label: 'KYC Verification', Icon: ShieldCheck },
-        { id: 'support-desk', label: 'Live Support & Tickets', Icon: Headphones },
+        { id: 'support-desk', label: t('dash.supportDesk', 'Live Support & Tickets'), Icon: Headphones },
         { id: 'track-ticket', label: 'Track Ticket', Icon: FileSearch },
       ],
     },
@@ -1079,6 +1154,8 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
           </div>
 
           <div className="flex items-center gap-2.5 shrink-0">
+            <LanguageSwitcher variant="dark" compact />
+
             {userProfile.isMentor && onOpenMentorDashboard && (
               <button
                 type="button"
@@ -1323,6 +1400,41 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                     >
                       <PlusCircle className="w-3.5 h-3.5 text-sky-400" />
                       <span>Deposit Funds</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        downloadAccountStatementPdf({
+                          companyName: platformConfig.companyName,
+                          user: userProfile,
+                          deposits,
+                          withdrawals,
+                          investments,
+                          commissions: mlmCommissions,
+                        });
+                        notify('ok', 'Account Statement PDF downloaded.');
+                      }}
+                      className="px-3 py-1.5 rounded-lg border border-indigo-500/45 bg-indigo-500/15 hover:bg-indigo-500/25 text-xs font-semibold text-indigo-200 inline-flex items-center gap-1.5 transition-colors"
+                    >
+                      <FileDown className="w-3.5 h-3.5 text-indigo-300" />
+                      <span>{t('dash.pdfStatement', 'PDF Statement')}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        downloadProfitCertificatePdf({
+                          companyName: platformConfig.companyName,
+                          user: userProfile,
+                          investments,
+                          withdrawals,
+                          commissions: mlmCommissions,
+                        });
+                        notify('ok', 'Verified Profit Certificate PDF downloaded.');
+                      }}
+                      className="px-3 py-1.5 rounded-lg border border-amber-500/45 bg-amber-500/15 hover:bg-amber-500/25 text-xs font-semibold text-amber-200 inline-flex items-center gap-1.5 transition-colors"
+                    >
+                      <Award className="w-3.5 h-3.5 text-amber-300" />
+                      <span>{t('dash.profitCertificate', 'Profit Certificate')}</span>
                     </button>
                     <button
                       type="button"
@@ -1892,6 +2004,20 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                 </div>
               </div>
 
+              {/* Row 5.5: Real-Time Top Performers Leaderboard Widget */}
+              <TopPerformersLeaderboard
+                userProfile={userProfile}
+                platformConfig={platformConfig}
+                mlmCommissions={mlmCommissions}
+                downlineReferrals={downlineReferrals}
+                investments={investments}
+                forexTrades={forexTrades}
+                compact
+                onOpenReferrals={() => selectNav('referral-network')}
+                onOpenTrading={() => selectNav('forex-market')}
+                onOpenFullView={() => selectNav('leaderboard')}
+              />
+
               {/* Row 6: Active Investments & Capital Control Table */}
               {renderInvestmentsTable()}
 
@@ -2146,138 +2272,189 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
           {(activeNav === 'deposit' || activeNav === 'deposit-report') && (
             <section className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               <div className="lg:col-span-5 bg-[#0B111E]/78 backdrop-blur-md border border-slate-700/70 rounded-2xl p-6 space-y-4 shadow-xl">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div>
-                    <h2 className="font-display font-bold text-white text-lg">Deposit Funds to Deposit Wallet</h2>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      Fund your Deposit Wallet to buy AI Trading &amp; Mining plans. Direct Forex trading from Deposit Wallet is{' '}
-                      <span className="text-amber-300 font-semibold">Upcoming</span>.
-                    </p>
-                  </div>
-                  <span className="px-2.5 py-1 rounded-lg bg-sky-500/15 border border-sky-500/35 font-mono text-xs text-sky-300 shrink-0">
-                    ${userProfile.usdBalance.toFixed(2)}
-                  </span>
+                {/* Deposit Channel Mode Toggle: Instant Web3 Auto-Deposit vs Manual TxID */}
+                <div className="grid grid-cols-2 gap-2 p-1 rounded-xl bg-slate-950/90 border border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setDepositMode('web3')}
+                    className={`py-2 px-3 rounded-lg text-xs font-bold transition-colors ${
+                      depositMode === 'web3'
+                        ? 'bg-emerald-600 text-white'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Instant Web3 Auto
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDepositMode('manual')}
+                    className={`py-2 px-3 rounded-lg text-xs font-bold transition-colors ${
+                      depositMode === 'manual'
+                        ? 'bg-orange-600 text-white'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Manual TxID Deposit
+                  </button>
                 </div>
 
-                {enabledDepositMethods.length === 0 ? (
-                  <div className="p-4 rounded-xl bg-amber-950/50 border border-amber-700/50 text-xs text-amber-200">
-                    All deposit channels are currently paused by administration.
-                  </div>
+                {depositMode === 'web3' ? (
+                  <Web3AutoDepositPanel
+                    platformConfig={platformConfig}
+                    currentDepositBalance={userProfile.usdBalance}
+                    onVerifyTx={verifyWeb3AutoDeposit}
+                    onNotify={notify}
+                  />
                 ) : (
                   <>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                      {enabledDepositMethods.map((method) => (
-                        <button
-                          key={method.id}
-                          type="button"
-                          onClick={() => setDepNetwork(method.id)}
-                          className={`py-2 px-2.5 rounded-lg border text-xs font-semibold text-left transition-colors ${
-                            activeDepositNetworkId === method.id
-                              ? 'border-orange-500 bg-orange-500/20 text-orange-300'
-                              : 'border-slate-700 bg-slate-900/70 text-slate-300 hover:bg-slate-800'
-                          }`}
-                        >
-                          <div className="truncate">{method.name}</div>
-                          <div className="text-[10px] font-mono text-slate-400 mt-0.5 uppercase">
-                            Min ${method.minDepositUsd}
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-
-                    <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-700/70 space-y-2">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-slate-400 font-medium">
-                          {selectedDepositMethod?.name || activeDepositNetworkId} Receiving Account
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => copyValue('wallet', currentDepositWallet)}
-                          className="inline-flex items-center gap-1 text-orange-400 font-semibold"
-                        >
-                          {copiedText === 'wallet' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                          {copiedText === 'wallet' ? 'Copied' : 'Copy'}
-                        </button>
-                      </div>
-                      <div className="font-mono text-xs text-slate-100 break-all bg-slate-950/90 border border-slate-800 rounded-lg p-2.5">
-                        {currentDepositWallet}
-                      </div>
-                      {selectedDepositMethod?.instructions && (
-                        <p className="text-[11px] text-slate-400 leading-relaxed">
-                          {selectedDepositMethod.instructions}
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <h2 className="font-display font-bold text-white text-lg">
+                          Manual Deposit to Deposit Wallet
+                        </h2>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          Send USDT/SOL or local channel payment and submit your TxID for admin review.
                         </p>
-                      )}
+                      </div>
+                      <span className="px-2.5 py-1 rounded-lg bg-sky-500/15 border border-sky-500/35 font-mono text-xs text-sky-300 shrink-0 tabular-nums">
+                        ${userProfile.usdBalance.toFixed(2)}
+                      </span>
                     </div>
 
-                    <form
-                      onSubmit={async (e) => {
-                        e.preventDefault();
-                        const amt = Number(depAmount);
-                        const minReq = selectedDepositMethod?.minDepositUsd || 1;
-                        if (!Number.isFinite(amt) || amt < minReq || !depTxId.trim()) {
-                          notify(
-                            'err',
-                            `Enter at least $${minReq.toFixed(2)} USD and a valid Transaction ID / Reference.`
-                          );
-                          return;
-                        }
-                        setBusyAction(true);
-                        try {
-                          await submitCryptoDeposit({
-                            network: activeDepositNetworkId,
-                            amountUsd: amt,
-                            txId: depTxId,
-                          });
-                          setDepTxId('');
-                          notify(
-                            'ok',
-                            `Deposit submitted via ${selectedDepositMethod?.name || activeDepositNetworkId}! Super Admin will verify and credit your Vault.`
-                          );
-                        } catch (err) {
-                          notify('err', (err as Error).message);
-                        } finally {
-                          setBusyAction(false);
-                        }
-                      }}
-                      className="space-y-3"
-                    >
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-300 mb-1">
-                          Deposit Amount (USD Equivalent · Min ${selectedDepositMethod?.minDepositUsd || 1})
-                        </label>
-                        <input
-                          type="number"
-                          min={selectedDepositMethod?.minDepositUsd || 1}
-                          step="0.01"
-                          required
-                          value={depAmount}
-                          onChange={(e) => setDepAmount(e.target.value)}
-                          className="w-full px-3.5 py-2.5 rounded-lg border border-slate-700 bg-slate-900/90 text-white font-mono text-sm"
-                        />
+                    {platformConfig.depositsPaused && (
+                      <div className="p-3.5 rounded-xl bg-amber-950/60 border border-amber-500/45 text-xs text-amber-200 flex items-start gap-2">
+                        <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                        <span>Deposits are temporarily paused by administration.</span>
                       </div>
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-300 mb-1">
-                          Transaction ID / Hash / TrxID
-                        </label>
-                        <input
-                          type="text"
-                          required
-                          value={depTxId}
-                          onChange={(e) => setDepTxId(e.target.value)}
-                          placeholder="Paste confirmed TxID / Order ID / TrxID"
-                          className="w-full px-3.5 py-2.5 rounded-lg border border-slate-700 bg-slate-900/90 text-white font-mono text-sm placeholder:text-slate-500"
-                        />
+                    )}
+
+                    {enabledDepositMethods.length === 0 ? (
+                      <div className="p-4 rounded-xl bg-amber-950/50 border border-amber-700/50 text-xs text-amber-200">
+                        All deposit channels are currently paused by administration.
                       </div>
-                      <button
-                        type="submit"
-                        disabled={busyAction}
-                        className="w-full py-2.5 px-4 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-sm font-semibold"
-                      >
-                        {busyAction
-                          ? 'Submitting...'
-                          : `Submit ${selectedDepositMethod?.name || 'Deposit'}`}
-                      </button>
-                    </form>
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                          {enabledDepositMethods.map((method) => (
+                            <button
+                              key={method.id}
+                              type="button"
+                              onClick={() => setDepNetwork(method.id)}
+                              className={`py-2 px-2.5 rounded-lg border text-xs font-semibold text-left transition-colors ${
+                                activeDepositNetworkId === method.id
+                                  ? 'border-orange-500 bg-orange-500/20 text-orange-300'
+                                  : 'border-slate-700 bg-slate-900/70 text-slate-300 hover:bg-slate-800'
+                              }`}
+                            >
+                              <div className="truncate">{method.name}</div>
+                              <div className="text-[10px] font-mono text-slate-400 mt-0.5 uppercase">
+                                Min ${method.minDepositUsd}
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-700/70 space-y-2">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-slate-400 font-medium">
+                              {selectedDepositMethod?.name || activeDepositNetworkId} Receiving Account
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => copyValue('wallet', currentDepositWallet)}
+                              className="inline-flex items-center gap-1 text-orange-400 font-semibold"
+                            >
+                              {copiedText === 'wallet' ? (
+                                <Check className="w-3.5 h-3.5" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5" />
+                              )}
+                              {copiedText === 'wallet' ? 'Copied' : 'Copy'}
+                            </button>
+                          </div>
+                          <div className="font-mono text-xs text-slate-100 break-all bg-slate-950/90 border border-slate-800 rounded-lg p-2.5">
+                            {currentDepositWallet}
+                          </div>
+                          {selectedDepositMethod?.instructions && (
+                            <p className="text-[11px] text-slate-400 leading-relaxed">
+                              {selectedDepositMethod.instructions}
+                            </p>
+                          )}
+                        </div>
+
+                        <form
+                          onSubmit={async (e) => {
+                            e.preventDefault();
+                            const amt = Number(depAmount);
+                            const minReq = selectedDepositMethod?.minDepositUsd || 1;
+                            if (!Number.isFinite(amt) || amt < minReq || !depTxId.trim()) {
+                              notify(
+                                'err',
+                                `Enter at least $${minReq.toFixed(2)} USD and a valid Transaction ID / Reference.`
+                              );
+                              return;
+                            }
+                            setBusyAction(true);
+                            try {
+                              await submitCryptoDeposit({
+                                network: activeDepositNetworkId,
+                                amountUsd: amt,
+                                txId: depTxId,
+                              });
+                              setDepTxId('');
+                              notify(
+                                'ok',
+                                `Deposit submitted via ${selectedDepositMethod?.name || activeDepositNetworkId}! Super Admin will verify and credit your Vault.`
+                              );
+                            } catch (err) {
+                              notify('err', (err as Error).message);
+                            } finally {
+                              setBusyAction(false);
+                            }
+                          }}
+                          className="space-y-3"
+                        >
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-300 mb-1">
+                              Deposit Amount (USD Equivalent · Min ${selectedDepositMethod?.minDepositUsd || 1})
+                            </label>
+                            <input
+                              type="number"
+                              min={selectedDepositMethod?.minDepositUsd || 1}
+                              step="0.01"
+                              required
+                              value={depAmount}
+                              onChange={(e) => setDepAmount(e.target.value)}
+                              className="w-full px-3.5 py-2.5 rounded-lg border border-slate-700 bg-slate-900/90 text-white font-mono text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-300 mb-1">
+                              Transaction ID / Hash / TrxID
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              value={depTxId}
+                              onChange={(e) => setDepTxId(e.target.value)}
+                              placeholder="Paste confirmed TxID / Order ID / TrxID"
+                              className="w-full px-3.5 py-2.5 rounded-lg border border-slate-700 bg-slate-900/90 text-white font-mono text-sm placeholder:text-slate-500"
+                            />
+                          </div>
+                          <button
+                            type="submit"
+                            disabled={busyAction || Boolean(platformConfig.depositsPaused)}
+                            className="w-full py-2.5 px-4 rounded-lg bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white text-sm font-semibold"
+                          >
+                            {platformConfig.depositsPaused
+                              ? 'Deposits Temporarily Paused'
+                              : busyAction
+                              ? 'Submitting...'
+                              : `Submit ${selectedDepositMethod?.name || 'Deposit'}`}
+                          </button>
+                        </form>
+                      </>
+                    )}
                   </>
                 )}
               </div>
@@ -2304,11 +2481,25 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                             <td className="py-2.5 pr-3 font-mono text-slate-400 whitespace-nowrap">
                               {formatTimestamp(d.createdAt)}
                             </td>
-                            <td className="py-2.5 pr-3 font-semibold text-slate-200">{d.network.replace(/_/g, ' ')}</td>
+                            <td className="py-2.5 pr-3">
+                              <div className="font-semibold text-slate-200">
+                                {d.network.replace(/_/g, ' ')}
+                              </div>
+                              {d.verificationSource === 'web3_auto' && (
+                                <div className="text-[10px] font-mono text-emerald-400">
+                                  Web3 Auto-Verified
+                                  {typeof d.confirmations === 'number'
+                                    ? ` · ${d.confirmations} confs`
+                                    : ''}
+                                </div>
+                              )}
+                            </td>
                             <td className="py-2.5 pr-3 font-mono font-bold text-white tabular-nums">
                               ${d.amountUsd.toFixed(2)}
                             </td>
-                            <td className="py-2.5 pr-3 font-mono text-slate-400 max-w-[140px] truncate">{d.txId}</td>
+                            <td className="py-2.5 pr-3 font-mono text-slate-400 max-w-[140px] truncate">
+                              {d.txId}
+                            </td>
                             <td className="py-2.5">
                               <span
                                 className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
@@ -2341,7 +2532,10 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
               investments={investments}
               mlmCommissions={mlmCommissions}
               savedPaymentMethods={savedPaymentMethods}
+              whitelistedWallets={whitelistedWallets}
               busyAction={busyAction}
+              onRequestWithdrawalOtp={requestWithdrawalOtp}
+              onVerifyWithdrawalOtp={verifyWithdrawalOtp}
               onRequestPayout={async ({
                 amountUsd,
                 network,
@@ -2349,6 +2543,7 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                 source,
                 savePaymentMethod,
                 methodName,
+                otpVerificationToken,
               }) => {
                 setBusyAction(true);
                 try {
@@ -2358,6 +2553,7 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                     destinationAddress,
                     source,
                     settlementMode: 'pending',
+                    otpVerificationToken,
                   });
                   if (
                     savePaymentMethod &&
@@ -2377,7 +2573,7 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                   }
                   notify(
                     'ok',
-                    `Payout request for $${amountUsd.toFixed(2)} submitted and queued as Pending Review.`
+                    `Payout request for $${amountUsd.toFixed(2)} locked safely and queued for Super Admin review.`
                   );
                 } catch (err) {
                   notify('err', (err as Error).message);
@@ -2387,6 +2583,7 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                 }
               }}
               onOpenPaymentMethods={() => selectNav('payment-methods')}
+              onOpenSecurityCenter={() => selectNav('security-center')}
               onOpenCapitalWithdraw={() => selectNav('capital-withdraw')}
               onInspectBreakdown={(w) => setSelectedBreakdown(w)}
               onNotify={notify}
@@ -2504,130 +2701,149 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                     </div>
                   )}
 
-                  <form
-                    onSubmit={async (e) => {
-                      e.preventDefault();
-                      const amt = Number(wdAmount);
-                      if (!Number.isFinite(amt) || amt <= 0) {
-                        notify('err', 'Enter a valid withdrawal USD amount.');
-                        return;
-                      }
-                      setBusyAction(true);
-                      try {
-                        await withdrawInstantProfit({
-                          amountUsd: amt,
-                          network: activeWithdrawNetworkId,
-                          destinationAddress: wdAddress,
-                          source: wdSource,
-                        });
-                        if (
-                          saveAfterWithdraw &&
-                          wdAddress.trim() &&
-                          !savedPaymentMethods.some(
-                            (pm) =>
-                              pm.methodId === activeWithdrawNetworkId &&
-                              pm.accountAddress === wdAddress.trim()
-                          )
-                        ) {
-                          const methodName = selectedWithdrawMethod?.name || activeWithdrawNetworkId;
-                          await addUserPaymentMethod({
-                            label: `${methodName} Payout`,
-                            methodId: activeWithdrawNetworkId,
-                            methodName,
-                            accountAddress: wdAddress.trim(),
-                            accountHolder: userProfile.fullName,
-                            isDefault: savedPaymentMethods.length === 0,
-                          });
+                  {platformConfig.web3PaymentConfig?.require2faForWithdrawals !== false ? (
+                    <div className="p-4 rounded-xl bg-slate-900/90 border border-sky-500/35 space-y-3 text-xs">
+                      <div className="font-semibold text-sky-300 flex items-center gap-1.5">
+                        <ShieldCheck className="w-4 h-4 shrink-0" />
+                        <span>2FA Email OTP &amp; Admin-Approved Safe Withdrawal Enabled</span>
+                      </div>
+                      <p className="text-slate-300 leading-relaxed">
+                        To protect your account against unauthorized drainage, all withdrawals require 6-digit Email OTP verification and manual Super Admin review in the dedicated Withdrawal Management desk.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => selectNav('withdraw')}
+                        className="w-full py-2.5 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors"
+                      >
+                        Open 2FA Safe Withdrawal Desk
+                      </button>
+                    </div>
+                  ) : (
+                    <form
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        const amt = Number(wdAmount);
+                        if (!Number.isFinite(amt) || amt <= 0) {
+                          notify('err', 'Enter a valid withdrawal USD amount.');
+                          return;
                         }
-                        setWdAddress('');
-                        setSaveAfterWithdraw(false);
-                        notify('ok', `Payout request of $${amt.toFixed(2)} submitted and queued as Pending Review.`);
-                      } catch (err) {
-                        notify('err', (err as Error).message);
-                      } finally {
-                        setBusyAction(false);
-                      }
-                    }}
-                    className="space-y-3"
-                  >
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-300 mb-1">Profit Source</label>
-                        <select
-                          value={wdSource}
-                          onChange={(e) =>
-                            setWdSource(e.target.value as 'package_profit' | 'mlm_commission')
+                        setBusyAction(true);
+                        try {
+                          await withdrawInstantProfit({
+                            amountUsd: amt,
+                            network: activeWithdrawNetworkId,
+                            destinationAddress: wdAddress,
+                            source: wdSource,
+                          });
+                          if (
+                            saveAfterWithdraw &&
+                            wdAddress.trim() &&
+                            !savedPaymentMethods.some(
+                              (pm) =>
+                                pm.methodId === activeWithdrawNetworkId &&
+                                pm.accountAddress === wdAddress.trim()
+                            )
+                          ) {
+                            const methodName = selectedWithdrawMethod?.name || activeWithdrawNetworkId;
+                            await addUserPaymentMethod({
+                              label: `${methodName} Payout`,
+                              methodId: activeWithdrawNetworkId,
+                              methodName,
+                              accountAddress: wdAddress.trim(),
+                              accountHolder: userProfile.fullName,
+                              isDefault: savedPaymentMethods.length === 0,
+                            });
                           }
-                          className="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-900/90 text-white text-xs"
-                        >
-                          <option value="package_profit">Package AI Profit</option>
-                          <option value="mlm_commission">Referral Commission (All Plans)</option>
-                        </select>
+                          setWdAddress('');
+                          setSaveAfterWithdraw(false);
+                          notify('ok', `Payout request of $${amt.toFixed(2)} submitted and queued as Pending Review.`);
+                        } catch (err) {
+                          notify('err', (err as Error).message);
+                        } finally {
+                          setBusyAction(false);
+                        }
+                      }}
+                      className="space-y-3"
+                    >
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-300 mb-1">Profit Source</label>
+                          <select
+                            value={wdSource}
+                            onChange={(e) =>
+                              setWdSource(e.target.value as 'package_profit' | 'mlm_commission')
+                            }
+                            className="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-900/90 text-white text-xs"
+                          >
+                            <option value="package_profit">Package AI Profit</option>
+                            <option value="mlm_commission">Referral Commission (All Plans)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-300 mb-1">Payout Channel</label>
+                          <select
+                            value={activeWithdrawNetworkId}
+                            onChange={(e) => setWdNetwork(e.target.value)}
+                            className="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-900/90 text-white text-xs"
+                          >
+                            {enabledWithdrawMethods.map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                       </div>
                       <div>
-                        <label className="block text-xs font-semibold text-slate-300 mb-1">Payout Channel</label>
-                        <select
-                          value={activeWithdrawNetworkId}
-                          onChange={(e) => setWdNetwork(e.target.value)}
-                          className="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-900/90 text-white text-xs"
-                        >
-                          {enabledWithdrawMethods.map((m) => (
-                            <option key={m.id} value={m.id}>
-                              {m.name}
-                            </option>
-                          ))}
-                        </select>
+                        <label className="block text-xs font-semibold text-slate-300 mb-1">
+                          Amount (Min ${Math.max(platformConfig.minWithdrawalUsd, selectedWithdrawMethod?.minWithdrawalUsd || 0)})
+                        </label>
+                        <input
+                          type="number"
+                          min={platformConfig.minWithdrawalUsd}
+                          step="0.01"
+                          required
+                          value={wdAmount}
+                          onChange={(e) => setWdAmount(e.target.value)}
+                          className="w-full px-3.5 py-2 rounded-lg border border-slate-700 bg-slate-900/90 text-white font-mono text-sm"
+                        />
                       </div>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-300 mb-1">
-                        Amount (Min ${Math.max(platformConfig.minWithdrawalUsd, selectedWithdrawMethod?.minWithdrawalUsd || 0)})
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-300 mb-1">
+                          Destination Wallet / Account Number
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={wdAddress}
+                          onChange={(e) => setWdAddress(e.target.value)}
+                          placeholder={`Enter receiving ${selectedWithdrawMethod?.name || 'payout'} address / ID`}
+                          className="w-full px-3.5 py-2 rounded-lg border border-slate-700 bg-slate-900/90 text-white font-mono text-sm placeholder:text-slate-500"
+                        />
+                      </div>
+                      <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={saveAfterWithdraw}
+                          onChange={(e) => setSaveAfterWithdraw(e.target.checked)}
+                        />
+                        <span>Save this payout account to My Payment Methods</span>
                       </label>
-                      <input
-                        type="number"
-                        min={platformConfig.minWithdrawalUsd}
-                        step="0.01"
-                        required
-                        value={wdAmount}
-                        onChange={(e) => setWdAmount(e.target.value)}
-                        className="w-full px-3.5 py-2 rounded-lg border border-slate-700 bg-slate-900/90 text-white font-mono text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-300 mb-1">
-                        Destination Wallet / Account Number
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={wdAddress}
-                        onChange={(e) => setWdAddress(e.target.value)}
-                        placeholder={`Enter receiving ${selectedWithdrawMethod?.name || 'payout'} address / ID`}
-                        className="w-full px-3.5 py-2 rounded-lg border border-slate-700 bg-slate-900/90 text-white font-mono text-sm placeholder:text-slate-500"
-                      />
-                    </div>
-                    <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={saveAfterWithdraw}
-                        onChange={(e) => setSaveAfterWithdraw(e.target.checked)}
-                      />
-                      <span>Save this payout account to My Payment Methods</span>
-                    </label>
-                    <button
-                      type="submit"
-                      disabled={
-                        busyAction ||
-                        enabledWithdrawMethods.length === 0 ||
-                        Boolean(platformConfig.withdrawalsPaused)
-                      }
-                      className="w-full py-2.5 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold"
-                    >
-                      {platformConfig.withdrawalsPaused
-                        ? 'Withdrawals Temporarily Paused'
-                        : 'Submit Payout Request'}
-                    </button>
-                  </form>
+                      <button
+                        type="submit"
+                        disabled={
+                          busyAction ||
+                          enabledWithdrawMethods.length === 0 ||
+                          Boolean(platformConfig.withdrawalsPaused)
+                        }
+                        className="w-full py-2.5 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold"
+                      >
+                        {platformConfig.withdrawalsPaused
+                          ? 'Withdrawals Temporarily Paused'
+                          : 'Submit Payout Request'}
+                      </button>
+                    </form>
+                  )}
                 </div>
 
                 {/* P2P Dollar Transfer */}
@@ -3147,6 +3363,20 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
             />
           )}
 
+          {/* VIEW: TOP PERFORMERS LEADERBOARD */}
+          {activeNav === 'leaderboard' && (
+            <TopPerformersLeaderboard
+              userProfile={userProfile}
+              platformConfig={platformConfig}
+              mlmCommissions={mlmCommissions}
+              downlineReferrals={downlineReferrals}
+              investments={investments}
+              forexTrades={forexTrades}
+              onOpenReferrals={() => selectNav('referral-network')}
+              onOpenTrading={() => selectNav('forex-market')}
+            />
+          )}
+
           {/* VIEW: HOW IT WORKS & MOTION VIDEO GUIDE */}
           {activeNav === 'video-guide' && (
             <HowItWorksGuideModule
@@ -3461,6 +3691,34 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
           {/* VIEW: FOREX & CRYPTO NEWS HUB */}
           {activeNav === 'forex-news' && <ForexNewsHub />}
 
+          {/* VIEW: DAILY CHECK-IN STREAK & PLATFORM MISSIONS */}
+          {activeNav === 'rewards-missions' && (
+            <UserRewardsMissionsPanel
+              userProfile={userProfile}
+              missionProfile={missionProfile}
+              investments={investments}
+              downlineReferrals={downlineReferrals}
+              whitelistedWallets={whitelistedWallets}
+              onClaimDailyCheckIn={claimDailyCheckIn}
+              onClaimMissionReward={claimMissionReward}
+              onNavigateToTab={(tab) => selectNav(tab as SidebarSection)}
+              onNotify={notify}
+            />
+          )}
+
+          {/* VIEW: ACCOUNT SECURITY, WITHDRAWAL WHITELIST & LOGIN HISTORY */}
+          {activeNav === 'security-center' && authUser && (
+            <UserSecurityCenter
+              userProfile={userProfile}
+              whitelistedWallets={whitelistedWallets}
+              loginActivities={loginActivities}
+              getIdToken={() => authUser.getIdToken()}
+              onToggleStrictMode={toggleWhitelistStrictMode}
+              onToggle24hLock={toggleWhitelist24hLock}
+              onNotify={notify}
+            />
+          )}
+
           {/* VIEW: TRACK TICKET */}
           {activeNav === 'track-ticket' && (
             <TrackTicketView
@@ -3655,6 +3913,12 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
         depositWallets={platformConfig.depositWallets}
         currentDepositBalance={userProfile.usdBalance}
         initialNetwork={activeDepositNetworkId}
+        depositsPaused={Boolean(platformConfig.depositsPaused)}
+        autoDepositEnabled={platformConfig.web3PaymentConfig?.autoDepositEnabled !== false}
+        onOpenWeb3AutoDeposit={() => {
+          setDepositMode('web3');
+          selectNav('deposit');
+        }}
         onSubmitDeposit={submitCryptoDeposit}
         onNotify={notify}
       />

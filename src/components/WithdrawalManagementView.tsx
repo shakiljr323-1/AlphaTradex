@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -8,8 +8,12 @@ import {
   Clock,
   Copy,
   CreditCard,
+  ExternalLink,
   Filter,
+  KeyRound,
   Loader2,
+  Lock,
+  Mail,
   Search,
   ShieldCheck,
   Star,
@@ -17,12 +21,14 @@ import {
   Wallet,
   XCircle,
 } from 'lucide-react';
+import { DEFAULT_WEB3_PAYMENT_CONFIG } from '../constants/defaults';
 import {
   Investment,
   MlmCommission,
   PlatformConfig,
   UserPaymentMethod,
   UserProfile,
+  WhitelistedWallet,
   Withdrawal,
 } from '../types/platform';
 import { formatTimestamp } from '../utils/investmentMath';
@@ -35,6 +41,29 @@ interface WithdrawalManagementViewProps {
   mlmCommissions: MlmCommission[];
   savedPaymentMethods: UserPaymentMethod[];
   busyAction: boolean;
+  onRequestWithdrawalOtp: (params: {
+    amountUsd: number;
+    network: string;
+    destinationAddress: string;
+  }) => Promise<{
+    ok: boolean;
+    emailMasked: string;
+    expiresInSeconds: number;
+    deliveryMode: string;
+    previewCode?: string;
+    message: string;
+  }>;
+  onVerifyWithdrawalOtp: (params: {
+    code: string;
+    amountUsd: number;
+    network: string;
+    destinationAddress: string;
+  }) => Promise<{
+    ok: boolean;
+    verified: boolean;
+    otpVerificationToken: string;
+    expiresAtIso: string;
+  }>;
   onRequestPayout: (params: {
     amountUsd: number;
     network: string;
@@ -42,8 +71,11 @@ interface WithdrawalManagementViewProps {
     source: 'package_profit' | 'mlm_commission' | 'mentor_profit';
     savePaymentMethod: boolean;
     methodName: string;
+    otpVerificationToken?: string;
   }) => Promise<void>;
+  whitelistedWallets?: WhitelistedWallet[];
   onOpenPaymentMethods: () => void;
+  onOpenSecurityCenter?: () => void;
   onOpenCapitalWithdraw: () => void;
   onInspectBreakdown: (w: Withdrawal) => void;
   onNotify: (type: 'ok' | 'err', text: string) => void;
@@ -91,13 +123,25 @@ export const WithdrawalManagementView: React.FC<WithdrawalManagementViewProps> =
   investments,
   mlmCommissions,
   savedPaymentMethods,
+  whitelistedWallets = [],
   busyAction,
+  onRequestWithdrawalOtp,
+  onVerifyWithdrawalOtp,
   onRequestPayout,
   onOpenPaymentMethods,
+  onOpenSecurityCenter,
   onOpenCapitalWithdraw,
   onInspectBreakdown,
   onNotify,
 }) => {
+  const web3Config = useMemo(
+    () => ({
+      ...DEFAULT_WEB3_PAYMENT_CONFIG,
+      ...(platformConfig.web3PaymentConfig || {}),
+    }),
+    [platformConfig.web3PaymentConfig]
+  );
+
   const enabledWithdrawMethods = useMemo(
     () => (platformConfig.paymentMethods || []).filter((m) => m.enabled && m.allowWithdrawal),
     [platformConfig.paymentMethods]
@@ -113,13 +157,23 @@ export const WithdrawalManagementView: React.FC<WithdrawalManagementViewProps> =
     defaultPm?.methodId || enabledWithdrawMethods[0]?.id || 'USDT_TRC20'
   );
   const [amountInput, setAmountInput] = useState<string>(
-    String(Math.max(platformConfig.minWithdrawalUsd || 10, 10))
+    String(Math.max(platformConfig.minWithdrawalUsd || 10, web3Config.minWithdrawalUsd || 10, 10))
   );
   const [destinationAddress, setDestinationAddress] = useState<string>(
     defaultPm?.accountAddress || ''
   );
   const [savePaymentMethod, setSavePaymentMethod] = useState<boolean>(false);
   const [submitting, setSubmitting] = useState<boolean>(false);
+
+  // 2FA Email OTP state bound to exact withdrawal parameters
+  const [otpSending, setOtpSending] = useState(false);
+  const [otpVerifying, setOtpVerifying] = useState(false);
+  const [otpRequestedForSig, setOtpRequestedForSig] = useState('');
+  const [otpMaskedEmail, setOtpMaskedEmail] = useState('');
+  const [otpPreviewCode, setOtpPreviewCode] = useState('');
+  const [otpCodeInput, setOtpCodeInput] = useState('');
+  const [verifiedOtpToken, setVerifiedOtpToken] = useState('');
+  const [verifiedOtpSig, setVerifiedOtpSig] = useState('');
 
   // Tracker filter state
   const [statusTab, setStatusTab] = useState<StatusTab>('all');
@@ -139,8 +193,32 @@ export const WithdrawalManagementView: React.FC<WithdrawalManagementViewProps> =
 
   const effectiveMinUsd = Math.max(
     Number(platformConfig.minWithdrawalUsd) || 10,
+    Number(web3Config.minWithdrawalUsd) || 10,
     Number(selectedMethod?.minWithdrawalUsd) || 0
   );
+
+  const effectiveMaxUsd = Math.max(
+    effectiveMinUsd,
+    Number(web3Config.maxWithdrawalUsd) || 25000
+  );
+
+  const feePercent = Math.max(0, Number(web3Config.withdrawalFeePercent) || 0);
+  const flatFeeUsd = Math.max(0, Number(web3Config.withdrawalFlatFeeUsd) || 0);
+  const parsedAmount = Number(amountInput) || 0;
+  const computedFeeUsd =
+    parsedAmount > 0
+      ? Math.round(((parsedAmount * feePercent) / 100 + flatFeeUsd) * 100) / 100
+      : 0;
+  const computedNetPayoutUsd = Math.max(
+    0,
+    Math.round((parsedAmount - computedFeeUsd) * 100) / 100
+  );
+
+  const require2fa = Boolean(web3Config.require2faForWithdrawals);
+  const currentRequestSig = `${(Number.isFinite(parsedAmount) ? parsedAmount : 0).toFixed(2)}|${activeNetworkId}|${destinationAddress.trim()}`;
+  const isOtpVerifiedForCurrent =
+    Boolean(verifiedOtpToken) && verifiedOtpSig === currentRequestSig;
+  const isOtpSentForCurrent = otpRequestedForSig === currentRequestSig;
 
   const totalReferralEarned = useMemo(
     () => mlmCommissions.reduce((acc, c) => acc + (Number(c.commissionUsd) || 0), 0),
@@ -210,9 +288,70 @@ export const WithdrawalManagementView: React.FC<WithdrawalManagementViewProps> =
     });
   }, [withdrawals, statusTab, sourceFilter, searchQuery]);
 
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
+
   const kycBlockedForWithdrawals =
-    Boolean(platformConfig.kycSettings?.requireKycForWithdrawals) &&
+    (Boolean(platformConfig.kycSettings?.requireKycForWithdrawals) ||
+      Boolean(web3Config.requireKycForWithdrawals)) &&
     userProfile.kycStatus !== 'approved';
+
+  const unlockedWhitelistedWallets = useMemo(
+    () => whitelistedWallets.filter((w) => Number(w.unlockAtMs || 0) <= nowMs),
+    [whitelistedWallets, nowMs]
+  );
+
+  const lockedWhitelistedWallets = useMemo(
+    () => whitelistedWallets.filter((w) => Number(w.unlockAtMs || 0) > nowMs),
+    [whitelistedWallets, nowMs]
+  );
+
+  const strictWhitelistEnabled = Boolean(userProfile.whitelistStrictMode);
+
+  const doesWalletMatchNetwork = (w: WhitelistedWallet, netId: string): boolean => {
+    if (netId === 'USDT_BEP20') return w.network === 'BEP20';
+    if (netId === 'USDT_POLYGON') return w.network === 'POLYGON';
+    if (netId === 'USDT_TRC20') return w.network === 'TRC20';
+    if (netId === 'USDT_ERC20') return w.network === 'ERC20';
+    return true;
+  };
+
+  const doesWalletMatchAddress = (w: WhitelistedWallet, addr: string): boolean => {
+    const clean = addr.trim();
+    if (!clean) return false;
+    if (w.network === 'TRC20') return w.address.trim() === clean;
+    return w.address.trim().toLowerCase() === clean.toLowerCase();
+  };
+
+  const matchesWhitelistForCurrent = useMemo(() => {
+    if (!destinationAddress.trim()) return false;
+    return unlockedWhitelistedWallets.some(
+      (w) => doesWalletMatchNetwork(w, activeNetworkId) && doesWalletMatchAddress(w, destinationAddress)
+    );
+  }, [destinationAddress, unlockedWhitelistedWallets, activeNetworkId]);
+
+  const lockedMatchingWallet = useMemo(() => {
+    if (!destinationAddress.trim()) return null;
+    return (
+      lockedWhitelistedWallets.find(
+        (w) => doesWalletMatchNetwork(w, activeNetworkId) && doesWalletMatchAddress(w, destinationAddress)
+      ) || null
+    );
+  }, [destinationAddress, lockedWhitelistedWallets, activeNetworkId]);
+
+  const formatCountdownShort = (unlockAtMs: number): string => {
+    const diff = Math.max(0, unlockAtMs - nowMs);
+    const hrs = Math.floor(diff / (1000 * 60 * 60));
+    const mins = Math.ceil((diff % (1000 * 60 * 60)) / (1000 * 60));
+    if (hrs > 0) return `${hrs}h ${mins}m`;
+    return `${Math.max(1, mins)}m`;
+  };
+
+  const strictWhitelistBlocked = strictWhitelistEnabled && !matchesWhitelistForCurrent;
+  const whitelistPolicyBlocked = strictWhitelistBlocked || Boolean(lockedMatchingWallet);
 
   const handleCopy = (key: string, val: string) => {
     navigator.clipboard?.writeText(val).catch(() => {});
@@ -222,8 +361,88 @@ export const WithdrawalManagementView: React.FC<WithdrawalManagementViewProps> =
 
   const applyQuickPercent = (pct: number) => {
     const raw = (userProfile.profitBalance * pct) / 100;
-    const rounded = Math.floor(raw * 100) / 100;
+    const capped = Math.min(raw, effectiveMaxUsd);
+    const rounded = Math.floor(capped * 100) / 100;
     setAmountInput(rounded > 0 ? rounded.toFixed(2) : String(effectiveMinUsd));
+  };
+
+  const handleSendOtp = async () => {
+    const amt = Number(amountInput);
+    if (!Number.isFinite(amt) || amt < effectiveMinUsd) {
+      onNotify('err', `Minimum withdrawal is $${effectiveMinUsd.toFixed(2)}.`);
+      return;
+    }
+    if (amt > effectiveMaxUsd) {
+      onNotify('err', `Maximum single withdrawal is $${effectiveMaxUsd.toLocaleString()}.`);
+      return;
+    }
+    if (amt > userProfile.profitBalance) {
+      onNotify('err', 'Insufficient withdrawable balance in your Income Wallet.');
+      return;
+    }
+    if (!destinationAddress.trim()) {
+      onNotify('err', 'Enter your destination wallet address before requesting a 2FA code.');
+      return;
+    }
+    if (lockedMatchingWallet) {
+      onNotify(
+        'err',
+        `24-Hour Security Lock active for "${lockedMatchingWallet.label}". Withdrawals to this address unlock in ${formatCountdownShort(lockedMatchingWallet.unlockAtMs)}.`
+      );
+      return;
+    }
+    if (strictWhitelistBlocked) {
+      onNotify(
+        'err',
+        'Strict Withdrawal Whitelist Lock is active. Select an unlocked whitelisted address or add it via Email OTP under Security & Whitelist.'
+      );
+      return;
+    }
+
+    setOtpSending(true);
+    try {
+      const res = await onRequestWithdrawalOtp({
+        amountUsd: amt,
+        network: activeNetworkId,
+        destinationAddress: destinationAddress.trim(),
+      });
+      setOtpRequestedForSig(currentRequestSig);
+      setOtpMaskedEmail(res.emailMasked || '');
+      setOtpPreviewCode(res.previewCode || '');
+      setOtpCodeInput('');
+      setVerifiedOtpToken('');
+      setVerifiedOtpSig('');
+      onNotify('ok', res.message || `6-digit 2FA verification code sent to ${res.emailMasked}.`);
+    } catch (err) {
+      onNotify('err', (err as Error).message);
+    } finally {
+      setOtpSending(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    const cleanCode = otpCodeInput.trim();
+    if (!/^\d{6}$/.test(cleanCode)) {
+      onNotify('err', 'Enter the 6-digit numeric verification code.');
+      return;
+    }
+    const amt = Number(amountInput);
+    setOtpVerifying(true);
+    try {
+      const res = await onVerifyWithdrawalOtp({
+        code: cleanCode,
+        amountUsd: amt,
+        network: activeNetworkId,
+        destinationAddress: destinationAddress.trim(),
+      });
+      setVerifiedOtpToken(res.otpVerificationToken);
+      setVerifiedOtpSig(currentRequestSig);
+      onNotify('ok', '2FA verification confirmed. You can now submit your safe withdrawal request.');
+    } catch (err) {
+      onNotify('err', (err as Error).message);
+    } finally {
+      setOtpVerifying(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -237,12 +456,38 @@ export const WithdrawalManagementView: React.FC<WithdrawalManagementViewProps> =
       onNotify('err', `Minimum withdrawal is $${effectiveMinUsd.toFixed(2)}.`);
       return;
     }
+    if (amt > effectiveMaxUsd) {
+      onNotify('err', `Maximum single withdrawal is $${effectiveMaxUsd.toLocaleString()}.`);
+      return;
+    }
     if (amt > userProfile.profitBalance) {
       onNotify('err', 'Insufficient withdrawable balance in your Income Wallet.');
       return;
     }
+    if (computedNetPayoutUsd <= 0) {
+      onNotify('err', 'Withdrawal amount must exceed platform network fees.');
+      return;
+    }
     if (!destinationAddress.trim()) {
       onNotify('err', 'Enter a valid destination wallet address or payout account.');
+      return;
+    }
+    if (lockedMatchingWallet) {
+      onNotify(
+        'err',
+        `24-Hour Security Lock active for "${lockedMatchingWallet.label}". Withdrawals unlock in ${formatCountdownShort(lockedMatchingWallet.unlockAtMs)}.`
+      );
+      return;
+    }
+    if (strictWhitelistBlocked) {
+      onNotify(
+        'err',
+        'Strict Withdrawal Whitelist Lock is enabled. Only unlocked whitelisted addresses can receive payouts.'
+      );
+      return;
+    }
+    if (require2fa && !isOtpVerifiedForCurrent) {
+      onNotify('err', 'Complete the 6-digit Email OTP / 2FA verification step before submitting.');
       return;
     }
 
@@ -255,8 +500,14 @@ export const WithdrawalManagementView: React.FC<WithdrawalManagementViewProps> =
         source: payoutSource,
         savePaymentMethod,
         methodName: selectedMethod?.name || activeNetworkId,
+        otpVerificationToken: require2fa ? verifiedOtpToken : undefined,
       });
       setSavePaymentMethod(false);
+      setVerifiedOtpToken('');
+      setVerifiedOtpSig('');
+      setOtpRequestedForSig('');
+      setOtpCodeInput('');
+      setOtpPreviewCode('');
       setStatusTab('pending');
     } finally {
       setSubmitting(false);
@@ -382,14 +633,15 @@ export const WithdrawalManagementView: React.FC<WithdrawalManagementViewProps> =
         <div className="xl:col-span-5 bg-[#0B111E]/82 backdrop-blur-md border border-slate-700/75 rounded-2xl p-6 space-y-5 shadow-xl">
           <div className="flex items-start justify-between gap-3 pb-4 border-b border-slate-800">
             <div>
-              <h3 className="font-display font-bold text-white text-lg">Request New Payout</h3>
+              <h3 className="font-display font-bold text-white text-lg">Request Safe Payout</h3>
               <p className="text-xs text-slate-400 mt-0.5">
-                Min ${effectiveMinUsd.toFixed(2)} · Funds reserve immediately &amp; move to Pending
-                Review
+                Min ${effectiveMinUsd.toFixed(2)} · Max ${effectiveMaxUsd.toLocaleString()} · Admin-Reviewed Hold
               </p>
             </div>
             <span className="px-2.5 py-1 rounded-md border border-emerald-500/35 bg-emerald-500/10 text-[11px] font-mono font-semibold text-emerald-300 shrink-0">
-              0% Platform Fee
+              {feePercent === 0 && flatFeeUsd === 0
+                ? '0% Platform Fee'
+                : `${feePercent > 0 ? `${feePercent}%` : ''}${feePercent > 0 && flatFeeUsd > 0 ? ' + ' : ''}${flatFeeUsd > 0 ? `$${flatFeeUsd.toFixed(2)}` : ''} Fee`}
             </span>
           </div>
 
@@ -464,6 +716,115 @@ export const WithdrawalManagementView: React.FC<WithdrawalManagementViewProps> =
                   </p>
                 </button>
               </div>
+            </div>
+
+            {/* Whitelisted Anti-Fraud Addresses Quick-Select */}
+            <div
+              className={`p-3 rounded-xl border space-y-2 ${
+                whitelistPolicyBlocked
+                  ? 'bg-amber-950/35 border-amber-500/45'
+                  : 'bg-emerald-950/25 border-emerald-500/35'
+              }`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-[11px] font-bold text-emerald-300 inline-flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>
+                    Trusted USDT Whitelist ({unlockedWhitelistedWallets.length} Ready
+                    {lockedWhitelistedWallets.length > 0
+                      ? `, ${lockedWhitelistedWallets.length} in 24h Lock`
+                      : ''}
+                    ){strictWhitelistEnabled ? ' · Strict Lock ON' : ''}
+                  </span>
+                </div>
+                {onOpenSecurityCenter && (
+                  <button
+                    type="button"
+                    onClick={onOpenSecurityCenter}
+                    className="text-[11px] font-semibold text-amber-300 hover:underline"
+                  >
+                    {whitelistedWallets.length === 0 ? 'Set Up Whitelist →' : 'Manage Whitelist →'}
+                  </button>
+                )}
+              </div>
+
+              {(unlockedWhitelistedWallets.length > 0 || lockedWhitelistedWallets.length > 0) ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {unlockedWhitelistedWallets.map((wl) => {
+                    const mappedNetworkId =
+                      wl.network === 'BEP20'
+                        ? 'USDT_BEP20'
+                        : wl.network === 'POLYGON'
+                        ? 'USDT_POLYGON'
+                        : wl.network === 'ERC20'
+                        ? 'USDT_ERC20'
+                        : 'USDT_TRC20';
+                    const active = doesWalletMatchAddress(wl, destinationAddress);
+                    return (
+                      <button
+                        key={wl.id}
+                        type="button"
+                        onClick={() => {
+                          if (enabledWithdrawMethods.some((m) => m.id === mappedNetworkId)) {
+                            setNetworkId(mappedNetworkId);
+                          }
+                          setDestinationAddress(wl.address);
+                        }}
+                        className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold inline-flex items-center gap-1.5 transition-colors ${
+                          active
+                            ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
+                            : 'border-slate-700 bg-slate-900/90 text-slate-200 hover:border-emerald-500/60'
+                        }`}
+                      >
+                        <Lock className="w-3 h-3 text-emerald-400" />
+                        <span>{wl.label}</span>
+                        <span className="font-mono text-[10px] text-slate-400">({wl.network})</span>
+                      </button>
+                    );
+                  })}
+
+                  {lockedWhitelistedWallets.map((wl) => (
+                    <span
+                      key={wl.id}
+                      title={`24-hour security lock active — unlocks in ${formatCountdownShort(wl.unlockAtMs)}`}
+                      className="px-2.5 py-1 rounded-lg border border-amber-500/40 bg-amber-950/40 text-amber-200/90 text-[11px] font-semibold inline-flex items-center gap-1.5 cursor-not-allowed opacity-85"
+                    >
+                      <Clock className="w-3 h-3 text-amber-400" />
+                      <span>{wl.label}</span>
+                      <span className="font-mono text-[10px] text-amber-300">
+                        ({wl.network} · {formatCountdownShort(wl.unlockAtMs)})
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-[11px] text-slate-300/90">
+                  {strictWhitelistEnabled
+                    ? 'Strict Whitelist Lock is enabled, but you have no unlocked whitelisted wallet yet. Add and Email-OTP verify a trusted USDT address under Security & Whitelist.'
+                    : 'Save your trusted USDT addresses with Email OTP and optional 24-hour lock delay in Security & Whitelist for faster, safer payouts.'}
+                </p>
+              )}
+
+              {lockedMatchingWallet && (
+                <p className="text-[11px] text-amber-300 flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 shrink-0" />
+                  <span>
+                    24-Hour Security Lock active for &ldquo;{lockedMatchingWallet.label}&rdquo;.
+                    Withdrawals to this address unlock in{' '}
+                    <strong>{formatCountdownShort(lockedMatchingWallet.unlockAtMs)}</strong>.
+                  </span>
+                </p>
+              )}
+
+              {!lockedMatchingWallet && strictWhitelistBlocked && unlockedWhitelistedWallets.length > 0 && (
+                <p className="text-[11px] text-amber-300 flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                  <span>
+                    Current address is not in your active whitelist for this network. Select one of
+                    the verified addresses above to proceed.
+                  </span>
+                </p>
+              )}
             </div>
 
             {/* Saved Payment Methods Quick-Fill */}
@@ -576,6 +937,114 @@ export const WithdrawalManagementView: React.FC<WithdrawalManagementViewProps> =
               <span>Save this payout destination to My Payment Methods</span>
             </label>
 
+            {/* Fee & Net Payout Summary */}
+            <div className="p-3.5 rounded-xl bg-slate-950/85 border border-slate-800 space-y-1.5 text-xs font-mono">
+              <div className="flex items-center justify-between text-slate-400">
+                <span>Requested Amount (Locked Hold)</span>
+                <span className="text-slate-200 tabular-nums">${parsedAmount.toFixed(2)}</span>
+              </div>
+              <div className="flex items-center justify-between text-slate-400">
+                <span>
+                  Withdrawal Fee ({feePercent}%{flatFeeUsd > 0 ? ` + $${flatFeeUsd.toFixed(2)}` : ''})
+                </span>
+                <span className="text-amber-300 tabular-nums">-${computedFeeUsd.toFixed(2)}</span>
+              </div>
+              <div className="flex items-center justify-between pt-1.5 border-t border-slate-800 font-bold text-sm">
+                <span className="text-slate-200 font-sans text-xs">Net Payout to Wallet</span>
+                <span className="text-emerald-400 tabular-nums">${computedNetPayoutUsd.toFixed(2)}</span>
+              </div>
+            </div>
+
+            {/* Step 5: Mandatory Email OTP / 2FA Anti-Drain Verification */}
+            {require2fa && (
+              <div className="p-3.5 rounded-xl bg-slate-900/90 border border-sky-500/35 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-xs font-bold text-sky-300 flex items-center gap-1.5">
+                    <KeyRound className="w-3.5 h-3.5" />
+                    <span>5. Email OTP / 2FA Security Check</span>
+                  </div>
+                  {isOtpVerifiedForCurrent ? (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-mono font-bold text-emerald-400">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      Verified
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-mono text-amber-300">
+                      <Lock className="w-3 h-3" />
+                      Required
+                    </span>
+                  )}
+                </div>
+
+                {isOtpVerifiedForCurrent ? (
+                  <p className="text-[11px] text-emerald-300/90 leading-relaxed">
+                    2FA verified for ${parsedAmount.toFixed(2)} to{' '}
+                    <span className="font-mono">{destinationAddress.trim().slice(0, 14)}...</span>.
+                    Editing amount or address will require a fresh code.
+                  </p>
+                ) : (
+                  <>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <button
+                        type="button"
+                        disabled={
+                          otpSending ||
+                          Boolean(platformConfig.withdrawalsPaused) ||
+                          kycBlockedForWithdrawals
+                        }
+                        onClick={() => void handleSendOtp()}
+                        className="px-3 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 shrink-0"
+                      >
+                        {otpSending ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Mail className="w-3.5 h-3.5" />
+                        )}
+                        <span>{isOtpSentForCurrent ? 'Resend 2FA Code' : 'Send 6-Digit Email OTP'}</span>
+                      </button>
+                      <span className="text-[11px] text-slate-400 self-center">
+                        {isOtpSentForCurrent && otpMaskedEmail
+                          ? `Sent to ${otpMaskedEmail} (valid 5 min)`
+                          : 'Bound to exact amount & destination wallet'}
+                      </span>
+                    </div>
+
+                    {isOtpSentForCurrent && (
+                      <div className="space-y-2 pt-1">
+                        {otpPreviewCode && (
+                          <div className="px-3 py-2 rounded-lg bg-amber-950/60 border border-amber-500/40 text-[11px] text-amber-200 flex items-center justify-between gap-2">
+                            <span>Instant Preview 2FA Code (SMTP unconfigured):</span>
+                            <strong className="font-mono text-sm tracking-widest text-amber-300">
+                              {otpPreviewCode}
+                            </strong>
+                          </div>
+                        )}
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            maxLength={6}
+                            value={otpCodeInput}
+                            onChange={(e) => setOtpCodeInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                            placeholder="Enter 6-digit OTP"
+                            className="flex-1 px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-white font-mono text-sm tracking-widest placeholder:text-slate-500 focus:outline-none focus:border-sky-500"
+                          />
+                          <button
+                            type="button"
+                            disabled={otpVerifying || otpCodeInput.length !== 6}
+                            onClick={() => void handleVerifyOtp()}
+                            className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold shrink-0"
+                          >
+                            {otpVerifying ? 'Checking...' : 'Verify Code'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
             <button
               type="submit"
               disabled={
@@ -583,17 +1052,24 @@ export const WithdrawalManagementView: React.FC<WithdrawalManagementViewProps> =
                 busyAction ||
                 enabledWithdrawMethods.length === 0 ||
                 Boolean(platformConfig.withdrawalsPaused) ||
-                kycBlockedForWithdrawals
+                kycBlockedForWithdrawals ||
+                whitelistPolicyBlocked ||
+                (require2fa && !isOtpVerifiedForCurrent)
               }
               className="w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold inline-flex items-center justify-center gap-2 transition-colors shadow-lg"
             >
               {submitting || busyAction ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Submitting Payout Request...</span>
+                  <span>Locking Funds &amp; Submitting...</span>
                 </>
               ) : platformConfig.withdrawalsPaused ? (
                 <span>Withdrawals Temporarily Paused</span>
+              ) : require2fa && !isOtpVerifiedForCurrent ? (
+                <>
+                  <Lock className="w-4 h-4" />
+                  <span>Complete 2FA Verification to Submit</span>
+                </>
               ) : (
                 <>
                   <ArrowUpRight className="w-4 h-4" />
@@ -603,6 +1079,9 @@ export const WithdrawalManagementView: React.FC<WithdrawalManagementViewProps> =
                 </>
               )}
             </button>
+            <p className="text-[11px] text-slate-400 text-center leading-relaxed">
+              Anti-Drain Protection: Requested funds are held securely and require manual Super Admin approval before blockchain settlement.
+            </p>
           </form>
         </div>
 
@@ -741,6 +1220,12 @@ export const WithdrawalManagementView: React.FC<WithdrawalManagementViewProps> =
                               Rejected
                             </span>
                           )}
+                          {w.twoFactorVerified && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-sky-500/35 bg-sky-500/10 text-sky-300 text-[10px] font-mono font-semibold">
+                              <ShieldCheck className="w-3 h-3" />
+                              2FA
+                            </span>
+                          )}
                         </div>
 
                         <div className="text-xs font-mono text-slate-400 flex flex-wrap items-center gap-2">
@@ -766,6 +1251,11 @@ export const WithdrawalManagementView: React.FC<WithdrawalManagementViewProps> =
                         <div className="font-mono font-extrabold text-lg text-white tabular-nums">
                           ${Number(w.amountUsd).toFixed(2)}
                         </div>
+                        {typeof w.netPayoutUsd === 'number' && typeof w.feeUsd === 'number' && w.feeUsd > 0 && (
+                          <div className="text-[10px] font-mono text-emerald-300 tabular-nums">
+                            Net ${w.netPayoutUsd.toFixed(2)} (Fee ${w.feeUsd.toFixed(2)})
+                          </div>
+                        )}
                         <div className="text-[11px] font-mono text-slate-400">
                           {w.network.replace(/_/g, ' ')}
                         </div>
@@ -838,6 +1328,44 @@ export const WithdrawalManagementView: React.FC<WithdrawalManagementViewProps> =
                         </button>
                       )}
                     </div>
+
+                    {w.payoutTxHash && (
+                      <div className="p-2.5 rounded-lg bg-emerald-950/35 border border-emerald-500/30 text-[11px] text-emerald-200 flex flex-wrap items-center justify-between gap-2">
+                        <span className="min-w-0 break-all">
+                          <strong className="text-emerald-400">Payout TxHash:</strong>{' '}
+                          <span className="font-mono text-white">{w.payoutTxHash}</span>
+                        </span>
+                        <div className="inline-flex items-center gap-2 shrink-0">
+                          {w.payoutTxHash.startsWith('0x') && (
+                            <a
+                              href={
+                                w.network.includes('POLYGON')
+                                  ? `https://polygonscan.com/tx/${w.payoutTxHash}`
+                                  : `https://bscscan.com/tx/${w.payoutTxHash}`
+                              }
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-sky-300 hover:underline inline-flex items-center gap-1"
+                            >
+                              <span>Explorer</span>
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleCopy(`tx-${w.id}`, w.payoutTxHash || '')}
+                            className="text-emerald-300 hover:text-white inline-flex items-center gap-1"
+                          >
+                            {copiedId === `tx-${w.id}` ? (
+                              <Check className="w-3 h-3 text-emerald-400" />
+                            ) : (
+                              <Copy className="w-3 h-3" />
+                            )}
+                            <span>{copiedId === `tx-${w.id}` ? 'Copied' : 'Copy'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
 
                     {w.adminNote && (
                       <div className="p-2.5 rounded-lg bg-slate-950/80 border border-slate-800 text-[11px] text-slate-300 flex flex-wrap items-center justify-between gap-2">

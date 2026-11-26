@@ -239,6 +239,7 @@ export interface PlatformConfig {
   eliteCapitalLockDays: number;
   totalProfitDays: number;
   globalPaused: boolean;
+  depositsPaused?: boolean;
   withdrawalsPaused?: boolean;
   signupsPaused?: boolean;
   p2pPaused?: boolean;
@@ -259,8 +260,214 @@ export interface PlatformConfig {
   kycSettings?: GlobalKycSettings;
   marketingCardsConfig?: MarketingCardsConfig;
   howItWorksConfig?: HowItWorksConfig;
+  leaderboardConfig?: LeaderboardConfig;
+  web3PaymentConfig?: Web3PaymentConfig;
   updatedAt?: unknown;
 }
+
+export type Web3ChainKey = 'BEP20' | 'POLYGON';
+
+export interface Web3PaymentConfig {
+  autoDepositEnabled: boolean;
+  bep20Enabled: boolean;
+  polygonEnabled: boolean;
+  bep20ReceivingAddress: string;
+  polygonReceivingAddress: string;
+  trc20ReceivingAddress: string;
+  minConfirmationsBsc: number;
+  minConfirmationsPolygon: number;
+  minDepositUsd: number;
+  maxDepositUsd: number;
+  minWithdrawalUsd: number;
+  maxWithdrawalUsd: number;
+  withdrawalFeePercent: number;
+  withdrawalFlatFeeUsd: number;
+  require2faForWithdrawals: boolean;
+  requireKycForWithdrawals: boolean;
+  requirePayoutTxHashOnApprove: boolean;
+  walletConnectProjectId: string;
+}
+
+export interface Web3VerifiedTx {
+  txKey: string;
+  txHash: string;
+  network: Web3ChainKey;
+  chainId: number;
+  uid: string;
+  userEmail: string;
+  fromAddress: string;
+  toAddress: string;
+  tokenContract: string;
+  amountUsd: number;
+  confirmations: number;
+  blockNumber: number;
+  depositId: string;
+  verifiedAtIso: string;
+  createdAt?: unknown;
+}
+
+export interface WalletTransaction {
+  id: string;
+  uid: string;
+  userEmail: string;
+  userName: string;
+  type:
+    | 'web3_auto_deposit'
+    | 'manual_deposit_approved'
+    | 'withdrawal_hold'
+    | 'withdrawal_paid'
+    | 'withdrawal_refund';
+  wallet: 'deposit_wallet' | 'income_wallet';
+  direction: 'credit' | 'debit' | 'hold' | 'release';
+  amountUsd: number;
+  feeUsd: number;
+  netAmountUsd: number;
+  network: string;
+  txHash: string;
+  referenceId: string;
+  status: 'confirmed' | 'pending' | 'approved' | 'rejected' | 'refunded';
+  details: string;
+  createdAt?: unknown;
+}
+
+export interface SecurityAuditLog {
+  id: string;
+  actorUid: string;
+  actorEmail: string;
+  actorRole: 'user' | 'admin' | 'system_web3_verifier';
+  eventType:
+    | 'WEB3_AUTO_DEPOSIT_CREDITED'
+    | 'WITHDRAWAL_REQUESTED_2FA'
+    | 'WITHDRAWAL_APPROVED_PAID'
+    | 'WITHDRAWAL_REJECTED_REFUNDED'
+    | 'PAYMENT_SECURITY_CONFIG_UPDATED'
+    | 'EMAIL_API_CONFIG_UPDATED'
+    | 'EMAIL_API_TEST_SENT'
+    | 'TELEGRAM_CONFIG_UPDATED'
+    | 'TELEGRAM_TEST_SENT'
+    | 'BULK_EMAIL_BROADCAST_SENT'
+    | 'WHITELIST_WALLET_ADDED'
+    | 'WHITELIST_WALLET_UPDATED'
+    | 'WHITELIST_WALLET_REMOVED'
+    | 'WHITELIST_POLICY_UPDATED';
+  targetUid: string;
+  network: string;
+  txHash: string;
+  amountUsd: number;
+  details: string;
+  createdAt?: unknown;
+}
+
+export type EmailProviderMode = 'auto' | 'smtp' | 'resend';
+
+export interface EmailAutomationToggles {
+  welcomeEmailEnabled: boolean;
+  depositConfirmedEmailEnabled: boolean;
+  withdrawalStatusEmailEnabled: boolean;
+  kycStatusEmailEnabled: boolean;
+  loginAlertEmailEnabled: boolean;
+}
+
+export interface AdminEmailConfigStatus {
+  ok: boolean;
+  providerMode: EmailProviderMode;
+  activeProvider: 'smtp' | 'resend' | 'none';
+  // Resend status
+  apiKeyConfigured: boolean;
+  apiKeyMasked: string;
+  apiKeyLast4: string;
+  hasDatabaseApiKey: boolean;
+  hasEnvApiKey: boolean;
+  activeApiKeySource: 'database' | 'env' | 'none';
+  fromEmail: string;
+  databaseFromEmail: string;
+  envFromEmail: string;
+  activeFromEmailSource: 'database' | 'env' | 'default';
+  // Company SMTP (Email + Pass Key) status
+  smtpConfigured: boolean;
+  smtpHost: string;
+  smtpPort: number;
+  smtpSecure: boolean;
+  smtpUser: string;
+  smtpFromName: string;
+  smtpFromEmail: string;
+  smtpPassConfigured: boolean;
+  smtpPassMasked: string;
+  smtpPassLast4: string;
+  hasDatabaseSmtpPass: boolean;
+  hasEnvSmtp: boolean;
+  activeSmtpSource: 'database' | 'env' | 'none';
+  // Automation toggles
+  automation: EmailAutomationToggles;
+  updatedByEmail: string;
+  updatedAtIso: string;
+  message?: string;
+}
+
+export interface AdminTelegramConfigStatus {
+  ok: boolean;
+  enabled: boolean;
+  botTokenConfigured: boolean;
+  botTokenMasked: string;
+  botTokenLast4: string;
+  hasDatabaseBotToken: boolean;
+  hasEnvBotToken: boolean;
+  activeTokenSource: 'database' | 'env' | 'none';
+  adminChatId: string;
+  envAdminChatId: string;
+  alertOnDeposits: boolean;
+  largeDepositThresholdUsd: number;
+  alertOnKyc: boolean;
+  alertOnWithdrawals: boolean;
+  updatedByEmail: string;
+  updatedAtIso: string;
+  message?: string;
+}
+
+export type WhitelistUsdtNetwork = 'BEP20' | 'POLYGON' | 'TRC20' | 'ERC20';
+
+export interface WhitelistedWallet {
+  id: string;
+  uid: string;
+  label: string;
+  network: WhitelistUsdtNetwork;
+  address: string;
+  verifiedViaOtp: boolean;
+  lockDelayHours?: number;
+  createdAtMs: number;
+  updatedAtMs?: number;
+  unlockAtMs: number;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
+export interface LoginActivityRecord {
+  id: string;
+  uid: string;
+  deviceSignature: string;
+  browser: string;
+  os: string;
+  deviceType: 'Desktop' | 'Mobile' | 'Tablet';
+  timezone: string;
+  locale: string;
+  isNewDevice: boolean;
+  loginAtMs: number;
+  createdAt?: unknown;
+}
+
+export interface UserMissionProfile {
+  uid: string;
+  currentStreak: number;
+  longestStreak: number;
+  lastCheckInDayKey: string;
+  totalCheckIns: number;
+  totalXp: number;
+  claimedMissionIds: string[];
+  badges: string[];
+  updatedAt?: unknown;
+}
+
+export type AppLanguage = 'en' | 'hi' | 'es';
 
 export type MarketingCardThemeId =
   | 'navy_gold'
@@ -322,13 +529,12 @@ export interface MarketingCardStats {
   updatedAt?: unknown;
 }
 
-export type GuideLanguage = 'en' | 'bn' | 'hi' | 'es';
+export type GuideLanguage = 'en' | 'hi' | 'es';
 export type MotionVisualPreset = 'overview' | 'signup' | 'package' | 'dashboard';
 export type MotionAccentColor = 'amber' | 'emerald' | 'sky' | 'violet';
 
 export interface GuideLocalizedText {
   en: string;
-  bn: string;
   hi: string;
   es: string;
 }
@@ -379,6 +585,40 @@ export interface HowItWorksConfig {
   videos: MotionVideoCardConfig[];
 }
 
+export type LeaderboardCategory = 'referrals' | 'traders';
+export type LeaderboardTimeframe = 'weekly' | 'monthly' | 'all_time';
+export type LeaderboardEntrySource = 'live_sync' | 'demo_sample';
+
+export interface LeaderboardEntry {
+  id: string;
+  category: LeaderboardCategory;
+  displayName: string;
+  handle: string;
+  countryCode: string;
+  tierLabel: string;
+  primaryMetricUsd: number;
+  secondaryMetricValue: number;
+  winRatePercent: number;
+  trendDeltaPercent: number;
+  source: LeaderboardEntrySource;
+  enabled: boolean;
+  pinnedRank?: number;
+}
+
+export interface LeaderboardConfig {
+  enabled: boolean;
+  title: string;
+  subtitle: string;
+  activeTimeframe: LeaderboardTimeframe;
+  maxVisibleRows: number;
+  showReferralTab: boolean;
+  showTradersTab: boolean;
+  allowClientSelfRank: boolean;
+  disclaimerText: string;
+  lastLiveSyncAtIso?: string;
+  entries: LeaderboardEntry[];
+}
+
 export interface UserProfile {
   uid: string;
   email: string;
@@ -416,6 +656,8 @@ export interface UserProfile {
   phoneDialPrefix?: string;
   phoneNumber?: string;
   phoneVerified?: boolean;
+  whitelistStrictMode?: boolean;
+  whitelist24hLockEnabled?: boolean;
   suspended?: boolean;
   suspensionReason?: string;
   usdBalance: number;
@@ -460,6 +702,11 @@ export interface CryptoDeposit {
   txId: string;
   status: 'pending' | 'approved' | 'rejected';
   adminNote: string;
+  verificationSource?: 'manual' | 'web3_auto';
+  web3TxKey?: string;
+  confirmations?: number;
+  tokenContract?: string;
+  senderAddress?: string;
   createdAt?: unknown;
   updatedAt?: unknown;
 }
@@ -477,10 +724,16 @@ export interface Withdrawal {
   principalCapital: number;
   totalProfitGenerated: number;
   amountUsd: number;
+  feeUsd?: number;
+  netPayoutUsd?: number;
   network: CryptoNetwork;
   destinationAddress: string;
   status: 'completed' | 'pending' | 'approved' | 'rejected';
   adminNote: string;
+  payoutTxHash?: string;
+  twoFactorVerified?: boolean;
+  reviewedByUid?: string;
+  reviewedByEmail?: string;
   createdAt?: unknown;
   updatedAt?: unknown;
 }

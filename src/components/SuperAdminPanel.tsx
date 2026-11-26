@@ -13,6 +13,7 @@ import {
   CreditCard,
   Database,
   Download,
+  ExternalLink,
   FileCheck,
   FileJson,
   Film,
@@ -23,6 +24,7 @@ import {
   LayoutDashboard,
   Lock,
   LogOut,
+  Mail,
   Megaphone,
   Menu,
   MessageCircle,
@@ -39,10 +41,12 @@ import {
   Sparkles,
   Trash2,
   TrendingUp,
+  Trophy,
   Unlock,
   Users,
   Wallet,
   X,
+  Zap,
 } from 'lucide-react';
 import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
 import { DEFAULT_PLATFORM_CONFIG } from '../constants/defaults';
@@ -70,9 +74,11 @@ import {
   PaymentMethodCategory,
   PaymentMethodConfig,
   PlatformConfig,
+  SecurityAuditLog,
   SupportChatThread,
   SupportTicket,
   UserProfile,
+  Web3VerifiedTx,
   Withdrawal,
 } from '../types/platform';
 import { BannerAdSlot } from './AlphatradexCoinHub';
@@ -82,6 +88,10 @@ import { AdminSupportCenter } from './AdminSupportCenter';
 import { AdminKycManagement } from './AdminKycManagement';
 import { AdminMarketingCardsPanel } from './AdminMarketingCardsPanel';
 import { AdminHowItWorksPanel } from './AdminHowItWorksPanel';
+import { AdminLeaderboardPanel } from './AdminLeaderboardPanel';
+import { AdminWeb3PaymentPanel } from './AdminWeb3PaymentPanel';
+import { AdminResendEmailSettingsPanel } from './AdminResendEmailSettingsPanel';
+import { AdminCashflowAnalyticsCard } from './AdminCashflowAnalyticsCard';
 
 function formatUiError(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err || 'Action failed.');
@@ -109,9 +119,12 @@ type AdminTab =
   | 'coin-ads-mining'
   | 'marketing-cards'
   | 'how-it-works'
+  | 'leaderboard'
   | 'modules-support'
   | 'company'
+  | 'web3-payments'
   | 'wallets-meme'
+  | 'email-api'
   | 'audit';
 
 export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitAdmin }) => {
@@ -158,6 +171,8 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
   const [allForexTrades, setAllForexTrades] = useState<ForexTrade[]>([]);
   const [allCopySubs, setAllCopySubs] = useState<CopyTradeSubscription[]>([]);
   const [allAdminLogs, setAllAdminLogs] = useState<AdminActionLog[]>([]);
+  const [allWeb3VerifiedTxs, setAllWeb3VerifiedTxs] = useState<Web3VerifiedTx[]>([]);
+  const [allAuditLogs, setAllAuditLogs] = useState<SecurityAuditLog[]>([]);
   const [allSupportChats, setAllSupportChats] = useState<SupportChatThread[]>([]);
   const [allSupportTickets, setAllSupportTickets] = useState<SupportTicket[]>([]);
 
@@ -167,6 +182,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
   const [selectedKycUids, setSelectedKycUids] = useState<string[]>([]);
   const [wdStatusFilter, setWdStatusFilter] = useState<'pending' | 'approved' | 'completed' | 'rejected' | 'all'>('pending');
   const [wdNoteDrafts, setWdNoteDrafts] = useState<Record<string, string>>({});
+  const [wdTxHashDrafts, setWdTxHashDrafts] = useState<Record<string, string>>({});
 
   const [manageClient, setManageClient] = useState<UserProfile | null>(null);
   const [manageClientSubTab, setManageClientSubTab] = useState<'controls' | 'deposits' | 'withdrawals' | 'packages' | 'forex'>('controls');
@@ -199,6 +215,33 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
   useEffect(() => {
     setDraftConfig(platformConfig);
   }, [platformConfig]);
+
+  // Silently hydrate the server's runtime Email (SMTP/Resend) & Telegram config caches from Firestore on Super Admin load
+  useEffect(() => {
+    if (!authUser) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const token = await authUser.getIdToken();
+        if (cancelled) return;
+        await Promise.allSettled([
+          fetch('/api/admin/email-config', {
+            method: 'GET',
+            headers: { Authorization: `Bearer ${token}` },
+          }),
+          fetch('/api/admin/telegram-config', {
+            method: 'GET',
+            headers: { Authorization: `Bearer ${token}` },
+          }),
+        ]);
+      } catch {
+        // Non-blocking warmup
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authUser]);
 
   useEffect(() => {
     const u1 = onSnapshot(
@@ -275,6 +318,22 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
         ),
       (err) => handleFirestoreError(err, OperationType.LIST, 'supportTickets')
     );
+    const u14 = onSnapshot(
+      query(collection(db, 'web3VerifiedTxs'), orderBy('createdAt', 'desc')),
+      (snap) =>
+        setAllWeb3VerifiedTxs(
+          snap.docs.map((d) => ({ txKey: d.id, ...(d.data() as Omit<Web3VerifiedTx, 'txKey'>) }))
+        ),
+      (err) => handleFirestoreError(err, OperationType.LIST, 'web3VerifiedTxs')
+    );
+    const u15 = onSnapshot(
+      query(collection(db, 'auditLogs'), orderBy('createdAt', 'desc')),
+      (snap) =>
+        setAllAuditLogs(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<SecurityAuditLog, 'id'>) }))
+        ),
+      (err) => handleFirestoreError(err, OperationType.LIST, 'auditLogs')
+    );
 
     return () => {
       u1();
@@ -290,6 +349,8 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
       u11();
       u12();
       u13();
+      u14();
+      u15();
     };
   }, []);
 
@@ -490,13 +551,18 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
         { id: 'coin-ads-mining', label: 'Banner Ads & Coin Mining', Icon: Sparkles },
         { id: 'marketing-cards', label: 'Marketing Cards', Icon: ImageIcon },
         { id: 'how-it-works', label: 'How It Works & Video', Icon: Film },
+        { id: 'leaderboard', label: 'Top Leaderboard', Icon: Trophy },
+        { id: 'web3-payments', label: 'Web3 Payments & Security', Icon: Zap },
         { id: 'wallets-meme', label: 'Addresses & Meme Coin', Icon: Coins },
         { id: 'company', label: 'Company & Trust Ratings', Icon: Shield },
       ],
     },
     {
-      heading: 'SYSTEM LEDGERS',
-      items: [{ id: 'audit', label: 'Audit Logs & Backup', Icon: Activity }],
+      heading: 'SECURITY, LOGS & APIS',
+      items: [
+        { id: 'email-api', label: 'Integration & Notifications', Icon: Mail },
+        { id: 'audit', label: 'Audit Logs & Backup', Icon: Activity },
+      ],
     },
   ];
 
@@ -756,6 +822,12 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                 </div>
               </div>
 
+              {/* Revenue & Cashflow Analytics (Daily 14D / Weekly 8W) */}
+              <AdminCashflowAnalyticsCard
+                deposits={allDeposits}
+                withdrawals={allWithdrawals}
+              />
+
               {/* 1-Click Global Kill Switches */}
               <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -927,6 +999,21 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
             <AdminHowItWorksPanel
               draftConfig={draftConfig}
               setDraftConfig={setDraftConfig}
+              onSaveConfig={handleSaveConfig}
+              busy={busy}
+              onNotify={notify}
+            />
+          )}
+
+          {/* TAB: TOP PERFORMERS LEADERBOARD CONTROL */}
+          {tab === 'leaderboard' && (
+            <AdminLeaderboardPanel
+              draftConfig={draftConfig}
+              setDraftConfig={setDraftConfig}
+              allUsers={allUsers}
+              allMlm={allMlm}
+              allForexTrades={allForexTrades}
+              allInvestments={allInvestments}
               onSaveConfig={handleSaveConfig}
               busy={busy}
               onNotify={notify}
@@ -1220,13 +1307,53 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                   <div className="space-y-3">
                     {filteredWithdrawals.map((w) => {
                       const noteValue = wdNoteDrafts[w.id] ?? (w.adminNote || '');
+                      const txHashValue = wdTxHashDrafts[w.id] ?? (w.payoutTxHash || '');
+                      const wdUser = allUsers.find((u) => u.uid === w.uid);
+                      const feeUsd = typeof w.feeUsd === 'number' ? w.feeUsd : 0;
+                      const netPayoutUsd =
+                        typeof w.netPayoutUsd === 'number'
+                          ? w.netPayoutUsd
+                          : Math.max(0, w.amountUsd - feeUsd);
+
+                      const riskFlags: { label: string; tone: 'rose' | 'amber' | 'emerald' }[] = [];
+                      if (wdUser?.suspended) {
+                        riskFlags.push({ label: 'ACCOUNT SUSPENDED', tone: 'rose' });
+                      }
+                      if (wdUser && wdUser.kycStatus !== 'approved') {
+                        riskFlags.push({
+                          label: `KYC ${wdUser.kycStatus.toUpperCase()}`,
+                          tone: 'amber',
+                        });
+                      }
+                      if (w.amountUsd >= 500) {
+                        riskFlags.push({ label: 'LARGE PAYOUT >= $500', tone: 'amber' });
+                      }
+                      if (
+                        wdUser &&
+                        wdUser.totalInvested > 0 &&
+                        wdUser.totalWithdrawn + w.amountUsd > wdUser.totalInvested * 2
+                      ) {
+                        riskFlags.push({ label: 'HIGH PAYOUT RATIO', tone: 'amber' });
+                      }
+                      if (
+                        (w.network.includes('BEP20') ||
+                          w.network.includes('POLYGON') ||
+                          w.network.includes('ERC20')) &&
+                        !/^0x[a-fA-F0-9]{40}$/.test((w.destinationAddress || '').trim())
+                      ) {
+                        riskFlags.push({ label: 'CHECK EVM ADDRESS FORMAT', tone: 'rose' });
+                      }
+                      if (w.twoFactorVerified) {
+                        riskFlags.push({ label: '2FA OTP VERIFIED', tone: 'emerald' });
+                      }
+
                       return (
                         <div
                           key={w.id}
                           className="p-4 rounded-xl border border-slate-200 space-y-3 text-xs"
                         >
                           <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
+                            <div className="space-y-1.5 min-w-0">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="font-semibold text-slate-900 text-sm">
                                   {w.type === 'manual_capital'
@@ -1248,23 +1375,105 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                                   }`}
                                 >
                                   {w.status === 'approved' || w.status === 'completed'
-                                    ? 'Processed'
+                                    ? 'Paid / Processed'
                                     : w.status}
                                 </span>
+                                {wdUser && (
+                                  <span
+                                    className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase ${
+                                      wdUser.kycStatus === 'approved'
+                                        ? 'bg-emerald-100 text-emerald-800'
+                                        : 'bg-slate-100 text-slate-700'
+                                    }`}
+                                  >
+                                    KYC: {wdUser.kycStatus}
+                                  </span>
+                                )}
                               </div>
-                              <div className="text-slate-600 font-mono mt-1">
-                                Amount: <strong className="text-slate-900">${w.amountUsd.toFixed(2)}</strong>
+
+                              {/* Automated Risk Flags */}
+                              {riskFlags.length > 0 && (
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  {riskFlags.map((flag) => (
+                                    <span
+                                      key={flag.label}
+                                      className={`px-2 py-0.5 rounded font-mono text-[10px] font-bold ${
+                                        flag.tone === 'rose'
+                                          ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                                          : flag.tone === 'amber'
+                                          ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                          : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                      }`}
+                                    >
+                                      {flag.label}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* Fee & Payout Summary */}
+                              <div className="text-slate-700 font-mono flex flex-wrap items-center gap-x-3 gap-y-1">
+                                <span>
+                                  Gross: <strong className="text-slate-900 tabular-nums">${w.amountUsd.toFixed(2)}</strong>
+                                </span>
+                                <span>
+                                  Fee: <strong className="text-amber-700 tabular-nums">${feeUsd.toFixed(2)}</strong>
+                                </span>
+                                <span>
+                                  Net Send:{' '}
+                                  <strong className="text-emerald-700 tabular-nums">${netPayoutUsd.toFixed(2)}</strong>
+                                </span>
+                                <span>· {w.network.replace(/_/g, ' ')}</span>
                                 {w.type === 'manual_capital' && (
-                                  <>
-                                    {' '}
+                                  <span>
                                     · Principal: ${w.principalCapital.toFixed(2)} · Profit Gen: $
                                     {w.totalProfitGenerated.toFixed(2)}
-                                  </>
-                                )}{' '}
-                                · {w.network.replace(/_/g, ' ')} ({w.destinationAddress})
+                                  </span>
+                                )}
                               </div>
+
+                              {/* Destination Wallet Address */}
+                              <div className="flex flex-wrap items-center gap-2 font-mono text-[11px] bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5">
+                                <span className="text-slate-500">Dest Wallet:</span>
+                                <span className="text-slate-900 break-all select-all">
+                                  {w.destinationAddress}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard?.writeText(w.destinationAddress).catch(() => {});
+                                    notify('ok', 'Copied destination wallet address.');
+                                  }}
+                                  className="text-sky-700 hover:text-sky-900 inline-flex items-center gap-1 font-sans font-semibold ml-auto"
+                                >
+                                  <Copy className="w-3 h-3" />
+                                  <span>Copy</span>
+                                </button>
+                              </div>
+
+                              {/* User Balance History Snapshot */}
+                              {wdUser && (
+                                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] font-mono text-slate-500">
+                                  <span>
+                                    User: <strong className="text-slate-700">{wdUser.email}</strong>
+                                  </span>
+                                  <span>
+                                    Dep Bal: <strong className="text-slate-800">${wdUser.usdBalance.toFixed(2)}</strong>
+                                  </span>
+                                  <span>
+                                    Inc Bal: <strong className="text-emerald-700">${wdUser.profitBalance.toFixed(2)}</strong>
+                                  </span>
+                                  <span>
+                                    Invested: <strong className="text-slate-800">${wdUser.totalInvested.toFixed(2)}</strong>
+                                  </span>
+                                  <span>
+                                    Withdrawn: <strong className="text-orange-700">${wdUser.totalWithdrawn.toFixed(2)}</strong>
+                                  </span>
+                                </div>
+                              )}
                             </div>
-                            <div className="flex flex-wrap items-center gap-2">
+
+                            <div className="flex flex-wrap items-center gap-2 shrink-0">
                               {w.type === 'manual_capital' && (
                                 <button
                                   type="button"
@@ -1282,12 +1491,16 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                                     onClick={async () => {
                                       setBusy(true);
                                       try {
-                                        await approveCapitalWithdrawal(w, noteValue.trim() || undefined);
+                                        await approveCapitalWithdrawal(
+                                          w,
+                                          noteValue.trim() || undefined,
+                                          txHashValue.trim() || undefined
+                                        );
                                         notify(
                                           'ok',
                                           w.type === 'manual_capital'
                                             ? `Approved capital withdrawal for Package #${w.packageNumber}.`
-                                            : `Marked $${w.amountUsd.toFixed(2)} payout for ${w.userName} as Processed.`
+                                            : `Approved & marked $${netPayoutUsd.toFixed(2)} net payout for ${w.userName} as Paid.`
                                         );
                                       } catch (err) {
                                         notify('err', formatUiError(err));
@@ -1297,7 +1510,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                                     }}
                                     className="px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold"
                                   >
-                                    Approve &amp; Mark Processed
+                                    Approve &amp; Mark Paid
                                   </button>
                                   <button
                                     type="button"
@@ -1326,22 +1539,36 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                                     }}
                                     className="px-3 py-1.5 rounded bg-red-600 hover:bg-red-500 text-white font-semibold"
                                   >
-                                    {w.type === 'manual_capital' ? 'Reject' : 'Reject & Refund'}
+                                    {w.type === 'manual_capital' ? 'Reject' : 'Reject & Refund Balance'}
                                   </button>
                                 </>
                               )}
                             </div>
                           </div>
 
-                          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-2 border-t border-slate-100">
+                          {/* Dedicated Payout TxHash & Settlement Note Controls */}
+                          <div className="grid grid-cols-1 md:grid-cols-12 gap-2 pt-2 border-t border-slate-100">
+                            <input
+                              type="text"
+                              value={txHashValue}
+                              onChange={(e) =>
+                                setWdTxHashDrafts((prev) => ({ ...prev, [w.id]: e.target.value }))
+                              }
+                              placeholder={
+                                platformConfig.web3PaymentConfig?.requirePayoutTxHashOnApprove
+                                  ? 'Required: Blockchain Payout txHash (0x... or TRON hash)'
+                                  : 'Optional: Blockchain Payout txHash (0x... or TRON hash)'
+                              }
+                              className="md:col-span-5 px-3 py-1.5 rounded-lg border border-slate-300 font-mono text-xs"
+                            />
                             <input
                               type="text"
                               value={noteValue}
                               onChange={(e) =>
                                 setWdNoteDrafts((prev) => ({ ...prev, [w.id]: e.target.value }))
                               }
-                              placeholder="Enter payout TXID or admin settlement note..."
-                              className="flex-1 px-3 py-1.5 rounded-lg border border-slate-200 font-mono text-xs"
+                              placeholder="Admin settlement note or rejection reason..."
+                              className="md:col-span-5 px-3 py-1.5 rounded-lg border border-slate-200 font-mono text-xs"
                             />
                             <button
                               type="button"
@@ -1349,19 +1576,52 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                               onClick={async () => {
                                 setBusy(true);
                                 try {
-                                  await updateWithdrawalNote(w.id, noteValue);
-                                  notify('ok', 'Saved payout TXID / admin note.');
+                                  await updateWithdrawalNote(
+                                    w.id,
+                                    noteValue,
+                                    txHashValue.trim() || undefined
+                                  );
+                                  notify('ok', 'Saved payout txHash & admin note.');
                                 } catch (err) {
                                   notify('err', formatUiError(err));
                                 } finally {
                                   setBusy(false);
                                 }
                               }}
-                              className="px-3 py-1.5 rounded-lg border border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-800 font-semibold whitespace-nowrap"
+                              className="md:col-span-2 px-3 py-1.5 rounded-lg border border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-800 font-semibold whitespace-nowrap"
                             >
-                              Save TXID / Note
+                              Save TxHash
                             </button>
                           </div>
+
+                          {(w.payoutTxHash || w.reviewedByEmail) && (
+                            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono text-slate-500 pt-1">
+                              {w.payoutTxHash && (
+                                <span className="inline-flex items-center gap-1.5">
+                                  <span>Recorded Payout Tx:</span>
+                                  <strong className="text-emerald-700">{w.payoutTxHash}</strong>
+                                  {w.payoutTxHash.startsWith('0x') && (
+                                    <a
+                                      href={
+                                        w.network.includes('POLYGON')
+                                          ? `https://polygonscan.com/tx/${w.payoutTxHash}`
+                                          : `https://bscscan.com/tx/${w.payoutTxHash}`
+                                      }
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-sky-700 hover:underline inline-flex items-center gap-0.5"
+                                    >
+                                      <span>Explorer</span>
+                                      <ExternalLink className="w-3 h-3" />
+                                    </a>
+                                  )}
+                                </span>
+                              )}
+                              {w.reviewedByEmail && (
+                                <span>Reviewed by: {w.reviewedByEmail}</span>
+                              )}
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -4438,6 +4698,39 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
           )}
 
           {/* TAB 6: AUDIT LOGS & BACKUP */}
+          {tab === 'web3-payments' && (
+            <AdminWeb3PaymentPanel
+              draftConfig={draftConfig}
+              setDraftConfig={setDraftConfig}
+              busy={busy}
+              verifiedTxs={allWeb3VerifiedTxs}
+              auditLogs={allAuditLogs}
+              onNotify={notify}
+              onOpenEmailApiSettings={() => setTab('email-api')}
+              onSaveConfig={async (nextCfg) => {
+                setBusy(true);
+                try {
+                  await updatePlatformConfig(nextCfg || draftConfig);
+                  notify('ok', 'Web3 Payment & Security settings saved to Firestore.');
+                } catch (err) {
+                  notify('err', formatUiError(err));
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            />
+          )}
+
+          {tab === 'email-api' && authUser && (
+            <AdminResendEmailSettingsPanel
+              authUserEmail={authUser.email || ''}
+              getIdToken={() => authUser.getIdToken()}
+              allUsers={allUsers}
+              auditLogs={allAuditLogs}
+              onNotify={notify}
+            />
+          )}
+
           {tab === 'audit' && (
             <section className="space-y-6">
               <div className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-wrap items-center justify-between gap-4">

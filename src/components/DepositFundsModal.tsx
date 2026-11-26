@@ -9,6 +9,7 @@ import {
   ShieldCheck,
   Wallet,
   X,
+  Zap,
 } from 'lucide-react';
 import {
   CryptoNetwork,
@@ -23,6 +24,9 @@ interface DepositFundsModalProps {
   depositWallets: DepositWallets;
   currentDepositBalance: number;
   initialNetwork?: CryptoNetwork;
+  depositsPaused?: boolean;
+  autoDepositEnabled?: boolean;
+  onOpenWeb3AutoDeposit?: () => void;
   onSubmitDeposit: (params: {
     network: CryptoNetwork;
     amountUsd: number;
@@ -38,6 +42,9 @@ export const DepositFundsModal: React.FC<DepositFundsModalProps> = ({
   depositWallets,
   currentDepositBalance,
   initialNetwork,
+  depositsPaused = false,
+  autoDepositEnabled = true,
+  onOpenWeb3AutoDeposit,
   onSubmitDeposit,
   onNotify,
 }) => {
@@ -244,6 +251,39 @@ export const DepositFundsModal: React.FC<DepositFundsModalProps> = ({
 
         {/* Modal Body */}
         <div className="p-5 sm:p-6 space-y-5">
+          {depositsPaused && (
+            <div className="p-3.5 rounded-xl bg-amber-500/15 border border-amber-500/40 text-xs text-amber-200 flex items-start gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <span>
+                Deposits are temporarily paused by administration. Please check back shortly.
+              </span>
+            </div>
+          )}
+
+          {!depositsPaused && autoDepositEnabled && onOpenWeb3AutoDeposit && (
+            <div className="p-3.5 rounded-xl bg-emerald-950/40 border border-emerald-500/35 flex flex-wrap items-center justify-between gap-3">
+              <div className="space-y-0.5">
+                <div className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                  <Zap className="w-3.5 h-3.5" />
+                  <span>Instant Web3 Auto-Deposit Available (BEP-20 &amp; Polygon USDT)</span>
+                </div>
+                <p className="text-[11px] text-slate-300">
+                  Connect Binance Web3, MetaMask, Trust Wallet, or WalletConnect QR for automatic on-chain credit.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenWeb3AutoDeposit();
+                }}
+                className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shrink-0"
+              >
+                Open Web3 Auto-Deposit
+              </button>
+            </div>
+          )}
+
           {/* Step 1: Select Crypto Asset & Network */}
           <div className="space-y-2">
             <div className="flex items-center justify-between text-xs">
@@ -430,11 +470,17 @@ export const DepositFundsModal: React.FC<DepositFundsModalProps> = ({
               </button>
               <button
                 type="submit"
-                disabled={submitting}
+                disabled={submitting || depositsPaused}
                 className="px-5 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-500 disabled:opacity-60 text-white text-xs sm:text-sm font-semibold inline-flex items-center gap-2 shadow-lg shadow-orange-600/20"
               >
                 <PlusCircle className="w-4 h-4" />
-                <span>{submitting ? 'Submitting Request...' : `Submit ${activeMethod.name} Deposit`}</span>
+                <span>
+                  {depositsPaused
+                    ? 'Deposits Paused'
+                    : submitting
+                    ? 'Submitting Request...'
+                    : `Submit ${activeMethod.name} Deposit`}
+                </span>
               </button>
             </div>
           </form>

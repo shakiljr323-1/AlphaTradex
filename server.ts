@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
+import { registerWeb3PaymentRoutes } from './server/web3PaymentService.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -846,6 +847,9 @@ async function startServer() {
     res.json({ ok: true, autoPostIntervalMinutes: Math.round(AUTO_POST_INTERVAL_MS / 60000) });
   });
 
+  // High-Security Web3 Auto-Deposit Verification & Safe 2FA Withdrawal Routes (Zero Private Keys)
+  registerWeb3PaymentRoutes(app);
+
   app.get('/api/kyc/provider-status', (_req, res) => {
     res.json(getKycProviderStatuses());
   });
@@ -1204,7 +1208,7 @@ async function startServer() {
 
       const response = await ai.models.generateContent({
         model: MODEL_NAME,
-        contents: `Generate a crisp 4-scene animated tutorial motion video storyboard and 4-language captions for "${videoTitle}" on ${companyName}.
+        contents: `Generate a crisp 4-scene animated tutorial motion video storyboard and 3-language captions for "${videoTitle}" on ${companyName}.
 
 Admin Prompt: ${userPrompt || 'Refresh the tutorial motion reel with clear onboarding visuals.'}
 Base Script Context: ${existingScript || 'Explain registration, wallet deposit & packages (Starter $100, Growth $300, Pro $500, Elite $1,000; 200 Mon-Fri profit days, Sat-Sun off, 70 calendar days capital withdrawal eligibility for Elite), and transparent dashboard tracking.'}
@@ -1214,7 +1218,7 @@ STRICT COMPLIANCE RULES:
 - Never promise guaranteed profits, guaranteed returns, or risk-free income.
 - Clearly frame visuals as illustrative onboarding & demo walkthroughs.
 - Keep every scene headline punchy (3 to 6 words) and each caption concise (under 24 words) so it reads cleanly inside a 16:9 motion canvas.
-- Translate the summary caption accurately into English (en), Bengali (bn), Hindi (hi), and Spanish (es).`,
+- Translate the summary caption accurately into English (en), Hindi (hi), and Spanish (es).`,
         config: {
           systemInstruction:
             'You are a fintech motion graphics director creating clean, factual, compliance-safe onboarding tutorial storyboards for a trading and vault platform. Never invent fake guaranteed profit promises.',
@@ -1231,11 +1235,10 @@ STRICT COMPLIANCE RULES:
                 type: Type.OBJECT,
                 properties: {
                   en: { type: Type.STRING },
-                  bn: { type: Type.STRING },
                   hi: { type: Type.STRING },
                   es: { type: Type.STRING },
                 },
-                required: ['en', 'bn', 'hi', 'es'],
+                required: ['en', 'hi', 'es'],
               },
               scenes: {
                 type: Type.ARRAY,
@@ -1271,7 +1274,7 @@ STRICT COMPLIANCE RULES:
 
       const parsed = extractJsonObject(response.text || '{}') as {
         script?: string;
-        caption?: { en?: string; bn?: string; hi?: string; es?: string };
+        caption?: { en?: string; hi?: string; es?: string };
         scenes?: Array<Record<string, unknown>>;
       };
 
@@ -1304,7 +1307,6 @@ STRICT COMPLIANCE RULES:
         script: String(parsed.script || existingScript || userPrompt).trim().slice(0, 1200),
         caption: {
           en: String(parsed.caption?.en || scenes[0].caption || videoTitle).trim().slice(0, 320),
-          bn: String(parsed.caption?.bn || parsed.caption?.en || videoTitle).trim().slice(0, 320),
           hi: String(parsed.caption?.hi || parsed.caption?.en || videoTitle).trim().slice(0, 320),
           es: String(parsed.caption?.es || parsed.caption?.en || videoTitle).trim().slice(0, 320),
         },
@@ -1324,7 +1326,11 @@ STRICT COMPLIANCE RULES:
     }
   });
 
-  const isProd = process.env.NODE_ENV === 'production';
+  const distDir = path.resolve(__dirname, 'dist');
+  const hasDistBuild = fs.existsSync(path.join(distDir, 'index.html'));
+  const isProd =
+    process.env.NODE_ENV === 'production' ||
+    (process.env.npm_lifecycle_event === 'start' && hasDistBuild);
 
   if (!isProd) {
     const { createServer: createViteServer } = await import('vite');
@@ -1334,7 +1340,6 @@ STRICT COMPLIANCE RULES:
     });
     app.use(vite.middlewares);
   } else {
-    const distDir = path.resolve(__dirname, 'dist');
     app.use(express.static(distDir));
     app.get('*', (_req, res) => {
       const indexFile = path.join(distDir, 'index.html');

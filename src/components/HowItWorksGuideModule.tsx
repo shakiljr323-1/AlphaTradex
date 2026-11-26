@@ -28,7 +28,6 @@ interface HowItWorksGuideModuleProps {
 
 const LANGUAGE_OPTIONS: { id: GuideLanguage; label: string }[] = [
   { id: 'en', label: 'English' },
-  { id: 'bn', label: 'বাংলা' },
   { id: 'hi', label: 'हिन्दी' },
   { id: 'es', label: 'Español' },
 ];
@@ -65,7 +64,11 @@ export const HowItWorksGuideModule: React.FC<HowItWorksGuideModuleProps> = ({
     [guideConfig.videos]
   );
 
-  const [language, setLanguage] = useState<GuideLanguage>(guideConfig.defaultLanguage || 'en');
+  const safeDefaultLang: GuideLanguage =
+    guideConfig.defaultLanguage === 'hi' || guideConfig.defaultLanguage === 'es'
+      ? guideConfig.defaultLanguage
+      : 'en';
+  const [language, setLanguage] = useState<GuideLanguage>(safeDefaultLang);
   const [selectedStepIdx, setSelectedStepIdx] = useState<number>(0);
   const [selectedVideoId, setSelectedVideoId] = useState<string>(
     () => visibleVideos[0]?.id || 'video_how_it_works'

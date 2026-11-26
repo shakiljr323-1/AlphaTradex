@@ -17,6 +17,7 @@ import {
   Users,
   X,
 } from 'lucide-react';
+import { LanguageSwitcher, useLanguage } from '../context/LanguageContext';
 import { AdminModuleControls, NavSection } from '../types/platform';
 import { AlphatradexLogo3D } from './AlphatradexLogo3D';
 
@@ -54,13 +55,18 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenMentorDashboard,
 }) => {
   const [slideBarOpen, setSlideBarOpen] = useState(false);
+  const { t } = useLanguage();
 
   const publicNavItems: { id: NavSection; label: string; Icon: React.ComponentType<{ className?: string }> }[] = [
-    { id: 'home', label: 'Home Overview', Icon: Home },
-    { id: 'how-it-works', label: 'How It Works', Icon: PlayCircle },
-    { id: 'plans', label: 'Investment Plans', Icon: Layers },
-    { id: 'forex-news', label: 'Forex News', Icon: Newspaper },
-    { id: 'mentor-referral', label: isMentor ? 'Referrals & Mentor' : 'Referrals', Icon: Users },
+    { id: 'home', label: t('nav.home', 'Home Overview'), Icon: Home },
+    { id: 'how-it-works', label: t('nav.howItWorks', 'How It Works'), Icon: PlayCircle },
+    { id: 'plans', label: t('nav.plans', 'Investment Plans'), Icon: Layers },
+    { id: 'forex-news', label: t('nav.forexNews', 'Forex News'), Icon: Newspaper },
+    {
+      id: 'mentor-referral',
+      label: isMentor ? t('nav.referralsMentor', 'Referrals & Mentor') : t('nav.referrals', 'Referrals'),
+      Icon: Users,
+    },
   ];
 
   const allGatedModuleItems: {
@@ -178,8 +184,10 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           </nav>
 
-          {/* Right: Desk Status & Auth Actions */}
+          {/* Right: Language Switcher, Desk Status & Auth Actions */}
           <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
+            <LanguageSwitcher variant="dark" compact />
+
             <span
               className={`hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-mono font-semibold whitespace-nowrap shrink-0 border ${
                 globalPaused
@@ -188,7 +196,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               }`}
             >
               <ShieldCheck className="w-3.5 h-3.5" />
-              {globalPaused ? 'DESK PAUSED' : 'LIVE DESK'}
+              {globalPaused ? t('nav.deskPaused', 'DESK PAUSED') : t('nav.liveDesk', 'LIVE DESK')}
             </span>
 
             {isSignedIn && onOpenDashboard ? (
@@ -199,7 +207,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     onClick={onOpenMentorDashboard}
                     className="px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold text-amber-200 border border-amber-500/50 bg-amber-500/15 hover:bg-amber-500/25 transition-colors whitespace-nowrap shrink-0"
                   >
-                    Mentor Dashboard
+                    {t('nav.mentorDashboard', 'Mentor Dashboard')}
                   </button>
                 )}
                 <button
@@ -207,7 +215,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   onClick={onOpenDashboard}
                   className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 transition-colors shadow-sm whitespace-nowrap shrink-0"
                 >
-                  Vault Dashboard
+                  {t('nav.dashboard', 'Vault Dashboard')}
                 </button>
               </div>
             ) : (
@@ -221,7 +229,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       : 'text-slate-200 border-slate-700 hover:bg-slate-800 hover:text-white'
                   }`}
                 >
-                  Sign In
+                  {t('nav.signIn', 'Sign In')}
                 </button>
 
                 <button
@@ -231,7 +239,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     isRegisterActive ? 'ring-2 ring-amber-400/60' : ''
                   }`}
                 >
-                  Register (KYC)
+                  {t('nav.register', 'Register (KYC)')}
                 </button>
               </>
             )}

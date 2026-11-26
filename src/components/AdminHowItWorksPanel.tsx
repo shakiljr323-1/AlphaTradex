@@ -31,7 +31,6 @@ interface AdminHowItWorksPanelProps {
 
 const LANGS: { id: GuideLanguage; label: string }[] = [
   { id: 'en', label: 'English (EN)' },
-  { id: 'bn', label: 'বাংলা (BN)' },
   { id: 'hi', label: 'हिन्दी (HI)' },
   { id: 'es', label: 'Español (ES)' },
 ];
@@ -131,7 +130,7 @@ export const AdminHowItWorksPanel: React.FC<AdminHowItWorksPanelProps> = ({
       const data = (await res.json()) as {
         error?: string;
         script?: string;
-        caption?: { en: string; bn: string; hi: string; es: string };
+        caption?: { en: string; hi: string; es: string };
         scenes?: MotionSceneBeat[];
         aiUpdatedAtIso?: string;
       };
@@ -151,7 +150,7 @@ export const AdminHowItWorksPanel: React.FC<AdminHowItWorksPanelProps> = ({
       });
       onNotify(
         'ok',
-        `AI Motion Video Studio refreshed "${activeStudioVideo.title.en}" with ${data.scenes.length} animated scenes & 4-language captions. Preview live below and click Publish Settings.`
+        `AI Motion Video Studio refreshed "${activeStudioVideo.title.en}" with ${data.scenes.length} animated scenes & 3-language captions. Preview live below and click Publish Settings.`
       );
     } catch (err) {
       onNotify(
@@ -216,7 +215,11 @@ export const AdminHowItWorksPanel: React.FC<AdminHowItWorksPanelProps> = ({
           <div className="flex items-center justify-between gap-2 p-3 rounded-lg border border-slate-200 bg-slate-50">
             <span className="text-xs font-semibold text-slate-800">Default Language</span>
             <select
-              value={hiw.defaultLanguage}
+              value={
+                hiw.defaultLanguage === 'hi' || hiw.defaultLanguage === 'es'
+                  ? hiw.defaultLanguage
+                  : 'en'
+              }
               onChange={(e) => patchHiw({ defaultLanguage: e.target.value as GuideLanguage })}
               className="px-2 py-1 rounded border border-slate-300 bg-white text-xs text-slate-800"
             >
@@ -253,7 +256,7 @@ export const AdminHowItWorksPanel: React.FC<AdminHowItWorksPanelProps> = ({
                   AI Motion Video Studio
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Generate or refresh compliant 4-scene animated tutorial reels &amp; 4-language
+                  Generate or refresh compliant 4-scene animated tutorial reels &amp; 3-language
                   captions from prompts or step scripts, and export as WebM.
                 </p>
               </div>
@@ -333,7 +336,7 @@ export const AdminHowItWorksPanel: React.FC<AdminHowItWorksPanelProps> = ({
 
               <p className="text-[11px] text-slate-500 leading-relaxed">
                 Uses server-side Gemini AI to compose compliance-safe scenes &amp; subtitles in
-                English, বাংলা, हिन्दी, and Español. Demo visuals are clearly labeled with no
+                English, हिन्दी, and Español. Demo visuals are clearly labeled with no
                 guaranteed profit claims.
               </p>
             </div>
