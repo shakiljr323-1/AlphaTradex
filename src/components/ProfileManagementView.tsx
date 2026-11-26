@@ -47,6 +47,7 @@ interface ProfileManagementViewProps {
     idPhotoData: string;
     portraitPhotoData: string;
   }) => Promise<void>;
+  onOpenKycVerification?: () => void;
   onNotify: (type: 'ok' | 'err', text: string) => void;
 }
 
@@ -58,6 +59,7 @@ export const ProfileManagementView: React.FC<ProfileManagementViewProps> = ({
   onUpdateUserPhone,
   onUpdateAccountEmail,
   onSubmitKyc,
+  onOpenKycVerification,
   onNotify,
 }) => {
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
@@ -391,9 +393,21 @@ export const ProfileManagementView: React.FC<ProfileManagementViewProps> = ({
               : userProfile.kycStatus === 'pending'
               ? 'Your KYC documents are currently under review by Super Admin compliance. No further action is required while verification completes.'
               : userProfile.kycStatus === 'rejected'
-              ? 'Your previous KYC submission was declined. Please upload clear, valid identification documents below to resubmit.'
-              : 'Complete your Know Your Customer (KYC) verification below to ensure uninterrupted withdrawals and compliance clearance.'}
+              ? userProfile.kycRejectionReason ||
+                'Your previous KYC submission was declined. Please upload clear, valid identification documents to resubmit.'
+              : 'Complete your Know Your Customer (KYC) verification to ensure uninterrupted withdrawals and compliance clearance.'}
           </p>
+
+          {onOpenKycVerification && (
+            <button
+              type="button"
+              onClick={onOpenKycVerification}
+              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs transition-colors"
+            >
+              <ShieldCheck className="w-4 h-4" />
+              Open Global KYC Verification Center (All Countries + Free AI OCR)
+            </button>
+          )}
 
           <div className="grid grid-cols-2 gap-3 text-xs">
             <div className="p-3 rounded-xl bg-slate-900/75 border border-slate-700/70">

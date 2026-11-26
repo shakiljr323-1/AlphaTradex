@@ -69,7 +69,8 @@ service cloud.firestore {
         'totalProfitDays', 'globalPaused', 'withdrawalsPaused', 'signupsPaused', 'p2pPaused',
         'moduleControls', 'supportLinks', 'packages', 'mlmRates', 'mentorConfig',
         'depositWallets', 'paymentMethods', 'pumpFunToken', 'dashboardAnnouncement',
-        'bannerAds', 'coinMiningSettings', 'coinMiningPlans', 'forexConfig', 'updatedAt'
+        'bannerAds', 'coinMiningSettings', 'coinMiningPlans', 'forexConfig',
+        'supportAutoResponder', 'kycSettings', 'marketingCardsConfig', 'updatedAt'
       ])
       && isNonEmptyString(data.companyName, 120)
       && isBoundedString(data.companyTagline, 200)
@@ -200,8 +201,83 @@ service cloud.firestore {
         data.forexConfig.copyTraders.size() <= 20 &&
         (data.forexConfig.copyTraders.size() == 0 || data.forexConfig.copyTraders[0] is map)
       ))
+      && (!('supportAutoResponder' in data) || (
+        data.supportAutoResponder is map &&
+        data.supportAutoResponder.keys().hasAll([
+          'enabled', 'notifyOnStatusChange', 'senderName', 'subjectTemplate',
+          'bodyTemplate', 'slaUrgent', 'slaHigh', 'slaMedium', 'slaLow'
+        ]) &&
+        data.supportAutoResponder.keys().hasOnly([
+          'enabled', 'notifyOnStatusChange', 'senderName', 'subjectTemplate',
+          'bodyTemplate', 'slaUrgent', 'slaHigh', 'slaMedium', 'slaLow'
+        ]) &&
+        data.supportAutoResponder.enabled is bool &&
+        data.supportAutoResponder.notifyOnStatusChange is bool &&
+        isNonEmptyString(data.supportAutoResponder.senderName, 120) &&
+        isNonEmptyString(data.supportAutoResponder.subjectTemplate, 200) &&
+        isNonEmptyString(data.supportAutoResponder.bodyTemplate, 2000) &&
+        isNonEmptyString(data.supportAutoResponder.slaUrgent, 80) &&
+        isNonEmptyString(data.supportAutoResponder.slaHigh, 80) &&
+        isNonEmptyString(data.supportAutoResponder.slaMedium, 80) &&
+        isNonEmptyString(data.supportAutoResponder.slaLow, 80)
+      ))
+      && (!('kycSettings' in data) || (
+        data.kycSettings is map &&
+        data.kycSettings.keys().hasAll([
+          'enabled', 'requireKycForDeposits', 'requireKycForPackages', 'requireKycForClaims',
+          'requireKycForWithdrawals', 'allowFreeAiOcr', 'requireBackSideForCards',
+          'requireLiveSelfie', 'activeProvider', 'disabledCountryCodes'
+        ]) &&
+        data.kycSettings.keys().hasOnly([
+          'enabled', 'requireKycForDeposits', 'requireKycForPackages', 'requireKycForClaims',
+          'requireKycForWithdrawals', 'allowFreeAiOcr', 'requireBackSideForCards',
+          'requireLiveSelfie', 'activeProvider', 'disabledCountryCodes'
+        ]) &&
+        data.kycSettings.enabled is bool &&
+        data.kycSettings.requireKycForDeposits is bool &&
+        data.kycSettings.requireKycForPackages is bool &&
+        data.kycSettings.requireKycForClaims is bool &&
+        data.kycSettings.requireKycForWithdrawals is bool &&
+        data.kycSettings.allowFreeAiOcr is bool &&
+        data.kycSettings.requireBackSideForCards is bool &&
+        data.kycSettings.requireLiveSelfie is bool &&
+        data.kycSettings.activeProvider in ['free_qr_mrz_ocr', 'free_ai_ocr', 'didit_free', 'sumsub', 'veriff', 'shufti_pro', 'custom_webhook'] &&
+        data.kycSettings.disabledCountryCodes is list &&
+        data.kycSettings.disabledCountryCodes.size() <= 250 &&
+        (data.kycSettings.disabledCountryCodes.size() == 0 || data.kycSettings.disabledCountryCodes[0] is string)
+      ))
+      && (!('marketingCardsConfig' in data) || (
+        data.marketingCardsConfig is map &&
+        data.marketingCardsConfig.keys().hasAll([
+          'enabled', 'allowQrCode', 'allowReferralCode', 'allowRankBadge',
+          'allowPackageBadge', 'defaultHeadline', 'defaultTagline', 'disclaimerText', 'templates'
+        ]) &&
+        data.marketingCardsConfig.keys().hasOnly([
+          'enabled', 'allowQrCode', 'allowReferralCode', 'allowRankBadge',
+          'allowPackageBadge', 'defaultHeadline', 'defaultTagline', 'disclaimerText', 'templates'
+        ]) &&
+        data.marketingCardsConfig.enabled is bool &&
+        data.marketingCardsConfig.allowQrCode is bool &&
+        data.marketingCardsConfig.allowReferralCode is bool &&
+        data.marketingCardsConfig.allowRankBadge is bool &&
+        data.marketingCardsConfig.allowPackageBadge is bool &&
+        isBoundedString(data.marketingCardsConfig.defaultHeadline, 140) &&
+        isBoundedString(data.marketingCardsConfig.defaultTagline, 240) &&
+        isBoundedString(data.marketingCardsConfig.disclaimerText, 300) &&
+        data.marketingCardsConfig.templates is list &&
+        data.marketingCardsConfig.templates.size() <= 20 &&
+        (data.marketingCardsConfig.templates.size() == 0 || data.marketingCardsConfig.templates[0] is map)
+      ))
       && data.pumpFunToken is map
       && data.updatedAt == request.time;
+    }
+
+    function isValidMarketingCardStats(data) {
+      return data.keys().hasAll(['totalGenerated', 'totalShared', 'updatedAt'])
+        && data.keys().hasOnly(['totalGenerated', 'totalShared', 'updatedAt'])
+        && data.totalGenerated is int && data.totalGenerated >= 0
+        && data.totalShared is int && data.totalShared >= 0
+        && data.updatedAt == request.time;
     }
 
     function isValidUserProfile(data, userId) {
@@ -214,7 +290,12 @@ service cloud.firestore {
       ]) && data.keys().hasOnly([
         'uid', 'email', 'fullName', 'handle', 'role', 'referredByUid',
         'referredByHandle', 'uplineChain', 'kycStatus', 'idType', 'idNumber',
-        'idPhotoData', 'portraitPhotoData', 'avatarData',
+        'idPhotoData', 'idBackPhotoData', 'portraitPhotoData', 'avatarData',
+        'kycCountryCode', 'kycCountryName', 'kycDateOfBirth', 'kycNationality',
+        'kycIssueDate', 'kycExpiryDate', 'kycAddress', 'kycRejectionReason',
+        'kycResubmissionRequested', 'kycVerificationMethod', 'kycApiVerificationStatus',
+        'kycOcrConfidence', 'kycLivenessPassed', 'kycSubmittedAtMs',
+        'kycReviewedAtMs', 'kycReviewedBy',
         'countryCode', 'countryName', 'phoneDialPrefix', 'phoneNumber', 'phoneVerified',
         'suspended', 'suspensionReason',
         'usdBalance', 'profitBalance',
@@ -234,8 +315,25 @@ service cloud.firestore {
       && data.idType in ['NID', 'Passport', 'Driving License', '']
       && isBoundedString(data.idNumber, 64)
       && isBoundedString(data.idPhotoData, 300000)
+      && (!('idBackPhotoData' in data) || isBoundedString(data.idBackPhotoData, 300000))
       && isBoundedString(data.portraitPhotoData, 300000)
       && (!('avatarData' in data) || isBoundedString(data.avatarData, 300000))
+      && (!('kycCountryCode' in data) || (isBoundedString(data.kycCountryCode, 8) && data.kycCountryCode.matches('^([A-Z]{2,4})?$')))
+      && (!('kycCountryName' in data) || isBoundedString(data.kycCountryName, 80))
+      && (!('kycDateOfBirth' in data) || isBoundedString(data.kycDateOfBirth, 32))
+      && (!('kycNationality' in data) || isBoundedString(data.kycNationality, 80))
+      && (!('kycIssueDate' in data) || isBoundedString(data.kycIssueDate, 32))
+      && (!('kycExpiryDate' in data) || isBoundedString(data.kycExpiryDate, 32))
+      && (!('kycAddress' in data) || isBoundedString(data.kycAddress, 260))
+      && (!('kycRejectionReason' in data) || isBoundedString(data.kycRejectionReason, 400))
+      && (!('kycResubmissionRequested' in data) || data.kycResubmissionRequested is bool)
+      && (!('kycVerificationMethod' in data) || isBoundedString(data.kycVerificationMethod, 80))
+      && (!('kycApiVerificationStatus' in data) || data.kycApiVerificationStatus in ['none', 'ocr_preview_only', 'manual_review', 'live_api_pending', 'live_api_verified'])
+      && (!('kycOcrConfidence' in data) || (data.kycOcrConfidence is number && data.kycOcrConfidence >= 0 && data.kycOcrConfidence <= 100))
+      && (!('kycLivenessPassed' in data) || data.kycLivenessPassed is bool)
+      && (!('kycSubmittedAtMs' in data) || (data.kycSubmittedAtMs is number && data.kycSubmittedAtMs >= 0))
+      && (!('kycReviewedAtMs' in data) || (data.kycReviewedAtMs is number && data.kycReviewedAtMs >= 0))
+      && (!('kycReviewedBy' in data) || isBoundedString(data.kycReviewedBy, 120))
       && (!('countryCode' in data) || (isBoundedString(data.countryCode, 8) && data.countryCode.matches('^([A-Z]{2,4})?$')))
       && (!('countryName' in data) || isBoundedString(data.countryName, 80))
       && (!('phoneDialPrefix' in data) || (isBoundedString(data.phoneDialPrefix, 12) && data.phoneDialPrefix.matches('^(\\+[0-9]{1,8})?$')))
@@ -613,6 +711,101 @@ service cloud.firestore {
       && data.createdAt == request.time;
     }
 
+    function isValidSupportChatThread(data, userId) {
+      return data.keys().hasAll([
+        'uid', 'userName', 'userEmail', 'userHandle', 'status',
+        'lastMessage', 'lastSender', 'unreadByAdmin', 'unreadByClient',
+        'createdAt', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'uid', 'userName', 'userEmail', 'userHandle', 'status',
+        'lastMessage', 'lastSender', 'unreadByAdmin', 'unreadByClient',
+        'createdAt', 'updatedAt'
+      ])
+      && isValidId(data.uid) && data.uid == userId
+      && isNonEmptyString(data.userName, 120)
+      && isNonEmptyString(data.userEmail, 254)
+      && isNonEmptyString(data.userHandle, 32)
+      && data.status in ['open', 'resolved']
+      && isBoundedString(data.lastMessage, 500)
+      && data.lastSender in ['client', 'admin']
+      && data.unreadByAdmin is number && data.unreadByAdmin >= 0 && data.unreadByAdmin <= 10000
+      && data.unreadByClient is number && data.unreadByClient >= 0 && data.unreadByClient <= 10000
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidSupportChatMessage(data, userId) {
+      return data.keys().hasAll([
+        'uid', 'senderUid', 'senderRole', 'senderName', 'text', 'topicTag', 'createdAt'
+      ]) && data.keys().hasOnly([
+        'uid', 'senderUid', 'senderRole', 'senderName', 'text', 'topicTag', 'createdAt'
+      ])
+      && isValidId(data.uid) && data.uid == userId
+      && isValidId(data.senderUid) && data.senderUid == request.auth.uid
+      && data.senderRole in ['client', 'admin']
+      && isNonEmptyString(data.senderName, 120)
+      && isNonEmptyString(data.text, 2000)
+      && isBoundedString(data.topicTag, 80)
+      && data.createdAt == request.time;
+    }
+
+    function isValidSupportTicket(data) {
+      return data.keys().hasAll([
+        'uid', 'userName', 'userEmail', 'userHandle', 'ticketNumber',
+        'category', 'priority', 'subject', 'description', 'referenceId',
+        'status', 'adminReply', 'resolvedBy', 'createdAt', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'uid', 'userName', 'userEmail', 'userHandle', 'ticketNumber',
+        'category', 'priority', 'subject', 'description', 'referenceId',
+        'status', 'adminReply', 'resolvedBy', 'autoAckMessage', 'estimatedResponseTime',
+        'createdAt', 'updatedAt'
+      ])
+      && isValidId(data.uid)
+      && isNonEmptyString(data.userName, 120)
+      && isNonEmptyString(data.userEmail, 254)
+      && isNonEmptyString(data.userHandle, 32)
+      && isNonEmptyString(data.ticketNumber, 32)
+      && data.category in ['deposit', 'withdrawal', 'kyc', 'trading', 'forex', 'p2p', 'account', 'other']
+      && data.priority in ['low', 'medium', 'high', 'urgent']
+      && data.subject is string && data.subject.size() >= 3 && data.subject.size() <= 140
+      && data.description is string && data.description.size() >= 5 && data.description.size() <= 2500
+      && isBoundedString(data.referenceId, 120)
+      && data.status in ['open', 'in_progress', 'resolved', 'closed']
+      && isBoundedString(data.adminReply, 2000)
+      && isBoundedString(data.resolvedBy, 120)
+      && (!('autoAckMessage' in data) || isBoundedString(data.autoAckMessage, 2000))
+      && (!('estimatedResponseTime' in data) || isBoundedString(data.estimatedResponseTime, 80))
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidUserNotification(data, userId) {
+      return data.keys().hasAll([
+        'uid', 'type', 'ticketId', 'ticketNumber', 'recipientEmail',
+        'senderName', 'title', 'emailSubject', 'message', 'category',
+        'priority', 'estimatedResponseTime', 'read', 'createdAt', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'uid', 'type', 'ticketId', 'ticketNumber', 'recipientEmail',
+        'senderName', 'title', 'emailSubject', 'message', 'category',
+        'priority', 'estimatedResponseTime', 'read', 'createdAt', 'updatedAt'
+      ])
+      && isValidId(data.uid) && data.uid == userId
+      && data.type in ['ticket_received', 'ticket_status_update', 'support_reply']
+      && isValidId(data.ticketId)
+      && isNonEmptyString(data.ticketNumber, 32)
+      && isNonEmptyString(data.recipientEmail, 254)
+      && isNonEmptyString(data.senderName, 120)
+      && isNonEmptyString(data.title, 160)
+      && isNonEmptyString(data.emailSubject, 200)
+      && data.message is string && data.message.size() >= 5 && data.message.size() <= 2500
+      && isBoundedString(data.category, 40)
+      && isBoundedString(data.priority, 20)
+      && isBoundedString(data.estimatedResponseTime, 80)
+      && data.read is bool
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
     // =========================================================================
     // Collection Rules
     // =========================================================================
@@ -665,8 +858,15 @@ service cloud.firestore {
             isOwner(userId)
             && incoming().role == existing().role
             && incoming().kycStatus == 'pending'
+            && (!('kycApiVerificationStatus' in incoming()) || incoming().kycApiVerificationStatus in ['none', 'ocr_preview_only', 'manual_review'])
+            && (!('kycRejectionReason' in incoming()) || incoming().kycRejectionReason == '')
+            && (!('kycResubmissionRequested' in incoming()) || incoming().kycResubmissionRequested == false)
             && incoming().diff(existing()).affectedKeys().hasOnly([
-              'fullName', 'idType', 'idNumber', 'idPhotoData', 'portraitPhotoData', 'kycStatus', 'updatedAt'
+              'fullName', 'idType', 'idNumber', 'idPhotoData', 'idBackPhotoData', 'portraitPhotoData',
+              'kycStatus', 'kycCountryCode', 'kycCountryName', 'kycDateOfBirth', 'kycNationality',
+              'kycIssueDate', 'kycExpiryDate', 'kycAddress', 'kycRejectionReason',
+              'kycResubmissionRequested', 'kycVerificationMethod', 'kycApiVerificationStatus',
+              'kycOcrConfidence', 'kycLivenessPassed', 'kycSubmittedAtMs', 'updatedAt'
             ])
           )
           || (
@@ -735,6 +935,48 @@ service cloud.firestore {
           ]);
         allow delete: if isValidId(userId) && isValidId(methodDocId) && isVerifiedUser() && (isOwner(userId) || isAdmin());
       }
+
+      match /notifications/{notificationId} {
+        allow get: if isValidId(userId) && isValidId(notificationId) && (isOwner(userId) || isAdmin());
+        allow list: if isValidId(userId) && isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+        allow create: if isValidId(userId)
+          && isValidId(notificationId)
+          && isSignedIn()
+          && isValidUserNotification(incoming(), userId)
+          && incoming().read == false
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && (
+            isAdmin()
+            || (
+              isOwner(userId)
+              && incoming().type == 'ticket_received'
+              && existsAfter(/databases/$(database)/documents/supportTickets/$(incoming().ticketId))
+              && getAfter(/databases/$(database)/documents/supportTickets/$(incoming().ticketId)).data.uid == request.auth.uid
+            )
+          );
+        allow update: if isValidId(userId)
+          && isValidId(notificationId)
+          && isSignedIn()
+          && (isOwner(userId) || isAdmin())
+          && isValidUserNotification(incoming(), userId)
+          && incoming().uid == existing().uid
+          && incoming().type == existing().type
+          && incoming().ticketId == existing().ticketId
+          && incoming().ticketNumber == existing().ticketNumber
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            isAdmin()
+            || (
+              isOwner(userId)
+              && incoming().read == true
+              && incoming().diff(existing()).affectedKeys().hasOnly(['read', 'updatedAt'])
+            )
+          );
+        allow delete: if false;
+      }
     }
 
     match /handles/{handle} {
@@ -795,6 +1037,24 @@ service cloud.firestore {
         && isValidReferralStat(incoming(), handle)
         && incoming().handle == existing().handle
         && incoming().clicks == existing().clicks + 1;
+      allow delete: if false;
+    }
+
+    match /marketingCardStats/{docId} {
+      allow get: if isValidId(docId) && isSignedIn();
+      allow list: if isAdmin();
+      allow create: if docId == 'global'
+        && isSignedIn()
+        && isValidMarketingCardStats(incoming())
+        && incoming().totalGenerated <= 1
+        && incoming().totalShared <= 1;
+      allow update: if docId == 'global'
+        && isSignedIn()
+        && isValidMarketingCardStats(incoming())
+        && (
+          (incoming().totalGenerated == existing().totalGenerated + 1 && incoming().totalShared == existing().totalShared) ||
+          (incoming().totalShared == existing().totalShared + 1 && incoming().totalGenerated == existing().totalGenerated)
+        );
       allow delete: if false;
     }
 
@@ -865,7 +1125,7 @@ service cloud.firestore {
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time
         && (
-          (incoming().type == 'instant_profit' && incoming().status == 'completed') ||
+          (incoming().type == 'instant_profit' && incoming().status in ['pending', 'completed']) ||
           (incoming().type == 'manual_capital' && incoming().status == 'pending')
         );
       allow update: if isValidId(withdrawalId)
@@ -1075,6 +1335,78 @@ service cloud.firestore {
         && isAdmin()
         && isValidAdminActionLog(incoming());
       allow update, delete: if false;
+    }
+
+    match /supportChats/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isValidId(userId)
+        && isSignedIn()
+        && (isOwner(userId) || isAdmin())
+        && isValidSupportChatThread(incoming(), userId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(userId)
+        && isSignedIn()
+        && isValidSupportChatThread(incoming(), userId)
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            isOwner(userId)
+            && incoming().lastSender == 'client'
+            && incoming().status == 'open'
+            && incoming().unreadByAdmin >= existing().unreadByAdmin
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'lastMessage', 'lastSender', 'status', 'unreadByAdmin', 'unreadByClient', 'updatedAt'
+            ])
+          )
+          || (
+            isOwner(userId)
+            && incoming().unreadByClient == 0
+            && incoming().diff(existing()).affectedKeys().hasOnly(['unreadByClient', 'updatedAt'])
+          )
+        );
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow get: if isValidId(userId) && isValidId(messageId) && (isOwner(userId) || isAdmin());
+        allow list: if isValidId(userId) && isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+        allow create: if isValidId(userId)
+          && isValidId(messageId)
+          && isSignedIn()
+          && (isOwner(userId) || isAdmin())
+          && isValidSupportChatMessage(incoming(), userId)
+          && (
+            (isAdmin() && incoming().senderRole == 'admin')
+            || (isOwner(userId) && incoming().senderRole == 'client')
+          );
+        allow update, delete: if false;
+      }
+    }
+
+    match /supportTickets/{ticketId} {
+      allow get: if isValidId(ticketId) && isSignedIn() && (existing().uid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow create: if isValidId(ticketId)
+        && isSignedIn()
+        && isValidSupportTicket(incoming())
+        && incoming().uid == request.auth.uid
+        && incoming().status == 'open'
+        && incoming().adminReply == ''
+        && incoming().resolvedBy == ''
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(ticketId)
+        && isAdmin()
+        && isValidSupportTicket(incoming())
+        && incoming().uid == existing().uid
+        && incoming().ticketNumber == existing().ticketNumber
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time;
+      allow delete: if false;
     }
   }
 }

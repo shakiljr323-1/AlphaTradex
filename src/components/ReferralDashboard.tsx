@@ -4,6 +4,7 @@ import {
   Award,
   Check,
   Copy,
+  Image as ImageIcon,
   MousePointerClick,
   Network,
   Search,
@@ -30,6 +31,7 @@ interface ReferralDashboardProps {
   copiedText: string;
   onCopyValue: (label: string, val: string) => void;
   onOpenWithdraw?: () => void;
+  onOpenPromoStudio?: () => void;
 }
 
 export const ReferralDashboard: React.FC<ReferralDashboardProps> = ({
@@ -42,6 +44,7 @@ export const ReferralDashboard: React.FC<ReferralDashboardProps> = ({
   copiedText,
   onCopyValue,
   onOpenWithdraw,
+  onOpenPromoStudio,
 }) => {
   const [levelFilter, setLevelFilter] = useState<'all' | 1 | 2 | 3>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -165,6 +168,16 @@ export const ReferralDashboard: React.FC<ReferralDashboardProps> = ({
               )}
               {copiedText === 'reflink' ? 'Link Copied' : 'Copy Referral Link'}
             </button>
+            {onOpenPromoStudio && (
+              <button
+                type="button"
+                onClick={onOpenPromoStudio}
+                className="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-amber-500/40 text-amber-300 text-xs font-bold inline-flex items-center gap-1.5 transition"
+              >
+                <ImageIcon className="w-3.5 h-3.5" />
+                Promo Card Studio
+              </button>
+            )}
           </div>
         </div>
 
@@ -186,7 +199,11 @@ export const ReferralDashboard: React.FC<ReferralDashboardProps> = ({
             </button>
           </div>
 
-          <div className="lg:col-span-5 grid grid-cols-3 sm:grid-cols-4 gap-2">
+          <div
+            className={`lg:col-span-5 grid gap-2 ${
+              userProfile.isMentor ? 'grid-cols-3 sm:grid-cols-4' : 'grid-cols-3'
+            }`}
+          >
             <div className="px-3 py-2 rounded-xl bg-slate-900/75 border border-slate-700/70 text-center">
               <div className="text-[11px] text-slate-400">Level 1</div>
               <div className="font-mono font-bold text-sm text-emerald-400 tabular-nums">
@@ -205,14 +222,16 @@ export const ReferralDashboard: React.FC<ReferralDashboardProps> = ({
                 {platformConfig.mlmRates.level3}%
               </div>
             </div>
-            <div className="px-3 py-2 rounded-xl bg-slate-900/75 border border-slate-700/70 text-center col-span-3 sm:col-span-1">
-              <div className="text-[11px] text-slate-400">Mentor</div>
-              <div className="font-mono font-bold text-sm text-orange-400 tabular-nums">
-                {platformConfig.mentorConfig?.enabled
-                  ? `+${platformConfig.mentorConfig.mentorCommissionPercent}%`
-                  : 'Off'}
+            {userProfile.isMentor && (
+              <div className="px-3 py-2 rounded-xl bg-slate-900/75 border border-slate-700/70 text-center col-span-3 sm:col-span-1">
+                <div className="text-[11px] text-slate-400">Mentor</div>
+                <div className="font-mono font-bold text-sm text-orange-400 tabular-nums">
+                  {platformConfig.mentorConfig?.enabled
+                    ? `+${platformConfig.mentorConfig.mentorCommissionPercent}%`
+                    : 'Off'}
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       </div>
@@ -369,7 +388,11 @@ export const ReferralDashboard: React.FC<ReferralDashboardProps> = ({
             </div>
           </div>
 
-          <div className="pt-2 border-t border-slate-800 grid grid-cols-2 gap-2.5 text-xs">
+          <div
+            className={`pt-2 border-t border-slate-800 grid gap-2.5 text-xs ${
+              userProfile.isMentor ? 'grid-cols-2' : 'grid-cols-3'
+            }`}
+          >
             <div className="p-3 rounded-xl bg-slate-900/75 border border-slate-700/70 flex items-center justify-between">
               <span className="text-slate-400">L1 Direct</span>
               <span className="font-mono font-bold text-emerald-400 tabular-nums">
@@ -388,12 +411,14 @@ export const ReferralDashboard: React.FC<ReferralDashboardProps> = ({
                 ${metrics.level3Earned.toFixed(2)}
               </span>
             </div>
-            <div className="p-3 rounded-xl bg-slate-900/75 border border-slate-700/70 flex items-center justify-between">
-              <span className="text-slate-400">Mentor</span>
-              <span className="font-mono font-bold text-orange-400 tabular-nums">
-                ${metrics.mentorEarned.toFixed(2)}
-              </span>
-            </div>
+            {userProfile.isMentor && (
+              <div className="p-3 rounded-xl bg-slate-900/75 border border-slate-700/70 flex items-center justify-between">
+                <span className="text-slate-400">Mentor</span>
+                <span className="font-mono font-bold text-orange-400 tabular-nums">
+                  ${metrics.mentorEarned.toFixed(2)}
+                </span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -439,7 +464,7 @@ export const ReferralDashboard: React.FC<ReferralDashboardProps> = ({
             })}
           </div>
 
-          {platformConfig.mentorConfig?.enabled && (
+          {userProfile.isMentor && platformConfig.mentorConfig?.enabled && (
             <div className="p-3 rounded-xl bg-sky-950/50 border border-sky-500/35 flex items-center justify-between gap-2 text-xs">
               <span className="text-sky-200 font-medium">
                 Mentor Override Bonus ({platformConfig.mentorConfig.volumeMultiplier}× network rule)

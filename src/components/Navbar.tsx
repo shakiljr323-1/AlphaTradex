@@ -10,6 +10,7 @@ import {
   Layers,
   Lock,
   Menu,
+  Newspaper,
   PanelLeft,
   ShieldCheck,
   Users,
@@ -28,9 +29,11 @@ interface NavbarProps {
   onOpenRegister: () => void;
   globalPaused: boolean;
   isSignedIn?: boolean;
+  isMentor?: boolean;
   requireSignupForModules?: boolean;
   moduleControls?: AdminModuleControls;
   onOpenDashboard?: () => void;
+  onOpenMentorDashboard?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -43,16 +46,19 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenRegister,
   globalPaused,
   isSignedIn = false,
+  isMentor = false,
   requireSignupForModules = true,
   moduleControls,
   onOpenDashboard,
+  onOpenMentorDashboard,
 }) => {
   const [slideBarOpen, setSlideBarOpen] = useState(false);
 
   const publicNavItems: { id: NavSection; label: string; Icon: React.ComponentType<{ className?: string }> }[] = [
     { id: 'home', label: 'Home Overview', Icon: Home },
     { id: 'plans', label: 'Investment Plans', Icon: Layers },
-    { id: 'mentor-referral', label: 'Referrals & Mentor', Icon: Users },
+    { id: 'forex-news', label: 'Forex News', Icon: Newspaper },
+    { id: 'mentor-referral', label: isMentor ? 'Referrals & Mentor' : 'Referrals', Icon: Users },
   ];
 
   const allGatedModuleItems: {
@@ -184,13 +190,24 @@ export const Navbar: React.FC<NavbarProps> = ({
             </span>
 
             {isSignedIn && onOpenDashboard ? (
-              <button
-                type="button"
-                onClick={onOpenDashboard}
-                className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 transition-colors shadow-sm whitespace-nowrap shrink-0"
-              >
-                Vault Dashboard
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                {isMentor && onOpenMentorDashboard && (
+                  <button
+                    type="button"
+                    onClick={onOpenMentorDashboard}
+                    className="px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold text-amber-200 border border-amber-500/50 bg-amber-500/15 hover:bg-amber-500/25 transition-colors whitespace-nowrap shrink-0"
+                  >
+                    Mentor Dashboard
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={onOpenDashboard}
+                  className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 transition-colors shadow-sm whitespace-nowrap shrink-0"
+                >
+                  Vault Dashboard
+                </button>
+              </div>
             ) : (
               <>
                 <button
@@ -369,17 +386,32 @@ export const Navbar: React.FC<NavbarProps> = ({
         {/* Slide Bar Bottom Auth / Vault Actions */}
         <div className="p-5 border-t border-slate-800/90 bg-[#060A14] space-y-2.5">
           {isSignedIn && onOpenDashboard ? (
-            <button
-              type="button"
-              onClick={() => {
-                setSlideBarOpen(false);
-                onOpenDashboard();
-              }}
-              className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white text-sm font-bold inline-flex items-center justify-center gap-2 transition-colors"
-            >
-              <span>Open Vault Dashboard</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
+            <div className="space-y-2">
+              {isMentor && onOpenMentorDashboard && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSlideBarOpen(false);
+                    onOpenMentorDashboard();
+                  }}
+                  className="w-full py-2.5 px-4 rounded-xl border border-amber-500/50 bg-amber-500/15 hover:bg-amber-500/25 text-amber-200 text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors"
+                >
+                  <span>Open Mentor Dashboard</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setSlideBarOpen(false);
+                  onOpenDashboard();
+                }}
+                className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white text-sm font-bold inline-flex items-center justify-center gap-2 transition-colors"
+              >
+                <span>Open Vault Dashboard</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
           ) : (
             <div className="grid grid-cols-2 gap-2.5">
               <button

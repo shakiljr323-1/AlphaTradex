@@ -3,6 +3,32 @@ export type PaymentMethodCategory = 'crypto' | 'exchange' | 'mobile_banking' | '
 export type AnnouncementTone = 'info' | 'warning' | 'urgent' | 'success';
 export type IdType = 'NID' | 'Passport' | 'Driving License';
 export type KycStatus = 'unsubmitted' | 'pending' | 'approved' | 'rejected';
+export type KycProviderId =
+  | 'free_qr_mrz_ocr'
+  | 'free_ai_ocr'
+  | 'didit_free'
+  | 'sumsub'
+  | 'veriff'
+  | 'shufti_pro'
+  | 'custom_webhook';
+export type KycApiVerificationStatus =
+  | 'ocr_preview_only'
+  | 'live_api_pending'
+  | 'live_api_verified'
+  | 'manual_review';
+
+export interface GlobalKycSettings {
+  enabled: boolean;
+  requireKycForDeposits: boolean;
+  requireKycForPackages: boolean;
+  requireKycForClaims: boolean;
+  requireKycForWithdrawals: boolean;
+  allowFreeAiOcr: boolean;
+  requireBackSideForCards: boolean;
+  requireLiveSelfie: boolean;
+  activeProvider: KycProviderId;
+  disabledCountryCodes: string[];
+}
 
 export interface DashboardAnnouncement {
   enabled: boolean;
@@ -174,6 +200,18 @@ export interface SupportLinksConfig {
   supportEmail: string;
 }
 
+export interface SupportAutoResponderConfig {
+  enabled: boolean;
+  notifyOnStatusChange: boolean;
+  senderName: string;
+  subjectTemplate: string;
+  bodyTemplate: string;
+  slaUrgent: string;
+  slaHigh: string;
+  slaMedium: string;
+  slaLow: string;
+}
+
 export interface AdminActionLog {
   id: string;
   adminUid: string;
@@ -217,6 +255,69 @@ export interface PlatformConfig {
   coinMiningSettings: CoinMiningSettings;
   coinMiningPlans: CoinMiningPlan[];
   forexConfig?: ForexPlatformConfig;
+  supportAutoResponder?: SupportAutoResponderConfig;
+  kycSettings?: GlobalKycSettings;
+  marketingCardsConfig?: MarketingCardsConfig;
+  updatedAt?: unknown;
+}
+
+export type MarketingCardThemeId =
+  | 'navy_gold'
+  | 'emerald_green'
+  | 'cyber_cyan'
+  | 'royal_purple';
+
+export type MarketingCardAspectRatio = '1:1' | '9:16' | '16:9';
+
+export type MarketingCardPhotoFrame = 'circle' | 'rounded' | 'square';
+
+export type MarketingCardCategory =
+  | 'member'
+  | 'package'
+  | 'trading'
+  | 'referral'
+  | 'milestone'
+  | 'launchpad'
+  | 'custom';
+
+export interface MarketingCardTemplateConfig {
+  id: string;
+  name: string;
+  category: MarketingCardCategory;
+  enabled: boolean;
+  headline: string;
+  subheadline: string;
+  badgeText: string;
+  ctaText: string;
+  defaultTheme: MarketingCardThemeId;
+  isCustom?: boolean;
+  overlayImageData?: string;
+  photoSlot?: {
+    xPct: number;
+    yPct: number;
+    sizePct: number;
+  };
+  textSlot?: {
+    xPct: number;
+    yPct: number;
+  };
+}
+
+export interface MarketingCardsConfig {
+  enabled: boolean;
+  allowQrCode: boolean;
+  allowReferralCode: boolean;
+  allowRankBadge: boolean;
+  allowPackageBadge: boolean;
+  defaultHeadline: string;
+  defaultTagline: string;
+  disclaimerText: string;
+  templates: MarketingCardTemplateConfig[];
+}
+
+export interface MarketingCardStats {
+  totalGenerated: number;
+  totalShared: number;
   updatedAt?: unknown;
 }
 
@@ -233,8 +334,25 @@ export interface UserProfile {
   idType: IdType | '';
   idNumber: string;
   idPhotoData: string;
+  idBackPhotoData?: string;
   portraitPhotoData: string;
   avatarData?: string;
+  kycCountryCode?: string;
+  kycCountryName?: string;
+  kycDateOfBirth?: string;
+  kycNationality?: string;
+  kycIssueDate?: string;
+  kycExpiryDate?: string;
+  kycAddress?: string;
+  kycRejectionReason?: string;
+  kycResubmissionRequested?: boolean;
+  kycVerificationMethod?: KycProviderId | 'manual_upload';
+  kycApiVerificationStatus?: KycApiVerificationStatus;
+  kycOcrConfidence?: 'HIGH' | 'MEDIUM' | 'LOW' | '';
+  kycLivenessPassed?: boolean;
+  kycSubmittedAtMs?: number;
+  kycReviewedAtMs?: number;
+  kycReviewedBy?: string;
   countryCode?: string;
   countryName?: string;
   phoneDialPrefix?: string;
@@ -460,9 +578,110 @@ export interface CopyTradeSubscription {
 
 export type PackageFundingSource = 'deposit_wallet' | 'income_wallet' | 'combined';
 
+export type SupportTicketCategory =
+  | 'deposit'
+  | 'withdrawal'
+  | 'kyc'
+  | 'trading'
+  | 'forex'
+  | 'p2p'
+  | 'account'
+  | 'other';
+
+export type SupportTicketPriority = 'low' | 'medium' | 'high' | 'urgent';
+
+export type SupportTicketStatus = 'open' | 'in_progress' | 'resolved' | 'closed';
+
+export interface SupportChatThread {
+  uid: string;
+  userName: string;
+  userEmail: string;
+  userHandle: string;
+  status: 'open' | 'resolved';
+  lastMessage: string;
+  lastSender: 'client' | 'admin';
+  unreadByAdmin: number;
+  unreadByClient: number;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
+export interface SupportChatMessage {
+  id: string;
+  uid: string;
+  senderUid: string;
+  senderRole: 'client' | 'admin';
+  senderName: string;
+  text: string;
+  topicTag: string;
+  createdAt?: unknown;
+}
+
+export interface SupportTicket {
+  id: string;
+  uid: string;
+  userName: string;
+  userEmail: string;
+  userHandle: string;
+  ticketNumber: string;
+  category: SupportTicketCategory;
+  priority: SupportTicketPriority;
+  subject: string;
+  description: string;
+  referenceId: string;
+  status: SupportTicketStatus;
+  adminReply: string;
+  resolvedBy: string;
+  autoAckMessage?: string;
+  estimatedResponseTime?: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
+export type UserNotificationType =
+  | 'ticket_received'
+  | 'ticket_status_update'
+  | 'support_reply';
+
+export interface UserNotification {
+  id: string;
+  uid: string;
+  type: UserNotificationType;
+  ticketId: string;
+  ticketNumber: string;
+  recipientEmail: string;
+  senderName: string;
+  title: string;
+  emailSubject: string;
+  message: string;
+  category: string;
+  priority: string;
+  estimatedResponseTime: string;
+  read: boolean;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
+export interface TicketConfirmationReceipt {
+  ticketId: string;
+  ticketNumber: string;
+  notificationId: string;
+  recipientEmail: string;
+  senderName: string;
+  emailSubject: string;
+  message: string;
+  category: SupportTicketCategory;
+  priority: SupportTicketPriority;
+  subject: string;
+  referenceId: string;
+  estimatedResponseTime: string;
+  sentAtIso: string;
+}
+
 export type NavSection =
   | 'home'
   | 'plans'
+  | 'forex-news'
   | 'ai-trading'
   | 'forex'
   | 'pump-fun'

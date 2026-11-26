@@ -40,6 +40,9 @@ import { IdType, NavSection } from '../types/platform';
 import { compressImageToDataUrl, isWeekendDate } from '../utils/investmentMath';
 import { AlphatradexCoinHub, BannerAdSlot } from './AlphatradexCoinHub';
 import { ForexMarketView } from './ForexMarketView';
+import { ForexNewsHub } from './ForexNewsHub';
+import { HomepageMarketNewsModule } from './HomepageMarketNewsModule';
+import { HomepageFaqAccordion } from './HomepageFaqAccordion';
 import { AlphatradexLogo3D } from './AlphatradexLogo3D';
 import { TermsAgreementCheckbox, TermsAndConditionsView } from './TermsAndConditionsView';
 
@@ -1673,6 +1676,11 @@ export const FrontPage: React.FC<FrontPageProps> = ({
             </div>
           </div>
 
+          {/* Gemini-Powered Daily Crypto, AI Trading & Forex Market Trends Ticker & Module */}
+          <HomepageMarketNewsModule
+            onOpenForexNews={() => onSelectSection('forex-news')}
+          />
+
           {/* Dedicated Feature Navigation Grid */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <button
@@ -1823,6 +1831,15 @@ export const FrontPage: React.FC<FrontPageProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Dynamic Self-Service FAQ Accordion (Vault Deposits & AI Packages) */}
+          <HomepageFaqAccordion
+            platformConfig={platformConfig}
+            isSignedIn={Boolean(authUser)}
+            onSelectSection={onSelectSection}
+            onOpenAuth={onOpenAuth}
+            onOpenDashboard={onOpenDashboard}
+          />
 
           <div className="bg-amber-950/55 backdrop-blur-md border border-amber-600/40 rounded-xl p-4 flex items-start gap-3">
             <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
@@ -2157,7 +2174,7 @@ export const FrontPage: React.FC<FrontPageProps> = ({
         </div>
       )}
 
-      {/* 6. DEDICATED MULTI-LEVEL REFERRAL & MENTOR PROGRAM PAGE */}
+      {/* 6. DEDICATED MULTI-LEVEL REFERRAL PROGRAM PAGE (Mentor card shown only to gifted Mentors) */}
       {activeSection === 'mentor-referral' && (
         <div className="space-y-6">
           <div className="bg-[#0B111E]/82 backdrop-blur-md border border-slate-700/70 rounded-2xl p-6 sm:p-7 shadow-xl flex flex-wrap items-center justify-between gap-4">
@@ -2167,7 +2184,9 @@ export const FrontPage: React.FC<FrontPageProps> = ({
                 <span>ALL-PLAN MULTI-LEVEL COMMISSION STRUCTURE</span>
               </div>
               <h1 className="font-display font-extrabold text-white text-2xl sm:text-3xl tracking-tight">
-                Referral &amp; Mentor Commission Program
+                {userProfile?.isMentor
+                  ? 'Referral & Mentor Commission Program'
+                  : 'Referral Commission Program'}
               </h1>
               <p className="text-xs sm:text-sm text-slate-300 max-w-2xl">
                 Every active investment package pays instant Level 1–3 referral commissions directly into your Income Wallet.
@@ -2185,7 +2204,9 @@ export const FrontPage: React.FC<FrontPageProps> = ({
 
           <div
             className={`grid grid-cols-1 gap-5 ${
-              platformConfig.mentorConfig?.enabled ? 'md:grid-cols-4' : 'md:grid-cols-3'
+              userProfile?.isMentor && platformConfig.mentorConfig?.enabled
+                ? 'md:grid-cols-4'
+                : 'md:grid-cols-3'
             }`}
           >
             <div className="p-6 rounded-2xl bg-[#0B111E]/80 border border-slate-700/70 text-center space-y-2 shadow-xl">
@@ -2215,7 +2236,7 @@ export const FrontPage: React.FC<FrontPageProps> = ({
                 Earned across third-level partner activations with instant payout access.
               </p>
             </div>
-            {platformConfig.mentorConfig?.enabled && (
+            {userProfile?.isMentor && platformConfig.mentorConfig?.enabled && (
               <div className="p-6 rounded-2xl bg-[#0B111E]/80 border border-sky-500/45 text-center space-y-2 shadow-xl">
                 <div className="text-xs font-mono text-sky-400 uppercase">Mentor · Override</div>
                 <div className="font-mono font-extrabold text-4xl text-sky-300 tabular-nums">
@@ -2293,7 +2314,10 @@ export const FrontPage: React.FC<FrontPageProps> = ({
         </div>
       )}
 
-      {/* 7. DEDICATED TERMS & CONDITIONS PAGE */}
+      {/* 7. DEDICATED FOREX & CRYPTO NEWS HUB (Myfxbook-Style Auto-Publishing Desk) */}
+      {activeSection === 'forex-news' && <ForexNewsHub />}
+
+      {/* 8. DEDICATED TERMS & CONDITIONS PAGE */}
       {activeSection === 'terms' && (
         <TermsAndConditionsView
           onBack={() => onSelectSection('home')}

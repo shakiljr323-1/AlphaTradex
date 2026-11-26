@@ -4,6 +4,7 @@ import {
   Award,
   CheckCircle2,
   Copy,
+  Flame,
   Globe,
   History,
   Layers,
@@ -32,10 +33,11 @@ import {
   AlphatradexTickerTape,
   ChartPositionOverlay,
 } from './TradingViewChart';
+import { CryptoSentimentHeatmap } from './CryptoSentimentHeatmap';
 
 type Timeframe = '15M' | '1H' | '4H' | '1D' | '1W';
 type ChartMode = 'candles' | 'area';
-type TerminalTab = 'terminal' | 'copy-trade' | 'account-tiers';
+type TerminalTab = 'terminal' | 'sentiment-heatmap' | 'copy-trade' | 'account-tiers';
 type OrdersTab = 'open' | 'history';
 
 export interface ForexPairSpec {
@@ -681,7 +683,7 @@ export const ForexMarketView: React.FC<ForexMarketViewProps> = ({
           <button
             type="button"
             onClick={() => setTerminalTab('terminal')}
-            className={`px-3.5 py-2 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors ${
+            className={`px-3.5 py-2 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap ${
               terminalTab === 'terminal'
                 ? 'bg-orange-600 text-white'
                 : 'text-slate-300 hover:text-white'
@@ -692,8 +694,20 @@ export const ForexMarketView: React.FC<ForexMarketViewProps> = ({
           </button>
           <button
             type="button"
+            onClick={() => setTerminalTab('sentiment-heatmap')}
+            className={`px-3.5 py-2 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+              terminalTab === 'sentiment-heatmap'
+                ? 'bg-orange-600 text-white'
+                : 'text-slate-300 hover:text-white'
+            }`}
+          >
+            <Flame className="w-3.5 h-3.5" />
+            Crypto Sentiment Heatmap
+          </button>
+          <button
+            type="button"
             onClick={() => setTerminalTab('copy-trade')}
-            className={`px-3.5 py-2 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors ${
+            className={`px-3.5 py-2 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap ${
               terminalTab === 'copy-trade'
                 ? 'bg-orange-600 text-white'
                 : 'text-slate-300 hover:text-white'
@@ -705,7 +719,7 @@ export const ForexMarketView: React.FC<ForexMarketViewProps> = ({
           <button
             type="button"
             onClick={() => setTerminalTab('account-tiers')}
-            className={`px-3.5 py-2 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors ${
+            className={`px-3.5 py-2 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap ${
               terminalTab === 'account-tiers'
                 ? 'bg-orange-600 text-white'
                 : 'text-slate-300 hover:text-white'
@@ -1516,7 +1530,23 @@ export const ForexMarketView: React.FC<ForexMarketViewProps> = ({
               </div>
             )}
           </div>
+
+          {/* Embedded Real-Time Crypto Market Sentiment Heatmap */}
+          <CryptoSentimentHeatmap
+            compact
+            onExpandFullTab={() => {
+              setTerminalTab('sentiment-heatmap');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          />
         </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* TAB 1B: FULL REAL-TIME CRYPTO MARKET SENTIMENT HEATMAP (RECHARTS)     */}
+      {/* ===================================================================== */}
+      {terminalTab === 'sentiment-heatmap' && (
+        <CryptoSentimentHeatmap />
       )}
 
       {/* ===================================================================== */}

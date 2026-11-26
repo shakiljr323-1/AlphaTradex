@@ -35,6 +35,9 @@
         "coinMiningSettings": { "type": "object" },
         "coinMiningPlans": { "type": "array" },
         "forexConfig": { "type": "object" },
+        "supportAutoResponder": { "type": "object" },
+        "kycSettings": { "type": "object" },
+        "marketingCardsConfig": { "type": "object" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": [
@@ -68,8 +71,25 @@
         "idType": { "type": "string", "enum": ["NID", "Passport", "Driving License", ""] },
         "idNumber": { "type": "string", "maxLength": 64 },
         "idPhotoData": { "type": "string", "maxLength": 300000 },
+        "idBackPhotoData": { "type": "string", "maxLength": 300000 },
         "portraitPhotoData": { "type": "string", "maxLength": 300000 },
         "avatarData": { "type": "string", "maxLength": 300000 },
+        "kycCountryCode": { "type": "string", "maxLength": 8, "pattern": "^([A-Z]{2,4})?$" },
+        "kycCountryName": { "type": "string", "maxLength": 80 },
+        "kycDateOfBirth": { "type": "string", "maxLength": 32 },
+        "kycNationality": { "type": "string", "maxLength": 80 },
+        "kycIssueDate": { "type": "string", "maxLength": 32 },
+        "kycExpiryDate": { "type": "string", "maxLength": 32 },
+        "kycAddress": { "type": "string", "maxLength": 260 },
+        "kycRejectionReason": { "type": "string", "maxLength": 400 },
+        "kycResubmissionRequested": { "type": "boolean" },
+        "kycVerificationMethod": { "type": "string", "maxLength": 80 },
+        "kycApiVerificationStatus": { "type": "string", "enum": ["none", "ocr_preview_only", "manual_review", "live_api_pending", "live_api_verified"] },
+        "kycOcrConfidence": { "type": "number" },
+        "kycLivenessPassed": { "type": "boolean" },
+        "kycSubmittedAtMs": { "type": "number" },
+        "kycReviewedAtMs": { "type": "number" },
+        "kycReviewedBy": { "type": "string", "maxLength": 120 },
         "countryCode": { "type": "string", "maxLength": 8, "pattern": "^([A-Z]{2,4})?$" },
         "countryName": { "type": "string", "maxLength": 80 },
         "phoneDialPrefix": { "type": "string", "maxLength": 12, "pattern": "^(\\+[0-9]{1,8})?$" },
@@ -569,6 +589,146 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["adminUid", "adminEmail", "action", "targetUid", "targetLabel", "details", "amountUsd", "createdAt"]
+    },
+    "SupportChatThread": {
+      "title": "SupportChatThread",
+      "description": "Per-user live support chat thread metadata synced in real time between client and Super Admin.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userName": { "type": "string", "maxLength": 120 },
+        "userEmail": { "type": "string", "maxLength": 254 },
+        "userHandle": { "type": "string", "maxLength": 32 },
+        "status": { "type": "string", "enum": ["open", "resolved"] },
+        "lastMessage": { "type": "string", "maxLength": 500 },
+        "lastSender": { "type": "string", "enum": ["client", "admin"] },
+        "unreadByAdmin": { "type": "number", "minimum": 0 },
+        "unreadByClient": { "type": "number", "minimum": 0 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid",
+        "userName",
+        "userEmail",
+        "userHandle",
+        "status",
+        "lastMessage",
+        "lastSender",
+        "unreadByAdmin",
+        "unreadByClient",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SupportChatMessage": {
+      "title": "SupportChatMessage",
+      "description": "Immutable live support chat message inside a user's supportChats thread.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "senderUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "senderRole": { "type": "string", "enum": ["client", "admin"] },
+        "senderName": { "type": "string", "maxLength": 120 },
+        "text": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "topicTag": { "type": "string", "maxLength": 80 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "senderUid", "senderRole", "senderName", "text", "topicTag", "createdAt"]
+    },
+    "SupportTicket": {
+      "title": "SupportTicket",
+      "description": "Formal client complaint and support ticket tracked through Super Admin resolution.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userName": { "type": "string", "maxLength": 120 },
+        "userEmail": { "type": "string", "maxLength": 254 },
+        "userHandle": { "type": "string", "maxLength": 32 },
+        "ticketNumber": { "type": "string", "maxLength": 32 },
+        "category": {
+          "type": "string",
+          "enum": ["deposit", "withdrawal", "kyc", "trading", "forex", "p2p", "account", "other"]
+        },
+        "priority": { "type": "string", "enum": ["low", "medium", "high", "urgent"] },
+        "subject": { "type": "string", "minLength": 3, "maxLength": 140 },
+        "description": { "type": "string", "minLength": 5, "maxLength": 2500 },
+        "referenceId": { "type": "string", "maxLength": 120 },
+        "status": { "type": "string", "enum": ["open", "in_progress", "resolved", "closed"] },
+        "adminReply": { "type": "string", "maxLength": 2000 },
+        "resolvedBy": { "type": "string", "maxLength": 120 },
+        "autoAckMessage": { "type": "string", "maxLength": 2000 },
+        "estimatedResponseTime": { "type": "string", "maxLength": 80 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid",
+        "userName",
+        "userEmail",
+        "userHandle",
+        "ticketNumber",
+        "category",
+        "priority",
+        "subject",
+        "description",
+        "referenceId",
+        "status",
+        "adminReply",
+        "resolvedBy",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "UserNotification": {
+      "title": "UserNotification",
+      "description": "Automated support ticket confirmation and status update notifications stored under /users/{userId}/notifications/{notificationId}.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "type": { "type": "string", "enum": ["ticket_received", "ticket_status_update", "support_reply"] },
+        "ticketId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ticketNumber": { "type": "string", "maxLength": 32 },
+        "recipientEmail": { "type": "string", "maxLength": 254 },
+        "senderName": { "type": "string", "maxLength": 120 },
+        "title": { "type": "string", "maxLength": 160 },
+        "emailSubject": { "type": "string", "maxLength": 200 },
+        "message": { "type": "string", "minLength": 5, "maxLength": 2500 },
+        "category": { "type": "string", "maxLength": 40 },
+        "priority": { "type": "string", "maxLength": 20 },
+        "estimatedResponseTime": { "type": "string", "maxLength": 80 },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid",
+        "type",
+        "ticketId",
+        "ticketNumber",
+        "recipientEmail",
+        "senderName",
+        "title",
+        "emailSubject",
+        "message",
+        "category",
+        "priority",
+        "estimatedResponseTime",
+        "read",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "MarketingCardStats": {
+      "title": "MarketingCardStats",
+      "description": "Platform-wide counters tracking total promotional marketing cards generated and shared.",
+      "type": "object",
+      "properties": {
+        "totalGenerated": { "type": "number" },
+        "totalShared": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["totalGenerated", "totalShared", "updatedAt"]
     }
   },
   "firestore": {
@@ -584,6 +744,10 @@
       "schema": { "$ref": "#/entities/UserPaymentMethod" },
       "description": "User saved payout / payment method accounts for quick withdrawals."
     },
+    "/users/{userId}/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/UserNotification" },
+      "description": "Automated support ticket confirmation receipts and status update notifications for a user."
+    },
     "/handles/{handle}": {
       "schema": { "$ref": "#/entities/PublicHandle" },
       "description": "Non-PII handle lookup for referral codes and P2P transfers."
@@ -595,6 +759,10 @@
     "/referralStats/{handle}": {
       "schema": { "$ref": "#/entities/ReferralStats" },
       "description": "Referral link click counter keyed by referrer handle."
+    },
+    "/marketingCardStats/{docId}": {
+      "schema": { "$ref": "#/entities/MarketingCardStats" },
+      "description": "Aggregate counter for promotional marketing cards generated and shared."
     },
     "/investments/{investmentId}": {
       "schema": { "$ref": "#/entities/Investment" },
@@ -647,6 +815,18 @@
     "/adminLogs/{logId}": {
       "schema": { "$ref": "#/entities/AdminActionLog" },
       "description": "Immutable Super Admin action audit logs."
+    },
+    "/supportChats/{userId}": {
+      "schema": { "$ref": "#/entities/SupportChatThread" },
+      "description": "Per-client live support chat thread state."
+    },
+    "/supportChats/{userId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/SupportChatMessage" },
+      "description": "Real-time live chat messages between a client and Super Admin."
+    },
+    "/supportTickets/{ticketId}": {
+      "schema": { "$ref": "#/entities/SupportTicket" },
+      "description": "Client complaint and support tickets managed in the Super Admin desk."
     }
   }
 }

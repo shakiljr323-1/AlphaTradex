@@ -8,6 +8,7 @@ import { AdminRouteGate } from './components/AdminRouteGate';
 import { AiRobotBackdrop } from './components/AiRobotBackdrop';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { FrontPage } from './components/FrontPage';
+import { MentorDashboard } from './components/MentorDashboard';
 import { Navbar } from './components/Navbar';
 import { UserVaultDashboard } from './components/UserVaultDashboard';
 import { PlatformProvider, usePlatform } from './context/PlatformContext';
@@ -19,6 +20,12 @@ function checkIsAdminRoute(): boolean {
   return path === '/admin' || path.endsWith('/admin') || hash === '#/admin';
 }
 
+function checkIsMentorRoute(): boolean {
+  const path = window.location.pathname.replace(/\/+$/, '');
+  const hash = window.location.hash.replace(/\/+$/, '');
+  return path === '/mentor' || path.endsWith('/mentor') || hash === '#/mentor';
+}
+
 function checkIsTermsRoute(): boolean {
   const path = window.location.pathname.replace(/\/+$/, '');
   const hash = window.location.hash.replace(/\/+$/, '');
@@ -26,7 +33,7 @@ function checkIsTermsRoute(): boolean {
 }
 
 const AppRouter: React.FC = () => {
-  const { authUser, authReady, platformConfig } = usePlatform();
+  const { authUser, userProfile, authReady, platformConfig } = usePlatform();
   const [isAdminRoute, setIsAdminRoute] = useState<boolean>(checkIsAdminRoute);
   const [activeSection, setActiveSection] = useState<NavSection>(() =>
     checkIsTermsRoute() ? 'terms' : 'home'
@@ -35,10 +42,28 @@ const AppRouter: React.FC = () => {
   const [authGateNotice, setAuthGateNotice] = useState<string | null>(null);
   const [showHomeView, setShowHomeView] = useState<boolean>(() => checkIsTermsRoute());
   const [dashTargetTab, setDashTargetTab] = useState<'dashboard' | 'forex-market' | 'pump-fun'>('dashboard');
+  const [dashboardMode, setDashboardMode] = useState<'client' | 'mentor'>(() =>
+    checkIsMentorRoute() ? 'mentor' : 'client'
+  );
+
+  const clearMentorRouteFromUrl = () => {
+    if (window.location.hash.replace(/\/+$/, '') === '#/mentor') {
+      window.location.hash = '';
+    }
+    const cleanPath = window.location.pathname.replace(/\/+$/, '');
+    if (cleanPath === '/mentor' || cleanPath.endsWith('/mentor')) {
+      const nextPath = cleanPath.replace(/\/mentor$/, '') || '/';
+      window.history.replaceState({}, '', nextPath.endsWith('/') ? nextPath : `${nextPath}/`);
+    }
+  };
 
   useEffect(() => {
     const syncRoute = () => {
       setIsAdminRoute(checkIsAdminRoute());
+      if (checkIsMentorRoute()) {
+        setDashboardMode('mentor');
+        setShowHomeView(false);
+      }
       if (checkIsTermsRoute()) {
         setActiveSection('terms');
         setShowHomeView(true);
@@ -56,10 +81,37 @@ const AppRouter: React.FC = () => {
     if (!authUser) {
       setShowHomeView(false);
       setDashTargetTab('dashboard');
+      setDashboardMode('client');
+      clearMentorRouteFromUrl();
     } else {
       setAuthGateNotice(null);
     }
   }, [authUser]);
+
+  // Hard security guard: immediately eject non-mentor or revoked accounts from Mentor Dashboard
+  useEffect(() => {
+    if (userProfile && !userProfile.isMentor && dashboardMode === 'mentor') {
+      setDashboardMode('client');
+      clearMentorRouteFromUrl();
+    }
+  }, [userProfile, dashboardMode]);
+
+  const openMentorDashboard = () => {
+    if (!userProfile?.isMentor) return;
+    setDashboardMode('mentor');
+    setShowHomeView(false);
+    if (window.location.hash !== '#/mentor') {
+      window.location.hash = '#/mentor';
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const switchToClientVault = () => {
+    setDashboardMode('client');
+    setShowHomeView(false);
+    clearMentorRouteFromUrl();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const exitAdminRoute = () => {
     if (window.location.hash === '#/admin') {
@@ -96,11 +148,28 @@ const AppRouter: React.FC = () => {
   }
 
   if (authUser && !showHomeView) {
+    if (dashboardMode === 'mentor' && userProfile?.isMentor) {
+      return (
+        <>
+          <AiRobotBackdrop />
+          <MentorDashboard
+            onSwitchToClientVault={switchToClientVault}
+            onOpenHomePage={() => {
+              setActiveSection('home');
+              setShowHomeView(true);
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          />
+        </>
+      );
+    }
+
     return (
       <>
         <AiRobotBackdrop />
         <UserVaultDashboard
           initialSection={dashTargetTab}
+          onOpenMentorDashboard={userProfile?.isMentor ? openMentorDashboard : undefined}
           onOpenHomePage={(section = 'home') => {
             setActiveSection(section);
             setShowHomeView(true);
@@ -164,6 +233,8 @@ const AppRouter: React.FC = () => {
 
   const openDashboardFromHome = (targetNav: 'dashboard' | 'forex-market' | 'pump-fun' = 'dashboard') => {
     setDashTargetTab(targetNav);
+    setDashboardMode('client');
+    clearMentorRouteFromUrl();
     setShowHomeView(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -186,9 +257,11 @@ const AppRouter: React.FC = () => {
         onOpenRegister={() => openDedicatedAuth('signup')}
         globalPaused={platformConfig.globalPaused}
         isSignedIn={Boolean(authUser)}
+        isMentor={Boolean(userProfile?.isMentor)}
         requireSignupForModules={platformConfig.moduleControls?.requireSignupForTradingModules !== false}
         moduleControls={platformConfig.moduleControls}
         onOpenDashboard={() => openDashboardFromHome('dashboard')}
+        onOpenMentorDashboard={userProfile?.isMentor ? openMentorDashboard : undefined}
       />
       <div className="relative z-10 flex-1">
         <FrontPage

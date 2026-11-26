@@ -1,4 +1,10 @@
-import { DepositWallets, PaymentMethodConfig, PlatformConfig } from '../types/platform';
+import {
+  DepositWallets,
+  GlobalKycSettings,
+  PaymentMethodConfig,
+  PlatformConfig,
+  SupportAutoResponderConfig,
+} from '../types/platform';
 
 export const SUPER_ADMIN_EMAIL = 'shakiljr323@gmail.com';
 
@@ -52,6 +58,32 @@ export function buildDefaultPaymentMethods(wallets: DepositWallets = DEFAULT_DEP
   ];
 }
 
+export const DEFAULT_SUPPORT_AUTO_RESPONDER: SupportAutoResponderConfig = {
+  enabled: true,
+  notifyOnStatusChange: true,
+  senderName: 'Alphatradex Support Desk',
+  subjectTemplate: 'Ticket Received [{{ticketNumber}}]: {{subject}}',
+  bodyTemplate:
+    'Hello {{userName}},\n\nWe have received your support complaint and registered it under Ticket ID {{ticketNumber}}.\n\nCategory: {{category}} · Priority: {{priority}}{{referenceLine}}\nEstimated Response Time: {{sla}}\n\nOur compliance and support specialists have queued your case for review. You can monitor real-time progress (Pending → In Progress → Resolved) anytime inside the Track Ticket section of your dashboard using Ticket ID {{ticketNumber}}.\n\nRegards,\n{{companyName}} Client Support Desk',
+  slaUrgent: 'Within 2 hours',
+  slaHigh: 'Within 6 hours',
+  slaMedium: 'Within 12 hours',
+  slaLow: 'Within 24 hours',
+};
+
+export const DEFAULT_GLOBAL_KYC_SETTINGS: GlobalKycSettings = {
+  enabled: true,
+  requireKycForDeposits: false,
+  requireKycForPackages: false,
+  requireKycForClaims: false,
+  requireKycForWithdrawals: false,
+  allowFreeAiOcr: true,
+  requireBackSideForCards: true,
+  requireLiveSelfie: true,
+  activeProvider: 'free_qr_mrz_ocr',
+  disabledCountryCodes: [],
+};
+
 export const DEFAULT_PLATFORM_CONFIG: PlatformConfig = {
   companyName: 'Alphatradex',
   companyTagline: 'Institutional Multi-Asset Crypto Vault, AI Quantitative Execution & Solana Launchpad',
@@ -85,6 +117,8 @@ export const DEFAULT_PLATFORM_CONFIG: PlatformConfig = {
     whatsappUrl: '',
     supportEmail: '',
   },
+  supportAutoResponder: DEFAULT_SUPPORT_AUTO_RESPONDER,
+  kycSettings: DEFAULT_GLOBAL_KYC_SETTINGS,
   packages: [
     {
       id: 'starter',
@@ -332,5 +366,84 @@ export const DEFAULT_PLATFORM_CONFIG: PlatformConfig = {
       },
     ],
   },
+  marketingCardsConfig: {
+    enabled: true,
+    allowQrCode: true,
+    allowReferralCode: true,
+    allowRankBadge: true,
+    allowPackageBadge: true,
+    defaultHeadline: 'Proud Member of AlphaTradex',
+    defaultTagline: 'Institutional AI Trading, Forex & Digital Asset Ecosystem',
+    disclaimerText: 'Trading & digital assets involve risk. Join via official referral.',
+    templates: [
+      {
+        id: 'official_member',
+        name: 'Official Member Card',
+        category: 'member',
+        enabled: true,
+        headline: 'Proud Member of AlphaTradex',
+        subheadline: 'Institutional AI Trading, Gold & Digital Asset Vault Platform',
+        badgeText: 'OFFICIAL MEMBER',
+        ctaText: 'Join via Official Referral',
+        defaultTheme: 'navy_gold',
+      },
+      {
+        id: 'investment_package',
+        name: 'Investment Package Card',
+        category: 'package',
+        enabled: true,
+        headline: 'Structured AI Trading Tiers',
+        subheadline: 'Explore Starter $100, Growth $300, Pro $500 & Elite $1,000 Vault Packages',
+        badgeText: 'AI TRADING PACKAGES',
+        ctaText: 'Scan to Explore Plans',
+        defaultTheme: 'emerald_green',
+      },
+      {
+        id: 'ai_gold_crypto',
+        name: 'AI & Gold / Crypto Trading Promo',
+        category: 'trading',
+        enabled: true,
+        headline: 'AI & Gold / Crypto Trading Desk',
+        subheadline: 'Disciplined Mon–Fri Execution Across BTC, ETH, SOL & XAU/USD',
+        badgeText: 'AI & GOLD DESK',
+        ctaText: 'Start Trading Smart',
+        defaultTheme: 'cyber_cyan',
+      },
+      {
+        id: 'team_leader_referral',
+        name: 'Team Leader & Referral Invite',
+        category: 'referral',
+        enabled: true,
+        headline: 'Join My Global Trading Network',
+        subheadline: 'Register directly with my official AlphaTradex Referral Code & QR',
+        badgeText: 'OFFICIAL TEAM INVITE',
+        ctaText: 'Scan QR to Register',
+        defaultTheme: 'navy_gold',
+      },
+      {
+        id: 'milestone_achievement',
+        name: 'Verified Milestone & Achievement',
+        category: 'milestone',
+        enabled: true,
+        headline: 'Verified Community Milestone',
+        subheadline: 'Committed to Disciplined Strategy & Transparent Network Leadership',
+        badgeText: 'VERIFIED MILESTONE',
+        ctaText: 'Connect with My Team',
+        defaultTheme: 'royal_purple',
+      },
+      {
+        id: 'launchpad_airdrop',
+        name: 'Meme Coin Launchpad & Airdrop',
+        category: 'launchpad',
+        enabled: true,
+        headline: 'Solana Launchpad & Airdrop Hub',
+        subheadline: 'Explore AlphaTradex Coin Liquidity, Tap-to-Mine & Ecosystem Rewards',
+        badgeText: 'LAUNCHPAD & AIRDROP',
+        ctaText: 'Scan to Claim Access',
+        defaultTheme: 'cyber_cyan',
+      },
+    ],
+  },
 };
+
 

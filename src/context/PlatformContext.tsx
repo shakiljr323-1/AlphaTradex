@@ -30,10 +30,13 @@ import {
 } from 'firebase/firestore';
 import {
   buildDefaultPaymentMethods,
+  DEFAULT_GLOBAL_KYC_SETTINGS,
   DEFAULT_PLATFORM_CONFIG,
+  DEFAULT_SUPPORT_AUTO_RESPONDER,
   SUPER_ADMIN_EMAIL,
 } from '../constants/defaults';
 import { auth, db, googleProvider, handleFirestoreError, OperationType } from '../lib/firebase';
+import { clearGoogleChatToken } from '../lib/googleChat';
 import {
   AdminActionLog,
   AdminModuleControls,
@@ -49,9 +52,17 @@ import {
   ForexAccountTierId,
   ForexPlatformConfig,
   ForexTrade,
+  GlobalKycSettings,
   IdType,
   Investment,
   InvestmentPackage,
+  KycApiVerificationStatus,
+  KycProviderId,
+  MarketingCardCategory,
+  MarketingCardStats,
+  MarketingCardsConfig,
+  MarketingCardTemplateConfig,
+  MarketingCardThemeId,
   MemeCoinInvestment,
   MlmCommission,
   P2PTransfer,
@@ -60,7 +71,16 @@ import {
   PlatformConfig,
   ReferralLinkRecord,
   ReferralStats,
+  SupportAutoResponderConfig,
+  SupportChatMessage,
+  SupportChatThread,
   SupportLinksConfig,
+  SupportTicket,
+  SupportTicketCategory,
+  SupportTicketPriority,
+  SupportTicketStatus,
+  TicketConfirmationReceipt,
+  UserNotification,
   UserPaymentMethod,
   UserProfile,
   WalletTransfer,
@@ -110,6 +130,10 @@ interface PlatformContextValue {
   savedPaymentMethods: UserPaymentMethod[];
   forexTrades: ForexTrade[];
   copyTradeSubscriptions: CopyTradeSubscription[];
+  supportChatThread: SupportChatThread | null;
+  supportChatMessages: SupportChatMessage[];
+  supportTickets: SupportTicket[];
+  userNotifications: UserNotification[];
   // Auth & KYC
   signInWithGoogle: (
     referralCode?: string,
@@ -136,7 +160,19 @@ interface PlatformContextValue {
     idType: IdType;
     idNumber: string;
     idPhotoData: string;
+    idBackPhotoData?: string;
     portraitPhotoData: string;
+    kycCountryCode?: string;
+    kycCountryName?: string;
+    kycDateOfBirth?: string;
+    kycNationality?: string;
+    kycIssueDate?: string;
+    kycExpiryDate?: string;
+    kycAddress?: string;
+    kycVerificationMethod?: string;
+    kycApiVerificationStatus?: KycApiVerificationStatus;
+    kycOcrConfidence?: number;
+    kycLivenessPassed?: boolean;
   }) => Promise<void>;
   updateProfileAvatar: (avatarData: string, fullName?: string) => Promise<void>;
   updateUserPhone: (params: {
@@ -167,6 +203,7 @@ interface PlatformContextValue {
     network: CryptoNetwork;
     destinationAddress: string;
     source: 'package_profit' | 'mlm_commission' | 'mentor_profit';
+    settlementMode?: 'pending' | 'completed';
   }) => Promise<void>;
   requestManualCapitalWithdrawal: (params: {
     investment: Investment;
@@ -236,9 +273,14 @@ interface PlatformContextValue {
   updatePlatformConfig: (next: PlatformConfig) => Promise<void>;
   approveCryptoDeposit: (deposit: CryptoDeposit, adminNote?: string) => Promise<void>;
   rejectCryptoDeposit: (deposit: CryptoDeposit, adminNote: string) => Promise<void>;
-  approveKyc: (targetUid: string) => Promise<void>;
-  rejectKyc: (targetUid: string) => Promise<void>;
-  setUserKycStatus: (targetUid: string, status: UserProfile['kycStatus']) => Promise<void>;
+  approveKyc: (targetUid: string, note?: string) => Promise<void>;
+  rejectKyc: (targetUid: string, reason?: string) => Promise<void>;
+  requestKycResubmission: (targetUid: string, reason: string) => Promise<void>;
+  setUserKycStatus: (
+    targetUid: string,
+    status: UserProfile['kycStatus'],
+    reason?: string
+  ) => Promise<void>;
   verifyUserPhone: (targetUid: string, verified: boolean) => Promise<void>;
   bulkApproveKyc: (targetUids: string[]) => Promise<number>;
   bulkVerifyPhones: (targetUids: string[]) => Promise<number>;
@@ -251,6 +293,7 @@ interface PlatformContextValue {
     dailyPercent: number;
     aiMode: string;
   }) => Promise<void>;
+  revokeMentorAccess: (targetUid: string) => Promise<void>;
   adjustUserBalance: (params: {
     targetUid: string;
     wallet: 'usdBalance' | 'profitBalance';
@@ -259,6 +302,31 @@ interface PlatformContextValue {
     reason: string;
   }) => Promise<void>;
   setUserSuspension: (targetUid: string, suspended: boolean, reason: string) => Promise<void>;
+  // Live Support Chat & Complaint Tickets
+  sendClientSupportMessage: (text: string, topicTag?: string) => Promise<void>;
+  markClientChatRead: () => Promise<void>;
+  createSupportTicket: (params: {
+    category: SupportTicketCategory;
+    priority: SupportTicketPriority;
+    subject: string;
+    description: string;
+    referenceId?: string;
+  }) => Promise<TicketConfirmationReceipt>;
+  markNotificationRead: (notificationId: string) => Promise<void>;
+  markAllNotificationsRead: () => Promise<void>;
+  sendAdminSupportReply: (
+    targetUser: { uid: string; fullName: string; email: string; handle: string },
+    text: string
+  ) => Promise<void>;
+  markAdminChatRead: (targetUid: string) => Promise<void>;
+  setSupportChatStatus: (targetUid: string, status: 'open' | 'resolved') => Promise<void>;
+  updateSupportTicket: (
+    ticketId: string,
+    params: { status: SupportTicketStatus; adminReply: string }
+  ) => Promise<void>;
+  // Marketing Photo Card Studio stats & telemetry
+  marketingCardStats: MarketingCardStats;
+  trackMarketingCardEvent: (event: 'generated' | 'shared') => Promise<void>;
 }
 
 const PlatformContext = createContext<PlatformContextValue | null>(null);
@@ -294,6 +362,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const provisioningInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
   const [isAdminDoc, setIsAdminDoc] = useState(false);
   const [platformConfig, setPlatformConfig] = useState<PlatformConfig>(DEFAULT_PLATFORM_CONFIG);
+  const [marketingCardStats, setMarketingCardStats] = useState<MarketingCardStats>({
+    totalGenerated: 0,
+    totalShared: 0,
+  });
 
   const [investments, setInvestments] = useState<Investment[]>([]);
   const [deposits, setDeposits] = useState<CryptoDeposit[]>([]);
@@ -309,6 +381,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [savedPaymentMethods, setSavedPaymentMethods] = useState<UserPaymentMethod[]>([]);
   const [forexTrades, setForexTrades] = useState<ForexTrade[]>([]);
   const [copyTradeSubscriptions, setCopyTradeSubscriptions] = useState<CopyTradeSubscription[]>([]);
+  const [supportChatThread, setSupportChatThread] = useState<SupportChatThread | null>(null);
+  const [supportChatMessages, setSupportChatMessages] = useState<SupportChatMessage[]>([]);
+  const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([]);
+  const [userNotifications, setUserNotifications] = useState<UserNotification[]>([]);
 
   const isAdminUser = Boolean(
     authUser &&
@@ -349,6 +425,26 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             supportLinks: {
               ...DEFAULT_PLATFORM_CONFIG.supportLinks!,
               ...(data.supportLinks || {}),
+            },
+            supportAutoResponder: {
+              ...DEFAULT_SUPPORT_AUTO_RESPONDER,
+              ...(data.supportAutoResponder || {}),
+            },
+            kycSettings: {
+              ...DEFAULT_GLOBAL_KYC_SETTINGS,
+              ...(data.kycSettings || {}),
+              disabledCountryCodes: Array.isArray(data.kycSettings?.disabledCountryCodes)
+                ? data.kycSettings.disabledCountryCodes
+                : DEFAULT_GLOBAL_KYC_SETTINGS.disabledCountryCodes,
+            },
+            marketingCardsConfig: {
+              ...DEFAULT_PLATFORM_CONFIG.marketingCardsConfig!,
+              ...(data.marketingCardsConfig || {}),
+              templates:
+                Array.isArray(data.marketingCardsConfig?.templates) &&
+                data.marketingCardsConfig.templates.length > 0
+                  ? data.marketingCardsConfig.templates
+                  : DEFAULT_PLATFORM_CONFIG.marketingCardsConfig!.templates,
             },
             mlmRates: { ...DEFAULT_PLATFORM_CONFIG.mlmRates, ...(data.mlmRates || {}) },
             mentorConfig: { ...DEFAULT_PLATFORM_CONFIG.mentorConfig, ...(data.mentorConfig || {}) },
@@ -398,6 +494,65 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     );
     return () => unsub();
   }, []);
+
+  // Subscribe to Marketing Photo Card Studio aggregate analytics (generated/shared counts)
+  useEffect(() => {
+    if (!authUser) {
+      setMarketingCardStats({ totalGenerated: 0, totalShared: 0 });
+      return;
+    }
+    const statsRef = doc(db, 'marketingCardStats', 'global');
+    const unsub = onSnapshot(
+      statsRef,
+      (snap) => {
+        if (snap.exists()) {
+          const d = snap.data() as Partial<MarketingCardStats>;
+          setMarketingCardStats({
+            totalGenerated: Math.max(0, Number(d.totalGenerated) || 0),
+            totalShared: Math.max(0, Number(d.totalShared) || 0),
+            updatedAt: d.updatedAt,
+          });
+        } else {
+          setMarketingCardStats({ totalGenerated: 0, totalShared: 0 });
+        }
+      },
+      (err) => {
+        console.warn('Marketing card stats snapshot unavailable:', err.message);
+      }
+    );
+    return () => unsub();
+  }, [authUser]);
+
+  const trackMarketingCardEvent = useCallback(
+    async (event: 'generated' | 'shared') => {
+      if (!authUser) return;
+      const statsRef = doc(db, 'marketingCardStats', 'global');
+      try {
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(statsRef);
+          if (!snap.exists()) {
+            tx.set(statsRef, {
+              totalGenerated: event === 'generated' ? 1 : 0,
+              totalShared: event === 'shared' ? 1 : 0,
+              updatedAt: serverTimestamp(),
+            });
+          } else {
+            const cur = snap.data() as Partial<MarketingCardStats>;
+            const curGen = Math.max(0, Math.floor(Number(cur.totalGenerated) || 0));
+            const curShare = Math.max(0, Math.floor(Number(cur.totalShared) || 0));
+            tx.update(statsRef, {
+              totalGenerated: event === 'generated' ? curGen + 1 : curGen,
+              totalShared: event === 'shared' ? curShare + 1 : curShare,
+              updatedAt: serverTimestamp(),
+            });
+          }
+        });
+      } catch (err) {
+        console.warn('Marketing card telemetry update skipped:', err instanceof Error ? err.message : String(err));
+      }
+    },
+    [authUser]
+  );
 
   // Track referral link visits (?ref=HANDLE) once per browser session
   useEffect(() => {
@@ -691,6 +846,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setSavedPaymentMethods([]);
         setForexTrades([]);
         setCopyTradeSubscriptions([]);
+        setSupportChatThread(null);
+        setSupportChatMessages([]);
+        setSupportTickets([]);
+        setUserNotifications([]);
         return;
       }
 
@@ -903,6 +1062,57 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       (err) => handleFirestoreError(err, OperationType.LIST, 'copyTradeSubscriptions')
     );
 
+    const unsubSupportThread = onSnapshot(
+      doc(db, 'supportChats', uid),
+      (snap) => {
+        if (snap.exists()) {
+          setSupportChatThread(snap.data() as SupportChatThread);
+        } else {
+          setSupportChatThread(null);
+        }
+      },
+      (err) => handleFirestoreError(err, OperationType.GET, `supportChats/${uid}`)
+    );
+
+    const unsubSupportMessages = onSnapshot(
+      query(collection(db, 'supportChats', uid, 'messages'), where('uid', '==', uid)),
+      (snap) => {
+        const list = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<SupportChatMessage, 'id'>),
+        }));
+        list.sort((a, b) => createdAtSeconds(a.createdAt) - createdAtSeconds(b.createdAt));
+        setSupportChatMessages(list);
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, `supportChats/${uid}/messages`)
+    );
+
+    const unsubSupportTickets = onSnapshot(
+      query(collection(db, 'supportTickets'), where('uid', '==', uid)),
+      (snap) => {
+        const list = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<SupportTicket, 'id'>),
+        }));
+        list.sort((a, b) => createdAtSeconds(b.createdAt) - createdAtSeconds(a.createdAt));
+        setSupportTickets(list);
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'supportTickets')
+    );
+
+    const unsubNotifications = onSnapshot(
+      query(collection(db, 'users', uid, 'notifications'), where('uid', '==', uid)),
+      (snap) => {
+        const list = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<UserNotification, 'id'>),
+        }));
+        list.sort((a, b) => createdAtSeconds(b.createdAt) - createdAtSeconds(a.createdAt));
+        setUserNotifications(list);
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, `users/${uid}/notifications`)
+    );
+
     return () => {
       unsubUser();
       unsubInv();
@@ -919,6 +1129,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       unsubPaymentMethods();
       unsubForexTrades();
       unsubCopySubs();
+      unsubSupportThread();
+      unsubSupportMessages();
+      unsubSupportTickets();
+      unsubNotifications();
     };
   }, [authUser, authSyncTick]);
 
@@ -1059,16 +1273,83 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     idType: IdType;
     idNumber: string;
     idPhotoData: string;
+    idBackPhotoData?: string;
     portraitPhotoData: string;
+    kycCountryCode?: string;
+    kycCountryName?: string;
+    kycDateOfBirth?: string;
+    kycNationality?: string;
+    kycIssueDate?: string;
+    kycExpiryDate?: string;
+    kycAddress?: string;
+    kycVerificationMethod?: string;
+    kycApiVerificationStatus?: KycApiVerificationStatus;
+    kycOcrConfidence?: number;
+    kycLivenessPassed?: boolean;
   }) => {
     if (!authUser) throw new Error('Authentication required.');
+    const kycPolicy = platformConfig.kycSettings || DEFAULT_GLOBAL_KYC_SETTINGS;
+    const cleanCountryCode = String(params.kycCountryCode || '')
+      .toUpperCase()
+      .replace(/[^A-Z]/g, '')
+      .slice(0, 4);
+    if (
+      cleanCountryCode &&
+      (kycPolicy.disabledCountryCodes || []).includes(cleanCountryCode)
+    ) {
+      throw new Error(
+        `KYC verification is currently restricted for ${params.kycCountryName || cleanCountryCode}. Contact compliance support for assistance.`
+      );
+    }
+    const cleanName = params.fullName.trim().slice(0, 120);
+    const cleanIdNumber = params.idNumber.trim().slice(0, 64);
+    if (!cleanName || !cleanIdNumber) {
+      throw new Error('Full legal name and document number are required.');
+    }
+    if (!params.idPhotoData) {
+      throw new Error('Front side of your government ID document is required.');
+    }
+    if (kycPolicy.requireLiveSelfie && !params.portraitPhotoData) {
+      throw new Error('A live selfie / portrait check photo is required.');
+    }
+
+    const safeApiStatus: KycApiVerificationStatus =
+      params.kycApiVerificationStatus === 'ocr_preview_only' ||
+      params.kycApiVerificationStatus === 'manual_review'
+        ? params.kycApiVerificationStatus
+        : 'manual_review';
+
+    const rawConfidence = Number(params.kycOcrConfidence ?? 0);
+    const safeConfidence = Number.isFinite(rawConfidence)
+      ? Math.min(100, Math.max(0, Math.round(rawConfidence)))
+      : 0;
+
     try {
       await updateDoc(doc(db, 'users', authUser.uid), {
-        fullName: params.fullName.trim().slice(0, 120),
+        fullName: cleanName,
         idType: params.idType,
-        idNumber: params.idNumber.trim().slice(0, 64),
+        idNumber: cleanIdNumber,
         idPhotoData: params.idPhotoData.slice(0, 300000),
-        portraitPhotoData: params.portraitPhotoData.slice(0, 300000),
+        idBackPhotoData: (params.idBackPhotoData || '').slice(0, 300000),
+        portraitPhotoData: (params.portraitPhotoData || '').slice(0, 300000),
+        kycCountryCode: cleanCountryCode,
+        kycCountryName: String(params.kycCountryName || '').trim().slice(0, 80),
+        kycDateOfBirth: String(params.kycDateOfBirth || '').trim().slice(0, 32),
+        kycNationality: String(params.kycNationality || '').trim().slice(0, 80),
+        kycIssueDate: String(params.kycIssueDate || '').trim().slice(0, 32),
+        kycExpiryDate: String(params.kycExpiryDate || '').trim().slice(0, 32),
+        kycAddress: String(params.kycAddress || '').trim().slice(0, 260),
+        kycRejectionReason: '',
+        kycResubmissionRequested: false,
+        kycVerificationMethod: String(
+          params.kycVerificationMethod || 'Free AI Vision OCR Preview + Manual Compliance Review'
+        )
+          .trim()
+          .slice(0, 80),
+        kycApiVerificationStatus: safeApiStatus,
+        kycOcrConfidence: safeConfidence,
+        kycLivenessPassed: Boolean(params.kycLivenessPassed),
+        kycSubmittedAtMs: Date.now(),
         kycStatus: 'pending',
         updatedAt: serverTimestamp(),
       });
@@ -1270,7 +1551,35 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [ensureUserProvisioned]);
 
   const signOutUser = async () => {
+    clearGoogleChatToken();
     await signOut(auth);
+  };
+
+  const assertKycPolicyAllowed = (
+    gate: 'deposits' | 'packages' | 'claims' | 'withdrawals',
+    profile: UserProfile
+  ) => {
+    const kycPolicy = platformConfig.kycSettings || DEFAULT_GLOBAL_KYC_SETTINGS;
+    const isRequired =
+      (gate === 'deposits' && kycPolicy.requireKycForDeposits) ||
+      (gate === 'packages' && kycPolicy.requireKycForPackages) ||
+      (gate === 'claims' && kycPolicy.requireKycForClaims) ||
+      (gate === 'withdrawals' && kycPolicy.requireKycForWithdrawals);
+    if (!isRequired || profile.kycStatus === 'approved') return;
+
+    const gateLabels = {
+      deposits: 'submitting deposits',
+      packages: 'activating investment packages',
+      claims: 'claiming accrued rewards',
+      withdrawals: 'requesting withdrawals',
+    };
+    const statusHint =
+      profile.kycStatus === 'pending'
+        ? 'Your KYC submission is currently under compliance review.'
+        : profile.kycStatus === 'rejected'
+        ? `Your previous KYC was rejected${profile.kycRejectionReason ? ` (${profile.kycRejectionReason})` : ''}. Please resubmit under Account & Security -> KYC Verification.`
+        : 'Complete your identity check under Account & Security -> KYC Verification.';
+    throw new Error(`KYC Verification Required before ${gateLabels[gate]}. ${statusHint}`);
   };
 
   const submitCryptoDeposit = async (params: {
@@ -1282,6 +1591,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (userProfile.suspended) {
       throw new Error(`Account suspended: ${userProfile.suspensionReason || 'Contact compliance support.'}`);
     }
+    assertKycPolicyAllowed('deposits', userProfile);
     const methodId = sanitizeRuleId(params.network, 'USDT_TRC20');
     const amount = Number(params.amountUsd);
     if (!Number.isFinite(amount) || amount <= 0) {
@@ -1414,6 +1724,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (userProfile.suspended) {
       throw new Error(`Account suspended: ${userProfile.suspensionReason || 'Contact compliance support.'}`);
     }
+    assertKycPolicyAllowed('packages', userProfile);
     if (platformConfig.moduleControls?.aiTradingEnabled === false) {
       throw new Error('AI Trading module is temporarily disabled by administration.');
     }
@@ -1652,6 +1963,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (userProfile.suspended) {
       throw new Error(`Account suspended: ${userProfile.suspensionReason || 'Contact compliance support.'}`);
     }
+    assertKycPolicyAllowed('claims', userProfile);
     const metrics = computeInvestmentMetrics(investment, platformConfig.globalPaused);
     if (metrics.unclaimedProfit <= 0) {
       throw new Error('No unclaimed weekday profit available yet.');
@@ -1697,11 +2009,13 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     network: CryptoNetwork;
     destinationAddress: string;
     source: 'package_profit' | 'mlm_commission' | 'mentor_profit';
+    settlementMode?: 'pending' | 'completed';
   }) => {
     if (!authUser || !userProfile) throw new Error('Authentication required.');
     if (userProfile.suspended) {
       throw new Error(`Account suspended: ${userProfile.suspensionReason || 'Contact compliance support.'}`);
     }
+    assertKycPolicyAllowed('withdrawals', userProfile);
     if (platformConfig.withdrawalsPaused) {
       throw new Error('Withdrawals are temporarily paused for scheduled maintenance by administration.');
     }
@@ -1735,10 +2049,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       throw new Error(
         `Mentor Volume Rule Active: Bring $${remaining} more in referred investment volume ($${userProfile.mentorBroughtVolume.toFixed(
           2
-        )} / $${userProfile.mentorRequiredVolume.toFixed(2)}) to unlock instant profit withdrawals.`
+        )} / $${userProfile.mentorRequiredVolume.toFixed(2)}) to unlock profit withdrawals.`
       );
     }
 
+    const targetStatus = params.settlementMode === 'completed' ? 'completed' : 'pending';
     const withId = makeId('wdp');
     try {
       await runTransaction(db, async (tx) => {
@@ -1749,7 +2064,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         if (cur.profitBalance < amount) throw new Error('Insufficient profit balance.');
 
         const nextProfitBalance = Number((cur.profitBalance - amount).toFixed(2));
-        const nextTotalWithdrawn = Number((cur.totalWithdrawn + amount).toFixed(2));
+        const nextTotalWithdrawn =
+          targetStatus === 'completed'
+            ? Number((cur.totalWithdrawn + amount).toFixed(2))
+            : cur.totalWithdrawn;
 
         tx.update(userRef, {
           profitBalance: nextProfitBalance,
@@ -1771,7 +2089,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           amountUsd: Number(amount.toFixed(2)),
           network: cleanNetwork,
           destinationAddress: params.destinationAddress.trim().slice(0, 160),
-          status: 'completed',
+          status: targetStatus,
           adminNote: '',
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
@@ -1791,6 +2109,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (userProfile.suspended) {
       throw new Error(`Account suspended: ${userProfile.suspensionReason || 'Contact compliance support.'}`);
     }
+    assertKycPolicyAllowed('withdrawals', userProfile);
     if (platformConfig.withdrawalsPaused) {
       throw new Error('Capital withdrawals are temporarily paused for scheduled maintenance by administration.');
     }
@@ -2829,6 +3148,138 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       supportEmail: String(next.supportLinks?.supportEmail || '').trim().slice(0, 254),
     };
 
+    const rawAuto = next.supportAutoResponder || DEFAULT_SUPPORT_AUTO_RESPONDER;
+    const safeSupportAutoResponder: SupportAutoResponderConfig = {
+      enabled: rawAuto.enabled !== false,
+      notifyOnStatusChange: rawAuto.notifyOnStatusChange !== false,
+      senderName:
+        String(rawAuto.senderName || DEFAULT_SUPPORT_AUTO_RESPONDER.senderName)
+          .trim()
+          .slice(0, 120) || DEFAULT_SUPPORT_AUTO_RESPONDER.senderName,
+      subjectTemplate:
+        String(rawAuto.subjectTemplate || DEFAULT_SUPPORT_AUTO_RESPONDER.subjectTemplate)
+          .trim()
+          .slice(0, 200) || DEFAULT_SUPPORT_AUTO_RESPONDER.subjectTemplate,
+      bodyTemplate:
+        String(rawAuto.bodyTemplate || DEFAULT_SUPPORT_AUTO_RESPONDER.bodyTemplate)
+          .trim()
+          .slice(0, 2000) || DEFAULT_SUPPORT_AUTO_RESPONDER.bodyTemplate,
+      slaUrgent:
+        String(rawAuto.slaUrgent || DEFAULT_SUPPORT_AUTO_RESPONDER.slaUrgent)
+          .trim()
+          .slice(0, 80) || DEFAULT_SUPPORT_AUTO_RESPONDER.slaUrgent,
+      slaHigh:
+        String(rawAuto.slaHigh || DEFAULT_SUPPORT_AUTO_RESPONDER.slaHigh)
+          .trim()
+          .slice(0, 80) || DEFAULT_SUPPORT_AUTO_RESPONDER.slaHigh,
+      slaMedium:
+        String(rawAuto.slaMedium || DEFAULT_SUPPORT_AUTO_RESPONDER.slaMedium)
+          .trim()
+          .slice(0, 80) || DEFAULT_SUPPORT_AUTO_RESPONDER.slaMedium,
+      slaLow:
+        String(rawAuto.slaLow || DEFAULT_SUPPORT_AUTO_RESPONDER.slaLow)
+          .trim()
+          .slice(0, 80) || DEFAULT_SUPPORT_AUTO_RESPONDER.slaLow,
+    };
+
+    const rawKycCfg = next.kycSettings || DEFAULT_GLOBAL_KYC_SETTINGS;
+    const allowedProviders: KycProviderId[] = [
+      'free_qr_mrz_ocr',
+      'free_ai_ocr',
+      'didit_free',
+      'sumsub',
+      'veriff',
+      'shufti_pro',
+      'custom_webhook',
+    ];
+    const safeKycSettings: GlobalKycSettings = {
+      enabled: rawKycCfg.enabled !== false,
+      requireKycForDeposits: Boolean(rawKycCfg.requireKycForDeposits),
+      requireKycForPackages: Boolean(rawKycCfg.requireKycForPackages),
+      requireKycForClaims: Boolean(rawKycCfg.requireKycForClaims),
+      requireKycForWithdrawals: Boolean(rawKycCfg.requireKycForWithdrawals),
+      allowFreeAiOcr: rawKycCfg.allowFreeAiOcr !== false,
+      requireBackSideForCards: rawKycCfg.requireBackSideForCards !== false,
+      requireLiveSelfie: rawKycCfg.requireLiveSelfie !== false,
+      activeProvider: allowedProviders.includes(rawKycCfg.activeProvider)
+        ? rawKycCfg.activeProvider
+        : 'free_qr_mrz_ocr',
+      disabledCountryCodes: Array.from(
+        new Set(
+          (Array.isArray(rawKycCfg.disabledCountryCodes) ? rawKycCfg.disabledCountryCodes : [])
+            .map((c) => String(c || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4))
+            .filter(Boolean)
+        )
+      ).slice(0, 250),
+    };
+
+    const defaultMc = DEFAULT_PLATFORM_CONFIG.marketingCardsConfig!;
+    const rawMc = next.marketingCardsConfig || defaultMc;
+    const allowedThemes: MarketingCardThemeId[] = [
+      'navy_gold',
+      'emerald_green',
+      'cyber_cyan',
+      'royal_purple',
+    ];
+    const allowedCategories: MarketingCardCategory[] = [
+      'member',
+      'package',
+      'trading',
+      'referral',
+      'milestone',
+      'launchpad',
+      'custom',
+    ];
+    const safeMarketingTemplates: MarketingCardTemplateConfig[] = (
+      Array.isArray(rawMc.templates) ? rawMc.templates : defaultMc.templates
+    )
+      .slice(0, 20)
+      .map((tpl, idx) => {
+        const cleanTpl: MarketingCardTemplateConfig = {
+          id: sanitizeRuleId(tpl.id || `tpl_${idx + 1}`, `tpl_${idx + 1}`),
+          name: String(tpl.name || `Template ${idx + 1}`).trim().slice(0, 80) || `Template ${idx + 1}`,
+          category: allowedCategories.includes(tpl.category) ? tpl.category : 'custom',
+          enabled: tpl.enabled !== false,
+          headline: String(tpl.headline || defaultMc.defaultHeadline).trim().slice(0, 140),
+          subheadline: String(tpl.subheadline || defaultMc.defaultTagline).trim().slice(0, 220),
+          badgeText: String(tpl.badgeText || 'OFFICIAL').trim().slice(0, 48),
+          ctaText: String(tpl.ctaText || 'Join via Referral').trim().slice(0, 64),
+          defaultTheme: allowedThemes.includes(tpl.defaultTheme) ? tpl.defaultTheme : 'navy_gold',
+        };
+        if (tpl.isCustom) {
+          cleanTpl.isCustom = true;
+          if (tpl.overlayImageData) {
+            cleanTpl.overlayImageData = String(tpl.overlayImageData).slice(0, 220_000);
+          }
+          if (tpl.photoSlot) {
+            cleanTpl.photoSlot = {
+              xPct: Math.max(5, Math.min(95, Number(tpl.photoSlot.xPct) || 50)),
+              yPct: Math.max(5, Math.min(95, Number(tpl.photoSlot.yPct) || 38)),
+              sizePct: Math.max(12, Math.min(60, Number(tpl.photoSlot.sizePct) || 28)),
+            };
+          }
+          if (tpl.textSlot) {
+            cleanTpl.textSlot = {
+              xPct: Math.max(5, Math.min(95, Number(tpl.textSlot.xPct) || 50)),
+              yPct: Math.max(5, Math.min(95, Number(tpl.textSlot.yPct) || 68)),
+            };
+          }
+        }
+        return cleanTpl;
+      });
+
+    const safeMarketingCardsConfig: MarketingCardsConfig = {
+      enabled: rawMc.enabled !== false,
+      allowQrCode: rawMc.allowQrCode !== false,
+      allowReferralCode: rawMc.allowReferralCode !== false,
+      allowRankBadge: rawMc.allowRankBadge !== false,
+      allowPackageBadge: rawMc.allowPackageBadge !== false,
+      defaultHeadline: String(rawMc.defaultHeadline || defaultMc.defaultHeadline).trim().slice(0, 140),
+      defaultTagline: String(rawMc.defaultTagline || defaultMc.defaultTagline).trim().slice(0, 240),
+      disclaimerText: String(rawMc.disclaimerText || defaultMc.disclaimerText).trim().slice(0, 300),
+      templates: safeMarketingTemplates,
+    };
+
     const writeAdminLog = async (entry: Omit<AdminActionLog, 'id' | 'adminUid' | 'adminEmail' | 'createdAt'>) => {
       if (!authUser) return;
       try {
@@ -2888,6 +3339,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           accountTiers: safeAccountTiers,
           copyTraders: safeCopyTraders,
         },
+        supportAutoResponder: safeSupportAutoResponder,
+        kycSettings: safeKycSettings,
+        marketingCardsConfig: safeMarketingCardsConfig,
         updatedAt: serverTimestamp(),
       });
       await writeAdminLog({
@@ -2978,14 +3432,19 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  const approveKyc = async (targetUid: string) => {
+  const approveKyc = async (targetUid: string, note = '') => {
     try {
       const userRef = doc(db, 'users', targetUid);
       const snap = await getDoc(userRef);
       const targetUser = snap.exists() ? (snap.data() as UserProfile) : null;
       const hasPhone = Boolean(targetUser?.phoneNumber);
+      const reviewerLabel = (authUser?.email || SUPER_ADMIN_EMAIL).trim().slice(0, 120);
       await updateDoc(userRef, {
         kycStatus: 'approved',
+        kycRejectionReason: '',
+        kycResubmissionRequested: false,
+        kycReviewedAtMs: Date.now(),
+        kycReviewedBy: reviewerLabel,
         ...(hasPhone ? { phoneVerified: true } : {}),
         updatedAt: serverTimestamp(),
       });
@@ -2993,7 +3452,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         action: 'KYC_APPROVED',
         targetUid,
         targetLabel: targetUser ? `${targetUser.fullName} (${targetUser.handle})` : targetUid,
-        details: `KYC approved${hasPhone ? ' + phone verified' : ''}`,
+        details: `KYC approved (${targetUser?.kycCountryName || targetUser?.countryName || 'Global'} · ${targetUser?.idType || 'ID'})${hasPhone ? ' + phone verified' : ''}${note.trim() ? ` · Note: ${note.trim()}` : ''}`.slice(0, 500),
         amountUsd: 0,
       });
     } catch (err) {
@@ -3001,20 +3460,27 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  const rejectKyc = async (targetUid: string) => {
+  const rejectKyc = async (targetUid: string, reason = 'Document image unclear or details mismatch.') => {
     try {
       const userRef = doc(db, 'users', targetUid);
       const snap = await getDoc(userRef);
       const targetUser = snap.exists() ? (snap.data() as UserProfile) : null;
+      const cleanReason =
+        reason.trim().slice(0, 400) || 'Document image unclear or details mismatch.';
+      const reviewerLabel = (authUser?.email || SUPER_ADMIN_EMAIL).trim().slice(0, 120);
       await updateDoc(userRef, {
         kycStatus: 'rejected',
+        kycRejectionReason: cleanReason,
+        kycResubmissionRequested: false,
+        kycReviewedAtMs: Date.now(),
+        kycReviewedBy: reviewerLabel,
         updatedAt: serverTimestamp(),
       });
       await recordAdminAudit({
         action: 'KYC_REJECTED',
         targetUid,
         targetLabel: targetUser ? `${targetUser.fullName} (${targetUser.handle})` : targetUid,
-        details: 'KYC submission rejected',
+        details: `KYC rejected: ${cleanReason}`.slice(0, 500),
         amountUsd: 0,
       });
     } catch (err) {
@@ -3022,20 +3488,58 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  const setUserKycStatus = async (targetUid: string, status: UserProfile['kycStatus']) => {
+  const requestKycResubmission = async (targetUid: string, reason: string) => {
     try {
       const userRef = doc(db, 'users', targetUid);
       const snap = await getDoc(userRef);
       const targetUser = snap.exists() ? (snap.data() as UserProfile) : null;
+      const cleanReason =
+        reason.trim().slice(0, 400) ||
+        'Please re-upload clearer front/back document photos and a live selfie.';
+      const reviewerLabel = (authUser?.email || SUPER_ADMIN_EMAIL).trim().slice(0, 120);
       await updateDoc(userRef, {
-        kycStatus: status,
+        kycStatus: 'rejected',
+        kycRejectionReason: cleanReason,
+        kycResubmissionRequested: true,
+        kycReviewedAtMs: Date.now(),
+        kycReviewedBy: reviewerLabel,
         updatedAt: serverTimestamp(),
       });
       await recordAdminAudit({
-        action: 'KYC_STATUS_SET',
+        action: 'KYC_RESUBMISSION_REQUESTED',
         targetUid,
         targetLabel: targetUser ? `${targetUser.fullName} (${targetUser.handle})` : targetUid,
-        details: `KYC status set to ${status}`,
+        details: `Requested KYC re-submission: ${cleanReason}`.slice(0, 500),
+        amountUsd: 0,
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `users/${targetUid}`);
+    }
+  };
+
+  const setUserKycStatus = async (
+    targetUid: string,
+    status: UserProfile['kycStatus'],
+    reason = ''
+  ) => {
+    try {
+      const userRef = doc(db, 'users', targetUid);
+      const snap = await getDoc(userRef);
+      const targetUser = snap.exists() ? (snap.data() as UserProfile) : null;
+      const reviewerLabel = (authUser?.email || SUPER_ADMIN_EMAIL).trim().slice(0, 120);
+      await updateDoc(userRef, {
+        kycStatus: status,
+        kycRejectionReason: status === 'rejected' ? reason.trim().slice(0, 400) : '',
+        kycResubmissionRequested: false,
+        kycReviewedAtMs: Date.now(),
+        kycReviewedBy: reviewerLabel,
+        updatedAt: serverTimestamp(),
+      });
+      await recordAdminAudit({
+        action: 'KYC_STATUS_OVERRIDE',
+        targetUid,
+        targetLabel: targetUser ? `${targetUser.fullName} (${targetUser.handle})` : targetUid,
+        details: `Admin override: KYC status set to ${status}${reason.trim() ? ` (${reason.trim()})` : ''}`.slice(0, 500),
         amountUsd: 0,
       });
     } catch (err) {
@@ -3079,6 +3583,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           const u = snap.data() as UserProfile;
           batch.update(userRef, {
             kycStatus: 'approved',
+            kycRejectionReason: '',
+            kycResubmissionRequested: false,
+            kycReviewedAtMs: Date.now(),
+            kycReviewedBy: (authUser?.email || SUPER_ADMIN_EMAIL).trim().slice(0, 120),
             ...(u.phoneNumber ? { phoneVerified: true } : {}),
             updatedAt: serverTimestamp(),
           });
@@ -3134,8 +3642,14 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  const approveCapitalWithdrawal = async (withdrawal: Withdrawal, adminNote = 'Manual capital payout released') => {
-    const cleanNote = adminNote.trim().slice(0, 300) || 'Manual capital payout released';
+  const approveCapitalWithdrawal = async (withdrawal: Withdrawal, adminNote?: string) => {
+    const defaultNote =
+      withdrawal.type === 'manual_capital'
+        ? 'Manual capital payout released'
+        : withdrawal.source === 'mlm_commission'
+        ? 'Referral commission payout processed'
+        : 'Trading profit payout processed';
+    const cleanNote = (adminNote || '').trim().slice(0, 300) || defaultNote;
     try {
       await runTransaction(db, async (tx) => {
         const wdRef = doc(db, 'withdrawals', withdrawal.id);
@@ -3175,10 +3689,16 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         });
       });
       await recordAdminAudit({
-        action: 'CAPITAL_WITHDRAWAL_APPROVED',
+        action:
+          withdrawal.type === 'manual_capital'
+            ? 'CAPITAL_WITHDRAWAL_APPROVED'
+            : 'PROFIT_WITHDRAWAL_APPROVED',
         targetUid: withdrawal.uid,
         targetLabel: withdrawal.userName || withdrawal.userEmail,
-        details: `Released Package #${withdrawal.packageNumber} capital payout · ${cleanNote}`,
+        details:
+          withdrawal.type === 'manual_capital'
+            ? `Released Package #${withdrawal.packageNumber} capital payout · ${cleanNote}`
+            : `Processed ${withdrawal.source === 'mlm_commission' ? 'Referral Commission' : 'Trading Profit'} payout · ${cleanNote}`,
         amountUsd: withdrawal.amountUsd,
       });
     } catch (err) {
@@ -3191,6 +3711,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     try {
       await runTransaction(db, async (tx) => {
         const wdRef = doc(db, 'withdrawals', withdrawal.id);
+        const wdSnap = await tx.get(wdRef);
+        if (!wdSnap.exists()) throw new Error('Withdrawal missing.');
+        if ((wdSnap.data() as Withdrawal).status !== 'pending') {
+          throw new Error('Withdrawal already processed.');
+        }
+
         if (withdrawal.investmentId) {
           const invRef = doc(db, 'investments', withdrawal.investmentId);
           const invSnap = await tx.get(invRef);
@@ -3200,7 +3726,21 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               updatedAt: serverTimestamp(),
             });
           }
+        } else if (withdrawal.type === 'instant_profit') {
+          const userRef = doc(db, 'users', withdrawal.uid);
+          const userSnap = await tx.get(userRef);
+          if (userSnap.exists()) {
+            const curUser = userSnap.data() as UserProfile;
+            const refundedBalance = Number(
+              ((curUser.profitBalance || 0) + withdrawal.amountUsd).toFixed(2)
+            );
+            tx.update(userRef, {
+              profitBalance: refundedBalance,
+              updatedAt: serverTimestamp(),
+            });
+          }
         }
+
         tx.update(wdRef, {
           status: 'rejected',
           adminNote: note,
@@ -3208,10 +3748,16 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         });
       });
       await recordAdminAudit({
-        action: 'CAPITAL_WITHDRAWAL_REJECTED',
+        action:
+          withdrawal.type === 'manual_capital'
+            ? 'CAPITAL_WITHDRAWAL_REJECTED'
+            : 'PROFIT_WITHDRAWAL_REJECTED',
         targetUid: withdrawal.uid,
         targetLabel: withdrawal.userName || withdrawal.userEmail,
-        details: `Rejected Package #${withdrawal.packageNumber} capital withdrawal: ${note}`,
+        details:
+          withdrawal.type === 'manual_capital'
+            ? `Rejected Package #${withdrawal.packageNumber} capital withdrawal: ${note}`
+            : `Rejected ${withdrawal.source === 'mlm_commission' ? 'Referral Commission' : 'Trading Profit'} payout (refunded to Income Wallet): ${note}`,
         amountUsd: withdrawal.amountUsd,
       });
     } catch (err) {
@@ -3298,6 +3844,32 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
+  const revokeMentorAccess = async (targetUid: string) => {
+    let targetLabel = targetUid;
+    try {
+      await runTransaction(db, async (tx) => {
+        const userRef = doc(db, 'users', targetUid);
+        const userSnap = await tx.get(userRef);
+        if (!userSnap.exists()) throw new Error('Target user not found.');
+        const cur = userSnap.data() as UserProfile;
+        targetLabel = `${cur.fullName} (${cur.handle})`;
+        tx.update(userRef, {
+          isMentor: false,
+          updatedAt: serverTimestamp(),
+        });
+      });
+      await recordAdminAudit({
+        action: 'MENTOR_REVOKED',
+        targetUid,
+        targetLabel,
+        details: 'Revoked Mentor account access (Mentor options hidden from client dashboard)',
+        amountUsd: 0,
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `users/${targetUid}`);
+    }
+  };
+
   const adjustUserBalance = async (params: {
     targetUid: string;
     wallet: 'usdBalance' | 'profitBalance';
@@ -3377,6 +3949,436 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
+  // =========================================================================
+  // Live Support Chat & Complaint Tickets
+  // =========================================================================
+  const sendClientSupportMessage = async (text: string, topicTag = '') => {
+    if (!authUser || !userProfile) throw new Error('Sign in to send a live support message.');
+    const cleanText = text.trim().slice(0, 2000);
+    if (!cleanText) throw new Error('Please type a message or select a suggestion.');
+    const cleanTag = topicTag.trim().slice(0, 80);
+    const uid = authUser.uid;
+    const threadRef = doc(db, 'supportChats', uid);
+    const msgId = makeId('msg');
+    const msgRef = doc(db, 'supportChats', uid, 'messages', msgId);
+
+    try {
+      const threadSnap = await getDoc(threadRef);
+      if (!threadSnap.exists()) {
+        await setDoc(threadRef, {
+          uid,
+          userName: (userProfile.fullName || 'Vault Client').slice(0, 120),
+          userEmail: (userProfile.email || authUser.email || 'client@alphatradex.pro').slice(0, 254),
+          userHandle: (userProfile.handle || 'CLIENT').slice(0, 32),
+          status: 'open',
+          lastMessage: cleanText.slice(0, 500),
+          lastSender: 'client',
+          unreadByAdmin: 1,
+          unreadByClient: 0,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        const cur = threadSnap.data() as SupportChatThread;
+        await updateDoc(threadRef, {
+          lastMessage: cleanText.slice(0, 500),
+          lastSender: 'client',
+          status: 'open',
+          unreadByAdmin: Math.min(9999, Number(cur.unreadByAdmin || 0) + 1),
+          unreadByClient: 0,
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      await setDoc(msgRef, {
+        uid,
+        senderUid: uid,
+        senderRole: 'client',
+        senderName: (userProfile.fullName || 'Vault Client').slice(0, 120),
+        text: cleanText,
+        topicTag: cleanTag,
+        createdAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `supportChats/${uid}`);
+    }
+  };
+
+  const markClientChatRead = async () => {
+    if (!authUser || !supportChatThread || supportChatThread.unreadByClient <= 0) return;
+    const uid = authUser.uid;
+    try {
+      await updateDoc(doc(db, 'supportChats', uid), {
+        unreadByClient: 0,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `supportChats/${uid}`);
+    }
+  };
+
+  const resolveTicketSla = (priority: SupportTicketPriority): string => {
+    const cfg = platformConfig.supportAutoResponder || DEFAULT_SUPPORT_AUTO_RESPONDER;
+    if (priority === 'urgent') return cfg.slaUrgent || DEFAULT_SUPPORT_AUTO_RESPONDER.slaUrgent;
+    if (priority === 'high') return cfg.slaHigh || DEFAULT_SUPPORT_AUTO_RESPONDER.slaHigh;
+    if (priority === 'low') return cfg.slaLow || DEFAULT_SUPPORT_AUTO_RESPONDER.slaLow;
+    return cfg.slaMedium || DEFAULT_SUPPORT_AUTO_RESPONDER.slaMedium;
+  };
+
+  const renderAutoResponseTemplate = (
+    template: string,
+    vars: {
+      ticketNumber: string;
+      userName: string;
+      subject: string;
+      category: string;
+      priority: string;
+      referenceId: string;
+      sla: string;
+      companyName: string;
+    }
+  ): string => {
+    const referenceLine = vars.referenceId ? ` · Ref: ${vars.referenceId}` : '';
+    return template
+      .replace(/\{\{ticketNumber\}\}/g, vars.ticketNumber)
+      .replace(/\{\{userName\}\}/g, vars.userName)
+      .replace(/\{\{subject\}\}/g, vars.subject)
+      .replace(/\{\{category\}\}/g, vars.category)
+      .replace(/\{\{priority\}\}/g, vars.priority)
+      .replace(/\{\{referenceId\}\}/g, vars.referenceId || 'N/A')
+      .replace(/\{\{referenceLine\}\}/g, referenceLine)
+      .replace(/\{\{sla\}\}/g, vars.sla)
+      .replace(/\{\{companyName\}\}/g, vars.companyName);
+  };
+
+  const createSupportTicket = async (params: {
+    category: SupportTicketCategory;
+    priority: SupportTicketPriority;
+    subject: string;
+    description: string;
+    referenceId?: string;
+  }): Promise<TicketConfirmationReceipt> => {
+    if (!authUser || !userProfile) throw new Error('Sign in to submit a complaint ticket.');
+    const cleanSubject = params.subject.trim().slice(0, 140);
+    const cleanDesc = params.description.trim().slice(0, 2500);
+    const cleanRef = (params.referenceId || '').trim().slice(0, 120);
+    if (cleanSubject.length < 3) throw new Error('Ticket subject must be at least 3 characters.');
+    if (cleanDesc.length < 5) throw new Error('Please describe your issue in at least 5 characters.');
+
+    const ticketId = makeId('tkt');
+    const notificationId = makeId('notif');
+    const ticketNumber = `TKT-${Date.now().toString().slice(-6)}`;
+    const recipientEmail = (
+      userProfile.email ||
+      authUser.email ||
+      'client@alphatradex.pro'
+    ).slice(0, 254);
+    const cleanUserName = (userProfile.fullName || 'Vault Client').slice(0, 120);
+    const cleanHandle = (userProfile.handle || 'CLIENT').slice(0, 32);
+
+    const autoCfg = platformConfig.supportAutoResponder || DEFAULT_SUPPORT_AUTO_RESPONDER;
+    const estimatedResponseTime = resolveTicketSla(params.priority).slice(0, 80);
+    const senderName = (
+      autoCfg.senderName ||
+      `${platformConfig.companyName || 'Alphatradex'} Support Desk`
+    ).slice(0, 120);
+
+    const templateVars = {
+      ticketNumber,
+      userName: cleanUserName,
+      subject: cleanSubject,
+      category: params.category.toUpperCase(),
+      priority: params.priority.toUpperCase(),
+      referenceId: cleanRef,
+      sla: estimatedResponseTime,
+      companyName: platformConfig.companyName || 'Alphatradex',
+    };
+
+    const emailSubject = renderAutoResponseTemplate(
+      autoCfg.subjectTemplate || DEFAULT_SUPPORT_AUTO_RESPONDER.subjectTemplate,
+      templateVars
+    ).slice(0, 200);
+    const autoAckMessage = renderAutoResponseTemplate(
+      autoCfg.bodyTemplate || DEFAULT_SUPPORT_AUTO_RESPONDER.bodyTemplate,
+      templateVars
+    ).slice(0, 2000);
+
+    try {
+      const batch = writeBatch(db);
+      const ticketRef = doc(db, 'supportTickets', ticketId);
+      batch.set(ticketRef, {
+        uid: authUser.uid,
+        userName: cleanUserName,
+        userEmail: recipientEmail,
+        userHandle: cleanHandle,
+        ticketNumber,
+        category: params.category,
+        priority: params.priority,
+        subject: cleanSubject,
+        description: cleanDesc,
+        referenceId: cleanRef,
+        status: 'open',
+        adminReply: '',
+        resolvedBy: '',
+        autoAckMessage,
+        estimatedResponseTime,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      if (autoCfg.enabled !== false) {
+        const notifRef = doc(db, 'users', authUser.uid, 'notifications', notificationId);
+        batch.set(notifRef, {
+          uid: authUser.uid,
+          type: 'ticket_received',
+          ticketId,
+          ticketNumber,
+          recipientEmail,
+          senderName,
+          title: `Ticket ${ticketNumber} Received — Confirmation Sent`.slice(0, 160),
+          emailSubject,
+          message: autoAckMessage,
+          category: params.category,
+          priority: params.priority,
+          estimatedResponseTime,
+          read: false,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      await batch.commit();
+
+      return {
+        ticketId,
+        ticketNumber,
+        notificationId: autoCfg.enabled !== false ? notificationId : '',
+        recipientEmail,
+        senderName,
+        emailSubject,
+        message: autoAckMessage,
+        category: params.category,
+        priority: params.priority,
+        subject: cleanSubject,
+        referenceId: cleanRef,
+        estimatedResponseTime,
+        sentAtIso: new Date().toISOString(),
+      };
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `supportTickets/${ticketId}`);
+    }
+  };
+
+  const markNotificationRead = async (notificationId: string) => {
+    if (!authUser) return;
+    try {
+      await updateDoc(doc(db, 'users', authUser.uid, 'notifications', notificationId), {
+        read: true,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(
+        err,
+        OperationType.UPDATE,
+        `users/${authUser.uid}/notifications/${notificationId}`
+      );
+    }
+  };
+
+  const markAllNotificationsRead = async () => {
+    if (!authUser) return;
+    const unread = userNotifications.filter((n) => !n.read);
+    if (unread.length === 0) return;
+    try {
+      const batch = writeBatch(db);
+      for (const n of unread) {
+        batch.update(doc(db, 'users', authUser.uid, 'notifications', n.id), {
+          read: true,
+          updatedAt: serverTimestamp(),
+        });
+      }
+      await batch.commit();
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `users/${authUser.uid}/notifications`);
+    }
+  };
+
+  const sendAdminSupportReply = async (
+    targetUser: { uid: string; fullName: string; email: string; handle: string },
+    text: string
+  ) => {
+    if (!authUser) throw new Error('Admin session required.');
+    const cleanText = text.trim().slice(0, 2000);
+    if (!cleanText) throw new Error('Reply message cannot be empty.');
+    const targetUid = targetUser.uid;
+    const threadRef = doc(db, 'supportChats', targetUid);
+    const msgId = makeId('msg');
+    const msgRef = doc(db, 'supportChats', targetUid, 'messages', msgId);
+
+    try {
+      const snap = await getDoc(threadRef);
+      if (!snap.exists()) {
+        await setDoc(threadRef, {
+          uid: targetUid,
+          userName: (targetUser.fullName || 'Vault Client').slice(0, 120),
+          userEmail: (targetUser.email || 'client@alphatradex.pro').slice(0, 254),
+          userHandle: (targetUser.handle || 'CLIENT').slice(0, 32),
+          status: 'open',
+          lastMessage: cleanText.slice(0, 500),
+          lastSender: 'admin',
+          unreadByAdmin: 0,
+          unreadByClient: 1,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        const cur = snap.data() as SupportChatThread;
+        await updateDoc(threadRef, {
+          lastMessage: cleanText.slice(0, 500),
+          lastSender: 'admin',
+          unreadByAdmin: 0,
+          unreadByClient: Math.min(9999, Number(cur.unreadByClient || 0) + 1),
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      await setDoc(msgRef, {
+        uid: targetUid,
+        senderUid: authUser.uid,
+        senderRole: 'admin',
+        senderName: 'Support Desk',
+        text: cleanText,
+        topicTag: '',
+        createdAt: serverTimestamp(),
+      });
+
+      await recordAdminAudit({
+        action: 'LIVE_CHAT_REPLIED',
+        targetUid,
+        targetLabel: `${targetUser.fullName} (${targetUser.handle})`,
+        details: cleanText.slice(0, 220),
+        amountUsd: 0,
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `supportChats/${targetUid}`);
+    }
+  };
+
+  const markAdminChatRead = async (targetUid: string) => {
+    try {
+      await updateDoc(doc(db, 'supportChats', targetUid), {
+        unreadByAdmin: 0,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `supportChats/${targetUid}`);
+    }
+  };
+
+  const setSupportChatStatus = async (targetUid: string, status: 'open' | 'resolved') => {
+    try {
+      await updateDoc(doc(db, 'supportChats', targetUid), {
+        status,
+        unreadByAdmin: 0,
+        updatedAt: serverTimestamp(),
+      });
+      await recordAdminAudit({
+        action: status === 'resolved' ? 'CHAT_RESOLVED' : 'CHAT_REOPENED',
+        targetUid,
+        targetLabel: targetUid,
+        details: `Support chat thread marked as ${status}`,
+        amountUsd: 0,
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `supportChats/${targetUid}`);
+    }
+  };
+
+  const updateSupportTicket = async (
+    ticketId: string,
+    params: { status: SupportTicketStatus; adminReply: string }
+  ) => {
+    if (!authUser) throw new Error('Admin session required.');
+    const cleanReply = params.adminReply.trim().slice(0, 2000);
+    const ticketRef = doc(db, 'supportTickets', ticketId);
+    try {
+      const snap = await getDoc(ticketRef);
+      if (!snap.exists()) throw new Error('Support ticket not found.');
+      const tkt = snap.data() as SupportTicket;
+      await updateDoc(ticketRef, {
+        status: params.status,
+        adminReply: cleanReply,
+        resolvedBy:
+          params.status === 'resolved' || params.status === 'closed'
+            ? (authUser.email || SUPER_ADMIN_EMAIL).slice(0, 120)
+            : tkt.resolvedBy || '',
+        updatedAt: serverTimestamp(),
+      });
+
+      const autoCfg = platformConfig.supportAutoResponder || DEFAULT_SUPPORT_AUTO_RESPONDER;
+      if (autoCfg.notifyOnStatusChange !== false && tkt.uid) {
+        const statusLabel =
+          params.status === 'in_progress'
+            ? 'In Progress'
+            : params.status === 'resolved' || params.status === 'closed'
+            ? 'Resolved'
+            : 'Pending';
+        const notifId = makeId('notif');
+        const senderName = (
+          autoCfg.senderName ||
+          `${platformConfig.companyName || 'Alphatradex'} Support Desk`
+        ).slice(0, 120);
+        const bodyLines = [
+          `Hello ${tkt.userName || 'Vault Client'},`,
+          '',
+          `Your support ticket ${tkt.ticketNumber} ("${tkt.subject}") has been updated to: ${statusLabel}.`,
+          cleanReply
+            ? `\nOfficial Support Desk Response:\n${cleanReply}`
+            : '\nA support specialist has updated your ticket stage. Open Track Ticket in your dashboard for live progress.',
+          '',
+          `Regards,\n${platformConfig.companyName || 'Alphatradex'} Client Support Desk`,
+        ];
+        try {
+          await setDoc(doc(db, 'users', tkt.uid, 'notifications', notifId), {
+            uid: tkt.uid,
+            type: 'ticket_status_update',
+            ticketId,
+            ticketNumber: tkt.ticketNumber,
+            recipientEmail: (tkt.userEmail || 'client@alphatradex.pro').slice(0, 254),
+            senderName,
+            title: `Ticket ${tkt.ticketNumber} Updated: ${statusLabel}`.slice(0, 160),
+            emailSubject: `Ticket Update [${tkt.ticketNumber}]: Status is now ${statusLabel}`.slice(
+              0,
+              200
+            ),
+            message: bodyLines.join('\n').slice(0, 2500),
+            category: tkt.category || 'other',
+            priority: tkt.priority || 'medium',
+            estimatedResponseTime: tkt.estimatedResponseTime || resolveTicketSla(tkt.priority),
+            read: false,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        } catch (notifErr) {
+          console.warn(
+            'Status notification delivery skipped:',
+            notifErr instanceof Error ? notifErr.message : String(notifErr)
+          );
+        }
+      }
+
+      await recordAdminAudit({
+        action: 'TICKET_UPDATED',
+        targetUid: tkt.uid,
+        targetLabel: `${tkt.ticketNumber} · ${tkt.userName}`,
+        details: `Status=${params.status} · Reply: ${cleanReply.slice(0, 200) || '(no reply text)'}`,
+        amountUsd: 0,
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `supportTickets/${ticketId}`);
+    }
+  };
+
   return (
     <PlatformContext.Provider
       value={{
@@ -3402,6 +4404,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         savedPaymentMethods,
         forexTrades,
         copyTradeSubscriptions,
+        supportChatThread,
+        supportChatMessages,
+        supportTickets,
+        userNotifications,
         signInWithGoogle,
         signInWithEmail,
         signUpWithKyc,
@@ -3437,6 +4443,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         rejectCryptoDeposit,
         approveKyc,
         rejectKyc,
+        requestKycResubmission,
         setUserKycStatus,
         verifyUserPhone,
         bulkApproveKyc,
@@ -3445,8 +4452,20 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         rejectCapitalWithdrawal,
         updateWithdrawalNote,
         giftMentorAccount,
+        revokeMentorAccess,
         adjustUserBalance,
         setUserSuspension,
+        sendClientSupportMessage,
+        markClientChatRead,
+        createSupportTicket,
+        markNotificationRead,
+        markAllNotificationsRead,
+        sendAdminSupportReply,
+        markAdminChatRead,
+        setSupportChatStatus,
+        updateSupportTicket,
+        marketingCardStats,
+        trackMarketingCardEvent,
       }}
     >
       {children}

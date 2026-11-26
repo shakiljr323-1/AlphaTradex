@@ -147,6 +147,10 @@ export const ReferralMentorDeskView: React.FC<ReferralMentorDeskViewProps> = ({
 
   const mentorCfg = platformConfig.mentorConfig;
 
+  if (!userProfile.isMentor) {
+    return null;
+  }
+
   return (
     <section aria-labelledby="referral-mentor-desk-heading" className="space-y-6">
       {/* Header & Shareable Referral Link / ID Card */}

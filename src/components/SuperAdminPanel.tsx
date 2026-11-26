@@ -13,9 +13,12 @@ import {
   CreditCard,
   Database,
   Download,
+  FileCheck,
   FileJson,
   Gift,
   Globe,
+  Headphones,
+  Image as ImageIcon,
   LayoutDashboard,
   Lock,
   LogOut,
@@ -66,12 +69,17 @@ import {
   PaymentMethodCategory,
   PaymentMethodConfig,
   PlatformConfig,
+  SupportChatThread,
+  SupportTicket,
   UserProfile,
   Withdrawal,
 } from '../types/platform';
 import { BannerAdSlot } from './AlphatradexCoinHub';
 import { CapitalRequestModal } from './CapitalRequestModal';
 import { AlphatradexLogo3D } from './AlphatradexLogo3D';
+import { AdminSupportCenter } from './AdminSupportCenter';
+import { AdminKycManagement } from './AdminKycManagement';
+import { AdminMarketingCardsPanel } from './AdminMarketingCardsPanel';
 
 function formatUiError(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err || 'Action failed.');
@@ -89,12 +97,15 @@ function formatUiError(err: unknown): string {
 type AdminTab =
   | 'overview'
   | 'approvals'
+  | 'kyc'
+  | 'support'
   | 'clients'
   | 'mentors'
   | 'packages'
   | 'forex-copy'
   | 'announcements'
   | 'coin-ads-mining'
+  | 'marketing-cards'
   | 'modules-support'
   | 'company'
   | 'wallets-meme'
@@ -104,12 +115,14 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
   const {
     authUser,
     platformConfig,
+    marketingCardStats,
     signOutUser,
     updatePlatformConfig,
     approveCryptoDeposit,
     rejectCryptoDeposit,
     approveKyc,
     rejectKyc,
+    requestKycResubmission,
     setUserKycStatus,
     verifyUserPhone,
     bulkApproveKyc,
@@ -118,6 +131,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
     rejectCapitalWithdrawal,
     updateWithdrawalNote,
     giftMentorAccount,
+    revokeMentorAccess,
     adjustUserBalance,
     setUserSuspension,
   } = usePlatform();
@@ -141,6 +155,8 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
   const [allForexTrades, setAllForexTrades] = useState<ForexTrade[]>([]);
   const [allCopySubs, setAllCopySubs] = useState<CopyTradeSubscription[]>([]);
   const [allAdminLogs, setAllAdminLogs] = useState<AdminActionLog[]>([]);
+  const [allSupportChats, setAllSupportChats] = useState<SupportChatThread[]>([]);
+  const [allSupportTickets, setAllSupportTickets] = useState<SupportTicket[]>([]);
 
   const [clientSearch, setClientSearch] = useState('');
   const [clientKycFilter, setClientKycFilter] = useState<'all' | 'pending' | 'approved' | 'unsubmitted' | 'rejected'>('all');
@@ -243,6 +259,19 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
         ),
       (err) => handleFirestoreError(err, OperationType.LIST, 'adminLogs')
     );
+    const u12 = onSnapshot(
+      query(collection(db, 'supportChats'), orderBy('updatedAt', 'desc')),
+      (snap) => setAllSupportChats(snap.docs.map((d) => d.data() as SupportChatThread)),
+      (err) => handleFirestoreError(err, OperationType.LIST, 'supportChats')
+    );
+    const u13 = onSnapshot(
+      query(collection(db, 'supportTickets'), orderBy('createdAt', 'desc')),
+      (snap) =>
+        setAllSupportTickets(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<SupportTicket, 'id'>) }))
+        ),
+      (err) => handleFirestoreError(err, OperationType.LIST, 'supportTickets')
+    );
 
     return () => {
       u1();
@@ -256,6 +285,8 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
       u9();
       u10();
       u11();
+      u12();
+      u13();
     };
   }, []);
 
@@ -278,9 +309,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
 
   const pendingDeposits = allDeposits.filter((d) => d.status === 'pending');
   const pendingKyc = allUsers.filter((u) => u.kycStatus === 'pending');
-  const pendingCapitalWd = allWithdrawals.filter(
-    (w) => w.type === 'manual_capital' && w.status === 'pending'
-  );
+  const pendingCapitalWd = allWithdrawals.filter((w) => w.status === 'pending');
   const mentorUsers = allUsers.filter((u) => u.isMentor);
 
   const totalVaultLiquidity = allUsers.reduce((sum, u) => sum + (Number(u.usdBalance) || 0), 0);
@@ -373,6 +402,8 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
         forexTrades: allForexTrades.length,
         copyTradeSubscriptions: allCopySubs.length,
         adminLogs: allAdminLogs.length,
+        supportChats: allSupportChats.length,
+        supportTickets: allSupportTickets.length,
       },
       data: {
         users: allUsers,
@@ -386,6 +417,8 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
         forexTrades: allForexTrades,
         copyTradeSubscriptions: allCopySubs,
         adminLogs: allAdminLogs,
+        supportChats: allSupportChats,
+        supportTickets: allSupportTickets,
       },
     };
     const json = JSON.stringify(backup, null, 2);
@@ -409,6 +442,13 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
   };
 
   const mentorMultiplier = Math.max(1, Number(draftConfig.mentorConfig?.volumeMultiplier) || 4);
+  const unreadSupportChatsCount = allSupportChats.reduce(
+    (sum, t) => sum + Number(t.unreadByAdmin || 0),
+    0
+  );
+  const openSupportTicketsCount = allSupportTickets.filter(
+    (t) => t.status === 'open' || t.status === 'in_progress'
+  ).length;
 
   const navGroups: {
     heading: string;
@@ -423,6 +463,16 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
           label: `Approvals (${pendingDeposits.length + pendingKyc.length + pendingCapitalWd.length})`,
           Icon: ShieldCheck,
         },
+        {
+          id: 'kyc',
+          label: `KYC Verifications (${pendingKyc.length})`,
+          Icon: FileCheck,
+        },
+        {
+          id: 'support',
+          label: `Support & Tickets (${unreadSupportChatsCount + openSupportTicketsCount})`,
+          Icon: Headphones,
+        },
         { id: 'clients', label: `Client Database (${allUsers.length})`, Icon: Users },
         { id: 'mentors', label: `Mentor Gifts (${mentorMultiplier}× Rule)`, Icon: Gift },
       ],
@@ -435,6 +485,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
         { id: 'packages', label: 'Packages & Commissions', Icon: Settings },
         { id: 'forex-copy', label: 'Forex Tiers & Copy Trade', Icon: Globe },
         { id: 'coin-ads-mining', label: 'Banner Ads & Coin Mining', Icon: Sparkles },
+        { id: 'marketing-cards', label: 'Marketing Cards', Icon: ImageIcon },
         { id: 'wallets-meme', label: 'Addresses & Meme Coin', Icon: Coins },
         { id: 'company', label: 'Company & Trust Ratings', Icon: Shield },
       ],
@@ -618,12 +669,16 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                 {pendingDeposits.length}
               </div>
             </div>
-            <div className="bg-white border border-slate-200 rounded-xl p-4">
+            <button
+              type="button"
+              onClick={() => setTab('kyc')}
+              className="bg-white border border-slate-200 hover:border-orange-300 rounded-xl p-4 text-left transition-colors"
+            >
               <div className="text-xs text-slate-500">Pending KYC Reviews</div>
               <div className="font-mono font-bold text-2xl text-orange-600 tabular-nums mt-1">
                 {pendingKyc.length}
               </div>
-            </div>
+            </button>
             <div className="bg-white border border-slate-200 rounded-xl p-4">
               <div className="text-xs text-slate-500">Pending Capital Withdrawals</div>
               <div className="font-mono font-bold text-2xl text-red-600 tabular-nums mt-1">
@@ -814,16 +869,53 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                 </button>
                 <button
                   type="button"
-                  onClick={() => setTab('audit')}
+                  onClick={() => setTab('support')}
                   className="bg-white border border-slate-200 hover:border-orange-400 rounded-xl p-4 text-left transition-colors"
                 >
-                  <div className="text-xs font-semibold text-slate-700">Audit &amp; Backup →</div>
+                  <div className="text-xs font-semibold text-amber-600">Live Support &amp; Tickets →</div>
                   <div className="text-sm font-bold text-slate-900 mt-1">
-                    Immutable Admin Logs &amp; JSON Export
+                    {unreadSupportChatsCount} Unread Chats · {openSupportTicketsCount} Open Tickets
                   </div>
                 </button>
               </div>
             </section>
+          )}
+
+          {/* TAB: DEDICATED GLOBAL KYC VERIFICATIONS & POLICY MANAGER */}
+          {tab === 'kyc' && (
+            <AdminKycManagement
+              allUsers={allUsers}
+              allAdminLogs={allAdminLogs}
+              draftConfig={draftConfig}
+              setDraftConfig={setDraftConfig}
+              onSaveConfig={() => handleSaveConfig(draftConfig)}
+              onApproveKyc={approveKyc}
+              onRejectKyc={rejectKyc}
+              onRequestResubmission={requestKycResubmission}
+              onBulkApproveKyc={bulkApproveKyc}
+              busy={busy}
+            />
+          )}
+
+          {/* TAB: LIVE SUPPORT CHAT, COMPLAINT TICKETS & GOOGLE CHAT SYNC */}
+          {tab === 'support' && (
+            <AdminSupportCenter
+              chatThreads={allSupportChats}
+              tickets={allSupportTickets}
+              onNotify={notify}
+            />
+          )}
+
+          {/* TAB: MARKETING PHOTO CARD TEMPLATES & ANALYTICS */}
+          {tab === 'marketing-cards' && (
+            <AdminMarketingCardsPanel
+              draftConfig={draftConfig}
+              setDraftConfig={setDraftConfig}
+              marketingCardStats={marketingCardStats}
+              onSaveConfig={handleSaveConfig}
+              busy={busy}
+              onNotify={notify}
+            />
           )}
 
           {/* TAB 1: APPROVAL QUEUES */}
@@ -1124,7 +1216,11 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                                 <span className="font-semibold text-slate-900 text-sm">
                                   {w.type === 'manual_capital'
                                     ? `Manual Capital · Package #${w.packageNumber}`
-                                    : 'Instant Profit Payout'}{' '}
+                                    : w.source === 'mentor_profit'
+                                    ? 'Mentor Profit Payout'
+                                    : w.source === 'mlm_commission'
+                                    ? 'Referral Commission Payout'
+                                    : 'Trading Profit Payout'}{' '}
                                   · {w.userName}
                                 </span>
                                 <span
@@ -1136,7 +1232,9 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                                       : 'bg-emerald-100 text-emerald-800'
                                   }`}
                                 >
-                                  {w.status}
+                                  {w.status === 'approved' || w.status === 'completed'
+                                    ? 'Processed'
+                                    : w.status}
                                 </span>
                               </div>
                               <div className="text-slate-600 font-mono mt-1">
@@ -1148,7 +1246,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                                     {w.totalProfitGenerated.toFixed(2)}
                                   </>
                                 )}{' '}
-                                · {w.network.replace('_', ' ')} ({w.destinationAddress})
+                                · {w.network.replace(/_/g, ' ')} ({w.destinationAddress})
                               </div>
                             </div>
                             <div className="flex flex-wrap items-center gap-2">
@@ -1161,7 +1259,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                                   Breakdown
                                 </button>
                               )}
-                              {w.status === 'pending' && w.type === 'manual_capital' && (
+                              {w.status === 'pending' && (
                                 <>
                                   <button
                                     type="button"
@@ -1170,7 +1268,12 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                                       setBusy(true);
                                       try {
                                         await approveCapitalWithdrawal(w, noteValue.trim() || undefined);
-                                        notify('ok', `Approved capital withdrawal for Package #${w.packageNumber}.`);
+                                        notify(
+                                          'ok',
+                                          w.type === 'manual_capital'
+                                            ? `Approved capital withdrawal for Package #${w.packageNumber}.`
+                                            : `Marked $${w.amountUsd.toFixed(2)} payout for ${w.userName} as Processed.`
+                                        );
                                       } catch (err) {
                                         notify('err', formatUiError(err));
                                       } finally {
@@ -1179,7 +1282,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                                     }}
                                     className="px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold"
                                   >
-                                    Approve Payout
+                                    Approve &amp; Mark Processed
                                   </button>
                                   <button
                                     type="button"
@@ -1189,9 +1292,17 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                                       try {
                                         await rejectCapitalWithdrawal(
                                           w,
-                                          noteValue.trim() || 'Capital lock review declined'
+                                          noteValue.trim() ||
+                                            (w.type === 'manual_capital'
+                                              ? 'Capital lock review declined'
+                                              : 'Payout request declined and refunded to Income Wallet')
                                         );
-                                        notify('ok', `Rejected capital withdrawal for Package #${w.packageNumber}.`);
+                                        notify(
+                                          'ok',
+                                          w.type === 'manual_capital'
+                                            ? `Rejected capital withdrawal for Package #${w.packageNumber}.`
+                                            : `Rejected $${w.amountUsd.toFixed(2)} payout and refunded Income Wallet.`
+                                        );
                                       } catch (err) {
                                         notify('err', formatUiError(err));
                                       } finally {
@@ -1200,7 +1311,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                                     }}
                                     className="px-3 py-1.5 rounded bg-red-600 hover:bg-red-500 text-white font-semibold"
                                   >
-                                    Reject
+                                    {w.type === 'manual_capital' ? 'Reject' : 'Reject & Refund'}
                                   </button>
                                 </>
                               )}
@@ -1501,7 +1612,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                   Gift Mentor Account (Automatic {mentorMultiplier}× Volume Rule)
                 </h2>
                 <p className="text-xs text-slate-500">
-                  Gifted capital accrues weekday profit immediately, while withdrawals unlock after referred team volume hits {mentorMultiplier}× Gifted Capital. Active mentors also earn a +{draftConfig.mentorConfig.mentorCommissionPercent}% override commission on direct L1 package activations.
+                  Gifted capital accrues weekday profit immediately, while withdrawals unlock after referred team volume hits {mentorMultiplier}× Gifted Capital. Active mentors also earn a +{draftConfig.mentorConfig.mentorCommissionPercent}% override commission on direct L1 package activations. <strong className="text-slate-900">Normal clients never see any Mentor option</strong> — the dedicated Mentor Dashboard unlocks exclusively for accounts gifted here.
                 </p>
 
                 <form
@@ -1628,13 +1739,33 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                               <span className="font-semibold text-slate-900">{m.fullName}</span>{' '}
                               <span className="font-mono text-slate-500">({m.handle})</span>
                             </div>
-                            <span
-                              className={`px-2 py-0.5 rounded font-semibold ${
-                                unlocked ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-900'
-                              }`}
-                            >
-                              {unlocked ? 'Volume Unlocked' : 'Locked'}
-                            </span>
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`px-2 py-0.5 rounded font-semibold ${
+                                  unlocked ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-900'
+                                }`}
+                              >
+                                {unlocked ? 'Volume Unlocked' : 'Locked'}
+                              </span>
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={async () => {
+                                  setBusy(true);
+                                  try {
+                                    await revokeMentorAccess(m.uid);
+                                    notify('ok', `Revoked Mentor access for ${m.fullName} (${m.handle}). Mentor options are now hidden from their account.`);
+                                  } catch (err) {
+                                    notify('err', (err as Error).message);
+                                  } finally {
+                                    setBusy(false);
+                                  }
+                                }}
+                                className="px-2 py-0.5 rounded border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold transition-colors disabled:opacity-50"
+                              >
+                                Revoke Mentor
+                              </button>
+                            </div>
                           </div>
                           <div className="flex justify-between font-mono text-slate-600 tabular-nums">
                             <span>Gifted: ${m.mentorGiftedCapital.toFixed(2)}</span>

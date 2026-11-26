@@ -21,3 +21,5 @@
 10. **P2P Negative Drain Attack**: `PATCH /users/victimUid` by attacker trying to decrease `usdBalance`.
 11. **ID Poisoning**: `GET /investments/` with oversized or invalid characters in ID (`150+ chars` or `../`).
 12. **Client Timestamp Forgery**: `POST /investments/inv1` with `createdAt: "2020-01-01T00:00:00Z"` instead of `serverTimestamp()`.
+13. **Spoofed Automated Notification**: Non-admin user creating `/users/{uid}/notifications/{id}` with `type: "ticket_status_update"` or without an atomically paired `/supportTickets/{ticketId}` owned by `request.auth.uid`, or modifying `message`/`ticketNumber` on update.
+
