@@ -101,6 +101,7 @@
         "phoneVerified": { "type": "boolean" },
         "whitelistStrictMode": { "type": "boolean" },
         "whitelist24hLockEnabled": { "type": "boolean" },
+        "autoCompoundConfig": { "type": "object" },
         "suspended": { "type": "boolean" },
         "suspensionReason": { "type": "string", "maxLength": 300 },
         "usdBalance": { "type": "number" },
@@ -248,6 +249,8 @@
         "totalProfitGenerated": { "type": "number" },
         "amountUsd": { "type": "number" },
         "feeUsd": { "type": "number" },
+        "feeDiscountUsd": { "type": "number" },
+        "promoCode": { "type": "string", "maxLength": 24 },
         "netPayoutUsd": { "type": "number" },
         "network": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "destinationAddress": { "type": "string", "maxLength": 160 },
@@ -961,6 +964,77 @@
         "uid", "currentStreak", "longestStreak", "lastCheckInDayKey",
         "totalCheckIns", "totalXp", "claimedMissionIds", "badges", "updatedAt"
       ]
+    },
+    "PriceAlert": {
+      "title": "PriceAlert",
+      "description": "User-configured Forex and Crypto target price alert triggering in-app and email notifications.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "symbol": { "type": "string", "enum": ["BTC/USD", "ETH/USD", "SOL/USD", "BNB/USD", "XAU/USD", "EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD"] },
+        "condition": { "type": "string", "enum": ["above", "below"] },
+        "targetPrice": { "type": "number" },
+        "notifyEmail": { "type": "boolean" },
+        "notifyInApp": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["active", "triggered", "paused"] },
+        "triggeredPrice": { "type": "number" },
+        "triggeredAtMs": { "type": "number" },
+        "emailSent": { "type": "boolean" },
+        "note": { "type": "string", "maxLength": 160 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid", "symbol", "condition", "targetPrice", "notifyEmail", "notifyInApp",
+        "status", "triggeredPrice", "triggeredAtMs", "emailSent", "note", "createdAt", "updatedAt"
+      ]
+    },
+    "PromoCode": {
+      "title": "PromoCode",
+      "description": "Super-Admin-controlled promotional fee-waiver and milestone bonus voucher codes.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "maxLength": 24, "pattern": "^[A-Z0-9_\\-]{3,24}$" },
+        "title": { "type": "string", "maxLength": 80 },
+        "description": { "type": "string", "maxLength": 240 },
+        "type": { "type": "string", "enum": ["withdrawal_fee_waiver", "withdrawal_fee_discount", "deposit_bonus_usd", "milestone_bonus_usd"] },
+        "discountPercent": { "type": "number" },
+        "bonusUsd": { "type": "number" },
+        "minAmountUsd": { "type": "number" },
+        "maxTotalUses": { "type": "number" },
+        "maxUsesPerUser": { "type": "number" },
+        "currentUses": { "type": "number" },
+        "expiresAtMs": { "type": "number" },
+        "active": { "type": "boolean" },
+        "createdByEmail": { "type": "string", "maxLength": 254 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "code", "title", "description", "type", "discountPercent", "bonusUsd",
+        "minAmountUsd", "maxTotalUses", "maxUsesPerUser", "currentUses",
+        "expiresAtMs", "active", "createdByEmail", "createdAt", "updatedAt"
+      ]
+    },
+    "PromoRedemption": {
+      "title": "PromoRedemption",
+      "description": "Immutable record of user promo/voucher redemptions for per-user limit enforcement and auditing.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userEmail": { "type": "string", "maxLength": 254 },
+        "code": { "type": "string", "maxLength": 24, "pattern": "^[A-Z0-9_\\-]{3,24}$" },
+        "type": { "type": "string", "enum": ["withdrawal_fee_waiver", "withdrawal_fee_discount", "deposit_bonus_usd", "milestone_bonus_usd"] },
+        "appliedTo": { "type": "string", "enum": ["withdrawal", "bonus_claim"] },
+        "referenceId": { "type": "string", "maxLength": 128 },
+        "feeSavedUsd": { "type": "number" },
+        "bonusCreditedUsd": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid", "userEmail", "code", "type", "appliedTo", "referenceId",
+        "feeSavedUsd", "bonusCreditedUsd", "createdAt"
+      ]
     }
   },
   "firestore": {
@@ -1079,6 +1153,18 @@
     "/users/{userId}/loginActivities/{activityId}": {
       "schema": { "$ref": "#/entities/LoginActivity" },
       "description": "Per-user recent sign-in & device history for security monitoring."
+    },
+    "/users/{userId}/priceAlerts/{alertId}": {
+      "schema": { "$ref": "#/entities/PriceAlert" },
+      "description": "Per-user live Forex and Crypto target price alerts."
+    },
+    "/promoCodes/{codeId}": {
+      "schema": { "$ref": "#/entities/PromoCode" },
+      "description": "Super-Admin-managed fee-waiver and milestone bonus voucher codes."
+    },
+    "/promoRedemptions/{redemptionId}": {
+      "schema": { "$ref": "#/entities/PromoRedemption" },
+      "description": "Immutable voucher redemption ledger enforcing per-user usage limits."
     },
     "/userMissions/{userId}": {
       "schema": { "$ref": "#/entities/UserMissionProfile" },

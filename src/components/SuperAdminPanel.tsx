@@ -16,6 +16,7 @@ import {
   ExternalLink,
   FileCheck,
   FileJson,
+  FileSpreadsheet,
   Film,
   Gift,
   Globe,
@@ -39,6 +40,7 @@ import {
   ShieldCheck,
   Sliders,
   Sparkles,
+  Tag,
   Trash2,
   TrendingUp,
   Trophy,
@@ -74,6 +76,8 @@ import {
   PaymentMethodCategory,
   PaymentMethodConfig,
   PlatformConfig,
+  PromoCode,
+  PromoRedemption,
   SecurityAuditLog,
   SupportChatThread,
   SupportTicket,
@@ -88,10 +92,11 @@ import { AdminSupportCenter } from './AdminSupportCenter';
 import { AdminKycManagement } from './AdminKycManagement';
 import { AdminMarketingCardsPanel } from './AdminMarketingCardsPanel';
 import { AdminHowItWorksPanel } from './AdminHowItWorksPanel';
-import { AdminLeaderboardPanel } from './AdminLeaderboardPanel';
 import { AdminWeb3PaymentPanel } from './AdminWeb3PaymentPanel';
 import { AdminResendEmailSettingsPanel } from './AdminResendEmailSettingsPanel';
 import { AdminCashflowAnalyticsCard } from './AdminCashflowAnalyticsCard';
+import { AdminPromoVouchersPanel } from './AdminPromoVouchersPanel';
+import { AdminFinancialExportPanel } from './AdminFinancialExportPanel';
 
 function formatUiError(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err || 'Action failed.');
@@ -119,11 +124,12 @@ type AdminTab =
   | 'coin-ads-mining'
   | 'marketing-cards'
   | 'how-it-works'
-  | 'leaderboard'
   | 'modules-support'
   | 'company'
   | 'web3-payments'
   | 'wallets-meme'
+  | 'promo-vouchers'
+  | 'financial-export'
   | 'email-api'
   | 'audit';
 
@@ -150,6 +156,9 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
     revokeMentorAccess,
     adjustUserBalance,
     setUserSuspension,
+    createPromoCode,
+    updatePromoCode,
+    deletePromoCode,
   } = usePlatform();
 
   const [tab, setTab] = useState<AdminTab>('overview');
@@ -175,6 +184,8 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
   const [allAuditLogs, setAllAuditLogs] = useState<SecurityAuditLog[]>([]);
   const [allSupportChats, setAllSupportChats] = useState<SupportChatThread[]>([]);
   const [allSupportTickets, setAllSupportTickets] = useState<SupportTicket[]>([]);
+  const [allPromoCodes, setAllPromoCodes] = useState<PromoCode[]>([]);
+  const [allPromoRedemptions, setAllPromoRedemptions] = useState<PromoRedemption[]>([]);
 
   const [clientSearch, setClientSearch] = useState('');
   const [clientKycFilter, setClientKycFilter] = useState<'all' | 'pending' | 'approved' | 'unsubmitted' | 'rejected'>('all');
@@ -334,6 +345,22 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
         ),
       (err) => handleFirestoreError(err, OperationType.LIST, 'auditLogs')
     );
+    const u16 = onSnapshot(
+      query(collection(db, 'promoCodes'), orderBy('createdAt', 'desc')),
+      (snap) =>
+        setAllPromoCodes(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<PromoCode, 'id'>) }))
+        ),
+      (err) => handleFirestoreError(err, OperationType.LIST, 'promoCodes')
+    );
+    const u17 = onSnapshot(
+      query(collection(db, 'promoRedemptions'), orderBy('createdAt', 'desc')),
+      (snap) =>
+        setAllPromoRedemptions(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<PromoRedemption, 'id'>) }))
+        ),
+      (err) => handleFirestoreError(err, OperationType.LIST, 'promoRedemptions')
+    );
 
     return () => {
       u1();
@@ -351,6 +378,8 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
       u13();
       u14();
       u15();
+      u16();
+      u17();
     };
   }, []);
 
@@ -551,10 +580,24 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
         { id: 'coin-ads-mining', label: 'Banner Ads & Coin Mining', Icon: Sparkles },
         { id: 'marketing-cards', label: 'Marketing Cards', Icon: ImageIcon },
         { id: 'how-it-works', label: 'How It Works & Video', Icon: Film },
-        { id: 'leaderboard', label: 'Top Leaderboard', Icon: Trophy },
         { id: 'web3-payments', label: 'Web3 Payments & Security', Icon: Zap },
         { id: 'wallets-meme', label: 'Addresses & Meme Coin', Icon: Coins },
         { id: 'company', label: 'Company & Trust Ratings', Icon: Shield },
+      ],
+    },
+    {
+      heading: 'GROWTH & ACCOUNTING',
+      items: [
+        {
+          id: 'promo-vouchers',
+          label: `Promo & Fee Vouchers (${allPromoCodes.length})`,
+          Icon: Tag,
+        },
+        {
+          id: 'financial-export',
+          label: 'CSV / Excel Financial Export',
+          Icon: FileSpreadsheet,
+        },
       ],
     },
     {
@@ -999,21 +1042,6 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
             <AdminHowItWorksPanel
               draftConfig={draftConfig}
               setDraftConfig={setDraftConfig}
-              onSaveConfig={handleSaveConfig}
-              busy={busy}
-              onNotify={notify}
-            />
-          )}
-
-          {/* TAB: TOP PERFORMERS LEADERBOARD CONTROL */}
-          {tab === 'leaderboard' && (
-            <AdminLeaderboardPanel
-              draftConfig={draftConfig}
-              setDraftConfig={setDraftConfig}
-              allUsers={allUsers}
-              allMlm={allMlm}
-              allForexTrades={allForexTrades}
-              allInvestments={allInvestments}
               onSaveConfig={handleSaveConfig}
               busy={busy}
               onNotify={notify}
@@ -4718,6 +4746,27 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                   setBusy(false);
                 }
               }}
+            />
+          )}
+
+          {tab === 'promo-vouchers' && (
+            <AdminPromoVouchersPanel
+              promoCodes={allPromoCodes}
+              promoRedemptions={allPromoRedemptions}
+              onCreatePromoCode={createPromoCode}
+              onUpdatePromoCode={updatePromoCode}
+              onDeletePromoCode={deletePromoCode}
+              onNotify={notify}
+            />
+          )}
+
+          {tab === 'financial-export' && (
+            <AdminFinancialExportPanel
+              allUsers={allUsers}
+              allDeposits={allDeposits}
+              allWithdrawals={allWithdrawals}
+              allMlmCommissions={allMlm}
+              onNotify={notify}
             />
           )}
 

@@ -503,6 +503,168 @@ async function fsQuerySubcollectionByUid(
   return out;
 }
 
+async function fsQueryRootCollectionByUid(
+  idToken: string,
+  collectionId: string,
+  uid: string
+): Promise<Array<{ id: string; data: Record<string, unknown> }>> {
+  const url = `${FIRESTORE_BASE_URL}/documents:runQuery`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      structuredQuery: {
+        from: [{ collectionId }],
+        where: {
+          fieldFilter: {
+            field: { fieldPath: 'uid' },
+            op: 'EQUAL',
+            value: { stringValue: uid },
+          },
+        },
+        limit: 100,
+      },
+    }),
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw Object.assign(
+      new Error(`Database query failed (${res.status}): ${text.slice(0, 220)}`),
+      { statusCode: res.status === 403 ? 403 : 502 }
+    );
+  }
+  const rows = (await res.json()) as Array<{
+    document?: { name?: string; fields?: Record<string, FirestoreRestValue> };
+  }>;
+  const out: Array<{ id: string; data: Record<string, unknown> }> = [];
+  for (const row of rows) {
+    if (!row.document?.name) continue;
+    const parts = row.document.name.split('/');
+    const id = parts[parts.length - 1] || '';
+    if (!id) continue;
+    out.push({ id, data: fromFsDoc(row.document) });
+  }
+  return out;
+}
+
+function normalizePromoCode(raw: unknown): string {
+  return String(raw || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_-]/g, '')
+    .slice(0, 24);
+}
+
+interface ValidatedPromoResult {
+  code: string;
+  title: string;
+  description: string;
+  type: 'withdrawal_fee_waiver' | 'withdrawal_fee_discount' | 'deposit_bonus_usd' | 'milestone_bonus_usd';
+  discountPercent: number;
+  bonusUsd: number;
+  minAmountUsd: number;
+  currentUses: number;
+  maxTotalUses: number;
+  maxUsesPerUser: number;
+}
+
+async function validatePromoForCaller(params: {
+  caller: VerifiedCaller;
+  rawCode: string;
+  context: 'withdrawal' | 'bonus';
+  amountUsd?: number;
+  txHandle?: string;
+}): Promise<ValidatedPromoResult> {
+  const code = normalizePromoCode(params.rawCode);
+  if (!/^[A-Z0-9_-]{3,24}$/.test(code)) {
+    throw Object.assign(new Error('Invalid promo code format. Use 3-24 letters or numbers.'), {
+      statusCode: 400,
+    });
+  }
+
+  const promoDoc = await fsGetDoc(params.caller.idToken, `promoCodes/${code}`, params.txHandle);
+  if (!promoDoc) {
+    throw Object.assign(new Error(`Promo code "${code}" does not exist.`), { statusCode: 404 });
+  }
+  if (promoDoc.active !== true) {
+    throw Object.assign(new Error(`Promo code "${code}" is currently inactive.`), { statusCode: 400 });
+  }
+  const expiresAtMs = Number(promoDoc.expiresAtMs || 0);
+  if (expiresAtMs > 0 && Date.now() > expiresAtMs) {
+    throw Object.assign(new Error(`Promo code "${code}" has expired.`), { statusCode: 400 });
+  }
+
+  const currentUses = Math.max(0, Math.round(Number(promoDoc.currentUses || 0)));
+  const maxTotalUses = Math.max(1, Math.round(Number(promoDoc.maxTotalUses || 1)));
+  if (currentUses >= maxTotalUses) {
+    throw Object.assign(new Error(`Promo code "${code}" has reached its global redemption limit.`), {
+      statusCode: 400,
+    });
+  }
+
+  const maxUsesPerUser = Math.max(1, Math.round(Number(promoDoc.maxUsesPerUser || 1)));
+  const userRedemptions = await fsQueryRootCollectionByUid(
+    params.caller.idToken,
+    'promoRedemptions',
+    params.caller.uid
+  );
+  const userUsesForCode = userRedemptions.filter(
+    (r) => String(r.data.code || '').toUpperCase() === code
+  ).length;
+  if (userUsesForCode >= maxUsesPerUser) {
+    throw Object.assign(
+      new Error(`You have already redeemed promo code "${code}" (${userUsesForCode}/${maxUsesPerUser}).`),
+      { statusCode: 400 }
+    );
+  }
+
+  const type = String(promoDoc.type || '') as ValidatedPromoResult['type'];
+  if (params.context === 'withdrawal') {
+    if (type !== 'withdrawal_fee_waiver' && type !== 'withdrawal_fee_discount') {
+      throw Object.assign(
+        new Error(`Code "${code}" is a bonus voucher, not a withdrawal fee voucher. Redeem it in Investor Tools -> Vouchers.`),
+        { statusCode: 400 }
+      );
+    }
+  } else {
+    if (type !== 'deposit_bonus_usd' && type !== 'milestone_bonus_usd') {
+      throw Object.assign(
+        new Error(`Code "${code}" is a withdrawal fee-waiver voucher. Apply it inside Withdrawal Management.`),
+        { statusCode: 400 }
+      );
+    }
+  }
+
+  const minAmountUsd = Math.max(0, Number(promoDoc.minAmountUsd || 0));
+  if (
+    params.context === 'withdrawal' &&
+    typeof params.amountUsd === 'number' &&
+    params.amountUsd < minAmountUsd
+  ) {
+    throw Object.assign(
+      new Error(`Promo code "${code}" requires a minimum withdrawal of $${minAmountUsd.toFixed(2)}.`),
+      { statusCode: 400 }
+    );
+  }
+
+  return {
+    code,
+    title: String(promoDoc.title || code),
+    description: String(promoDoc.description || ''),
+    type,
+    discountPercent: Math.max(0, Math.min(100, Number(promoDoc.discountPercent || 0))),
+    bonusUsd: Math.max(0, Math.min(10000, Number(promoDoc.bonusUsd || 0))),
+    minAmountUsd,
+    currentUses,
+    maxTotalUses,
+    maxUsesPerUser,
+  };
+}
+
 type WhitelistUsdtNetwork = 'BEP20' | 'POLYGON' | 'TRC20' | 'ERC20';
 
 function normalizeWhitelistNetwork(raw: string): WhitelistUsdtNetwork | null {
@@ -1459,6 +1621,7 @@ export function registerWeb3PaymentRoutes(app: Express): void {
         destinationAddress?: string;
         source?: string;
         otpVerificationToken?: string;
+        promoCode?: string;
       };
 
       const amountUsd = Number(Number(body.amountUsd || 0).toFixed(2));
@@ -1551,10 +1714,14 @@ export function registerWeb3PaymentRoutes(app: Express): void {
 
       const feePercent = Math.max(0, Math.min(15, Number(web3Cfg.withdrawalFeePercent ?? 0) || 0));
       const flatFeeUsd = Math.max(0, Math.min(50, Number(web3Cfg.withdrawalFlatFeeUsd ?? 0) || 0));
-      const feeUsd = Number(((amountUsd * feePercent) / 100 + flatFeeUsd).toFixed(2));
-      const netPayoutUsd = Number((amountUsd - feeUsd).toFixed(2));
+      const rawFeeUsd = Number(((amountUsd * feePercent) / 100 + flatFeeUsd).toFixed(2));
+      const requestedPromoCode = normalizePromoCode(body.promoCode);
+      let appliedPromo: ValidatedPromoResult | null = null;
+      let feeDiscountUsd = 0;
+      let feeUsd = rawFeeUsd;
+      let netPayoutUsd = Number((amountUsd - feeUsd).toFixed(2));
 
-      if (netPayoutUsd <= 0) {
+      if (!requestedPromoCode && netPayoutUsd <= 0) {
         res.status(400).json({
           error: `Withdrawal amount ($${amountUsd.toFixed(
             2
@@ -1634,6 +1801,32 @@ export function registerWeb3PaymentRoutes(app: Express): void {
           return;
         }
 
+        // Validate optional withdrawal fee-waiver / fee-discount promo code inside transaction
+        if (requestedPromoCode) {
+          appliedPromo = await validatePromoForCaller({
+            caller,
+            rawCode: requestedPromoCode,
+            context: 'withdrawal',
+            amountUsd,
+            txHandle,
+          });
+          const effectiveDiscountPct =
+            appliedPromo.type === 'withdrawal_fee_waiver' ? 100 : appliedPromo.discountPercent;
+          feeDiscountUsd = Number(((rawFeeUsd * effectiveDiscountPct) / 100).toFixed(2));
+          feeUsd = Number(Math.max(0, rawFeeUsd - feeDiscountUsd).toFixed(2));
+          netPayoutUsd = Number((amountUsd - feeUsd).toFixed(2));
+        }
+
+        if (netPayoutUsd <= 0) {
+          await fsRollbackTransaction(caller.idToken, txHandle);
+          res.status(400).json({
+            error: `Withdrawal amount ($${amountUsd.toFixed(
+              2
+            )}) must exceed the withdrawal fee ($${feeUsd.toFixed(2)}).`,
+          });
+          return;
+        }
+
         const nextProfitBalance = Number((currentProfitBalance - amountUsd).toFixed(2));
         const userName = String(userDoc.fullName || caller.email).slice(0, 120);
         const wdId = makeServerDocId('wdp');
@@ -1665,11 +1858,15 @@ export function registerWeb3PaymentRoutes(app: Express): void {
               totalProfitGenerated: 0,
               amountUsd,
               feeUsd,
+              feeDiscountUsd,
+              promoCode: appliedPromo ? appliedPromo.code : '',
               netPayoutUsd,
               network,
               destinationAddress,
               status: 'pending',
-              adminNote: '',
+              adminNote: appliedPromo
+                ? `Promo ${appliedPromo.code} applied (-$${feeDiscountUsd.toFixed(2)} fee saved)`
+                : '',
               payoutTxHash: '',
               twoFactorVerified,
               reviewedByUid: '',
@@ -1696,7 +1893,7 @@ export function registerWeb3PaymentRoutes(app: Express): void {
               status: 'pending',
               details: `Funds locked pending Super Admin manual payout review (${network} -> ${destinationAddress}, 2FA: ${
                 twoFactorVerified ? 'Verified' : 'Optional'
-              })`,
+              }${appliedPromo ? `, Promo: ${appliedPromo.code}` : ''})`,
             },
             ['createdAt']
           ),
@@ -1714,13 +1911,40 @@ export function registerWeb3PaymentRoutes(app: Express): void {
               amountUsd,
               details: `Safe withdrawal request ${wdId} locked ($${amountUsd.toFixed(
                 2
-              )} gross, $${feeUsd.toFixed(2)} fee, $${netPayoutUsd.toFixed(
-                2
-              )} net) -> ${destinationAddress}`,
+              )} gross, $${feeUsd.toFixed(2)} fee${
+                appliedPromo ? ` after promo ${appliedPromo.code}` : ''
+              }, $${netPayoutUsd.toFixed(2)} net) -> ${destinationAddress}`,
             },
             ['createdAt']
           ),
         ];
+
+        if (appliedPromo) {
+          const redId = makeServerDocId('prd');
+          writes.push(
+            buildUpdateWrite(
+              `promoCodes/${appliedPromo.code}`,
+              {
+                currentUses: appliedPromo.currentUses + 1,
+              },
+              ['updatedAt']
+            ),
+            buildCreateWrite(
+              `promoRedemptions/${redId}`,
+              {
+                uid: caller.uid,
+                userEmail: caller.email,
+                code: appliedPromo.code,
+                type: appliedPromo.type,
+                appliedTo: 'withdrawal',
+                referenceId: wdId,
+                feeSavedUsd: feeDiscountUsd,
+                bonusCreditedUsd: 0,
+              },
+              ['createdAt']
+            )
+          );
+        }
 
         await fsCommitTransaction(caller.idToken, txHandle, writes);
 
@@ -1732,7 +1956,9 @@ export function registerWeb3PaymentRoutes(app: Express): void {
           amountUsd,
           network,
           destinationAddress,
-          sourceLabel: '2FA Withdrawal Request',
+          sourceLabel: appliedPromo
+            ? `2FA Withdrawal Request (Promo ${appliedPromo.code})`
+            : '2FA Withdrawal Request',
         });
 
         res.json({
@@ -1741,12 +1967,16 @@ export function registerWeb3PaymentRoutes(app: Express): void {
           status: 'pending',
           amountUsd,
           feeUsd,
+          feeDiscountUsd,
+          promoCode: appliedPromo?.code || '',
           netPayoutUsd,
           twoFactorVerified,
           newProfitBalance: nextProfitBalance,
           message: `Withdrawal request #${wdId} ($${netPayoutUsd.toFixed(
             2
-          )} net after $${feeUsd.toFixed(2)} fee) is locked and queued for Super Admin manual approval.`,
+          )} net after $${feeUsd.toFixed(2)} fee${
+            appliedPromo ? `, promo ${appliedPromo.code} saved $${feeDiscountUsd.toFixed(2)}` : ''
+          }) is locked and queued for Super Admin manual approval.`,
         });
       } catch (txErr) {
         await fsRollbackTransaction(caller.idToken, txHandle);
@@ -2305,7 +2535,273 @@ export function registerWeb3PaymentRoutes(app: Express): void {
     }
   });
 
-  // 7. Register Dual-Engine Email (Company SMTP + Resend), Bulk Broadcast, Telegram Bot & Event Dispatch Routes
+  // 7. Promo & Fee-Waiver Voucher Code Validation (Preview)
+  app.post('/api/promo/validate', async (req, res) => {
+    try {
+      const caller = await verifyFirebaseBearerToken(req);
+      const body = (req.body || {}) as Record<string, unknown>;
+      const context = body.context === 'bonus' ? 'bonus' : 'withdrawal';
+      const amountUsd = Number(body.amountUsd || 0);
+
+      const promo = await validatePromoForCaller({
+        caller,
+        rawCode: String(body.code || ''),
+        context,
+        amountUsd: Number.isFinite(amountUsd) ? amountUsd : 0,
+      });
+
+      const cfgDoc = await fsGetDoc(caller.idToken, 'config/platform');
+      const web3Cfg = ((cfgDoc?.web3PaymentConfig as Record<string, unknown> | undefined) || {});
+      const feePercent = Math.max(0, Math.min(15, Number(web3Cfg.withdrawalFeePercent ?? 0) || 0));
+      const flatFeeUsd = Math.max(0, Math.min(50, Number(web3Cfg.withdrawalFlatFeeUsd ?? 0) || 0));
+      const baseFeeUsd = Number(((Math.max(0, amountUsd) * feePercent) / 100 + flatFeeUsd).toFixed(2));
+      const discountPct = promo.type === 'withdrawal_fee_waiver' ? 100 : promo.discountPercent;
+      const feeSavedUsd =
+        context === 'withdrawal' ? Number(((baseFeeUsd * discountPct) / 100).toFixed(2)) : 0;
+
+      res.json({
+        ok: true,
+        promo: {
+          code: promo.code,
+          title: promo.title,
+          description: promo.description,
+          type: promo.type,
+          discountPercent: discountPct,
+          bonusUsd: promo.bonusUsd,
+          minAmountUsd: promo.minAmountUsd,
+          feeSavedUsd,
+          discountedFeeUsd: Number(Math.max(0, baseFeeUsd - feeSavedUsd).toFixed(2)),
+        },
+      });
+    } catch (err) {
+      const e = err as Error & { statusCode?: number };
+      res.status(e.statusCode || 400).json({
+        error: e.message || 'Unable to validate promo code.',
+      });
+    }
+  });
+
+  // 8. Atomic Promo Bonus Voucher Redemption (Deposit Bonus / Milestone Bonus)
+  app.post('/api/promo/redeem-bonus', async (req, res) => {
+    try {
+      const caller = await verifyFirebaseBearerToken(req);
+      const body = (req.body || {}) as Record<string, unknown>;
+      const rawCode = String(body.code || '');
+
+      const txHandle = await fsBeginTransaction(caller.idToken);
+      try {
+        const promo = await validatePromoForCaller({
+          caller,
+          rawCode,
+          context: 'bonus',
+          txHandle,
+        });
+
+        if (promo.bonusUsd <= 0) {
+          await fsRollbackTransaction(caller.idToken, txHandle);
+          res.status(400).json({ error: 'This voucher does not carry a USD bonus credit.' });
+          return;
+        }
+
+        const userDoc = await fsGetDoc(caller.idToken, `users/${caller.uid}`, txHandle);
+        if (!userDoc) {
+          await fsRollbackTransaction(caller.idToken, txHandle);
+          res.status(404).json({ error: 'User profile not found.' });
+          return;
+        }
+
+        if (promo.type === 'deposit_bonus_usd' && promo.minAmountUsd > 0) {
+          const userDeposits = await fsQueryRootCollectionByUid(
+            caller.idToken,
+            'cryptoDeposits',
+            caller.uid
+          );
+          const approvedTotal = userDeposits
+            .filter((d) => d.data.status === 'approved')
+            .reduce((sum, d) => sum + Number(d.data.amountUsd || 0), 0);
+          if (approvedTotal < promo.minAmountUsd) {
+            await fsRollbackTransaction(caller.idToken, txHandle);
+            res.status(400).json({
+              error: `Code "${promo.code}" requires at least $${promo.minAmountUsd.toFixed(
+                2
+              )} in approved deposits (your total: $${approvedTotal.toFixed(2)}).`,
+            });
+            return;
+          }
+        }
+
+        if (promo.type === 'milestone_bonus_usd' && promo.minAmountUsd > 0) {
+          const totalInvested = Number(userDoc.totalInvested || 0);
+          if (totalInvested < promo.minAmountUsd) {
+            await fsRollbackTransaction(caller.idToken, txHandle);
+            res.status(400).json({
+              error: `Code "${promo.code}" requires at least $${promo.minAmountUsd.toFixed(
+                2
+              )} in active/total investments (your total: $${totalInvested.toFixed(2)}).`,
+            });
+            return;
+          }
+        }
+
+        const currentDepositBalance = Number(userDoc.usdBalance || 0);
+        const currentProfitBalance = Number(userDoc.profitBalance || 0);
+        const creditToDeposit = promo.type === 'deposit_bonus_usd';
+        const nextDepositBalance = creditToDeposit
+          ? Number((currentDepositBalance + promo.bonusUsd).toFixed(2))
+          : currentDepositBalance;
+        const nextProfitBalance = !creditToDeposit
+          ? Number((currentProfitBalance + promo.bonusUsd).toFixed(2))
+          : currentProfitBalance;
+
+        const redId = makeServerDocId('prd');
+        const audId = makeServerDocId('aud');
+        const writes = [
+          buildUpdateWrite(
+            `users/${caller.uid}`,
+            creditToDeposit
+              ? { usdBalance: nextDepositBalance }
+              : { profitBalance: nextProfitBalance },
+            ['updatedAt']
+          ),
+          buildUpdateWrite(
+            `promoCodes/${promo.code}`,
+            { currentUses: promo.currentUses + 1 },
+            ['updatedAt']
+          ),
+          buildCreateWrite(
+            `promoRedemptions/${redId}`,
+            {
+              uid: caller.uid,
+              userEmail: caller.email,
+              code: promo.code,
+              type: promo.type,
+              appliedTo: 'bonus_claim',
+              referenceId: redId,
+              feeSavedUsd: 0,
+              bonusCreditedUsd: promo.bonusUsd,
+            },
+            ['createdAt']
+          ),
+          buildCreateWrite(
+            `auditLogs/${audId}`,
+            {
+              actorUid: caller.uid,
+              actorEmail: caller.email,
+              actorRole: 'user',
+              eventType: 'PROMO_VOUCHER_REDEEMED',
+              targetUid: caller.uid,
+              network: 'VOUCHER',
+              txHash: promo.code,
+              amountUsd: promo.bonusUsd,
+              details: `Redeemed ${promo.type} voucher ${promo.code} (+$${promo.bonusUsd.toFixed(
+                2
+              )} credited to ${creditToDeposit ? 'Deposit Wallet' : 'Income Wallet'}).`,
+            },
+            ['createdAt']
+          ),
+        ];
+
+        await fsCommitTransaction(caller.idToken, txHandle, writes);
+
+        res.json({
+          ok: true,
+          code: promo.code,
+          bonusUsd: promo.bonusUsd,
+          creditedWallet: creditToDeposit ? 'Deposit Wallet' : 'Income Wallet',
+          message: `Voucher "${promo.code}" redeemed! +$${promo.bonusUsd.toFixed(
+            2
+          )} credited to your ${creditToDeposit ? 'Deposit Wallet' : 'Income Wallet'}.`,
+        });
+      } catch (txErr) {
+        await fsRollbackTransaction(caller.idToken, txHandle);
+        throw txErr;
+      }
+    } catch (err) {
+      const e = err as Error & { statusCode?: number };
+      res.status(e.statusCode || 400).json({
+        error: e.message || 'Unable to redeem bonus voucher.',
+      });
+    }
+  });
+
+  // 9. Authenticated Live Price Alert Email Dispatch (Owner-Verified Against Firestore)
+  app.post('/api/alerts/price-triggered', async (req, res) => {
+    try {
+      const caller = await verifyFirebaseBearerToken(req);
+      const body = (req.body || {}) as Record<string, unknown>;
+      const alertId = String(body.alertId || '').trim();
+      const livePrice = Number(body.livePrice || 0);
+
+      if (!/^[a-zA-Z0-9_-]{3,128}$/.test(alertId) || !Number.isFinite(livePrice) || livePrice <= 0) {
+        res.status(400).json({ error: 'Invalid alertId or livePrice.' });
+        return;
+      }
+
+      const alertDoc = await fsGetDoc(
+        caller.idToken,
+        `users/${caller.uid}/priceAlerts/${alertId}`
+      );
+      if (!alertDoc || alertDoc.uid !== caller.uid) {
+        res.status(404).json({ error: 'Price alert not found.' });
+        return;
+      }
+      if (alertDoc.notifyEmail !== true) {
+        res.json({ ok: true, emailSent: false, message: 'Email notifications disabled for this alert.' });
+        return;
+      }
+      if (alertDoc.emailSent === true) {
+        res.json({ ok: true, emailSent: true, message: 'Alert email already dispatched.' });
+        return;
+      }
+
+      const symbol = String(alertDoc.symbol || 'MARKET');
+      const condition = alertDoc.condition === 'below' ? 'dropped below' : 'rose above';
+      const targetPrice = Number(alertDoc.targetPrice || 0);
+      const note = String(alertDoc.note || '').trim();
+      const decimals = symbol.includes('JPY') ? 3 : symbol.startsWith('EUR') || symbol.startsWith('GBP') || symbol.startsWith('AUD') ? 5 : 2;
+
+      const sendRes = await sendPlatformEmail({
+        toEmail: caller.email,
+        subject: `Price Alert Triggered: ${symbol} ${condition} ${targetPrice.toFixed(decimals)}`,
+        text: `AlphaTradex Live Market Alert\n\nPair: ${symbol}\nCondition: Price ${condition} ${targetPrice.toFixed(
+          decimals
+        )}\nLive Market Price: ${livePrice.toFixed(decimals)}${
+          note ? `\nYour Note: ${note}` : ''
+        }\nTriggered At: ${new Date().toISOString().replace('T', ' ').slice(0, 19)} UTC\n\nLog in to your AlphaTradex Vault Dashboard to review your positions.`,
+      });
+
+      if (sendRes.ok) {
+        const txHandle = await fsBeginTransaction(caller.idToken);
+        try {
+          await fsCommitTransaction(caller.idToken, txHandle, [
+            buildUpdateWrite(
+              `users/${caller.uid}/priceAlerts/${alertId}`,
+              { emailSent: true },
+              ['updatedAt']
+            ),
+          ]);
+        } catch {
+          await fsRollbackTransaction(caller.idToken, txHandle);
+        }
+      }
+
+      res.json({
+        ok: true,
+        emailSent: sendRes.ok,
+        provider: sendRes.providerUsed,
+        message: sendRes.ok
+          ? `Price alert email sent to ${caller.email}.`
+          : sendRes.errorMessage || 'In-app alert triggered (email provider not configured).',
+      });
+    } catch (err) {
+      const e = err as Error & { statusCode?: number };
+      res.status(e.statusCode || 500).json({
+        error: e.message || 'Failed to dispatch price alert email.',
+      });
+    }
+  });
+
+  // 10. Register Dual-Engine Email (Company SMTP + Resend), Bulk Broadcast, Telegram Bot & Event Dispatch Routes
   registerNotificationHubRoutes(app, {
     verifyFirebaseBearerToken,
     verifySuperAdminCaller,

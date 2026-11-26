@@ -389,7 +389,7 @@ service cloud.firestore {
         'kycOcrConfidence', 'kycLivenessPassed', 'kycSubmittedAtMs',
         'kycReviewedAtMs', 'kycReviewedBy',
         'countryCode', 'countryName', 'phoneDialPrefix', 'phoneNumber', 'phoneVerified',
-        'whitelistStrictMode', 'whitelist24hLockEnabled',
+        'whitelistStrictMode', 'whitelist24hLockEnabled', 'autoCompoundConfig',
         'suspended', 'suspensionReason',
         'usdBalance', 'profitBalance',
         'totalInvested', 'totalWithdrawn', 'isMentor', 'mentorGiftedCapital',
@@ -434,6 +434,26 @@ service cloud.firestore {
       && (!('phoneVerified' in data) || data.phoneVerified is bool)
       && (!('whitelistStrictMode' in data) || data.whitelistStrictMode is bool)
       && (!('whitelist24hLockEnabled' in data) || data.whitelist24hLockEnabled is bool)
+      && (!('autoCompoundConfig' in data) || (
+        data.autoCompoundConfig is map &&
+        data.autoCompoundConfig.keys().hasAll([
+          'enabled', 'mode', 'thresholdUsd', 'targetPackageId', 'autoClaimOnThreshold'
+        ]) &&
+        data.autoCompoundConfig.keys().hasOnly([
+          'enabled', 'mode', 'thresholdUsd', 'targetPackageId', 'autoClaimOnThreshold',
+          'lastExecutedAtMs', 'totalAutoCompoundedUsd', 'executionsCount'
+        ]) &&
+        data.autoCompoundConfig.enabled is bool &&
+        data.autoCompoundConfig.mode in ['route_to_deposit', 'auto_activate_package'] &&
+        data.autoCompoundConfig.thresholdUsd is number &&
+        data.autoCompoundConfig.thresholdUsd >= 10 &&
+        data.autoCompoundConfig.thresholdUsd <= 100000 &&
+        isBoundedString(data.autoCompoundConfig.targetPackageId, 64) &&
+        data.autoCompoundConfig.autoClaimOnThreshold is bool &&
+        (!('lastExecutedAtMs' in data.autoCompoundConfig) || (data.autoCompoundConfig.lastExecutedAtMs is number && data.autoCompoundConfig.lastExecutedAtMs >= 0)) &&
+        (!('totalAutoCompoundedUsd' in data.autoCompoundConfig) || (data.autoCompoundConfig.totalAutoCompoundedUsd is number && data.autoCompoundConfig.totalAutoCompoundedUsd >= 0)) &&
+        (!('executionsCount' in data.autoCompoundConfig) || (data.autoCompoundConfig.executionsCount is number && data.autoCompoundConfig.executionsCount >= 0))
+      ))
       && (!('suspended' in data) || data.suspended is bool)
       && (!('suspensionReason' in data) || isBoundedString(data.suspensionReason, 300))
       && data.usdBalance is number && data.usdBalance >= 0
@@ -571,7 +591,7 @@ service cloud.firestore {
       ]) && data.keys().hasOnly([
         'uid', 'userEmail', 'userName', 'type', 'source', 'investmentId',
         'packageNumber', 'investmentDate', 'principalCapital', 'totalProfitGenerated',
-        'amountUsd', 'feeUsd', 'netPayoutUsd', 'network', 'destinationAddress', 'status',
+        'amountUsd', 'feeUsd', 'feeDiscountUsd', 'promoCode', 'netPayoutUsd', 'network', 'destinationAddress', 'status',
         'adminNote', 'payoutTxHash', 'twoFactorVerified', 'reviewedByUid', 'reviewedByEmail',
         'createdAt', 'updatedAt'
       ])
@@ -587,6 +607,8 @@ service cloud.firestore {
       && data.totalProfitGenerated is number && data.totalProfitGenerated >= 0
       && data.amountUsd is number && data.amountUsd > 0
       && (!('feeUsd' in data) || (data.feeUsd is number && data.feeUsd >= 0))
+      && (!('feeDiscountUsd' in data) || (data.feeDiscountUsd is number && data.feeDiscountUsd >= 0))
+      && (!('promoCode' in data) || isBoundedString(data.promoCode, 24))
       && (!('netPayoutUsd' in data) || (data.netPayoutUsd is number && data.netPayoutUsd >= 0))
       && isValidId(data.network) && data.network.size() <= 64
       && isNonEmptyString(data.destinationAddress, 160)
@@ -679,7 +701,10 @@ service cloud.firestore {
         'WHITELIST_WALLET_ADDED',
         'WHITELIST_WALLET_UPDATED',
         'WHITELIST_WALLET_REMOVED',
-        'WHITELIST_POLICY_UPDATED'
+        'WHITELIST_POLICY_UPDATED',
+        'PROMO_CODE_CREATED',
+        'PROMO_CODE_UPDATED',
+        'PROMO_VOUCHER_REDEEMED'
       ]
       && isBoundedString(data.targetUid, 128)
       && isBoundedString(data.network, 64)
@@ -768,6 +793,75 @@ service cloud.firestore {
       && data.unlockAtMs is number && data.unlockAtMs >= data.createdAtMs
       && data.createdAt is timestamp
       && (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidPriceAlert(data, userId) {
+      return data.keys().hasAll([
+        'uid', 'symbol', 'condition', 'targetPrice', 'notifyEmail', 'notifyInApp',
+        'status', 'triggeredPrice', 'triggeredAtMs', 'emailSent', 'note', 'createdAt', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'uid', 'symbol', 'condition', 'targetPrice', 'notifyEmail', 'notifyInApp',
+        'status', 'triggeredPrice', 'triggeredAtMs', 'emailSent', 'note', 'createdAt', 'updatedAt'
+      ])
+      && isValidId(data.uid) && data.uid == userId
+      && data.symbol in ['BTC/USD', 'ETH/USD', 'SOL/USD', 'BNB/USD', 'XAU/USD', 'EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD']
+      && data.condition in ['above', 'below']
+      && data.targetPrice is number && data.targetPrice > 0 && data.targetPrice <= 100000000
+      && data.notifyEmail is bool
+      && data.notifyInApp is bool
+      && data.status in ['active', 'triggered', 'paused']
+      && data.triggeredPrice is number && data.triggeredPrice >= 0
+      && data.triggeredAtMs is number && data.triggeredAtMs >= 0
+      && data.emailSent is bool
+      && isBoundedString(data.note, 160)
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidPromoCode(data, codeId) {
+      return data.keys().hasAll([
+        'code', 'title', 'description', 'type', 'discountPercent', 'bonusUsd',
+        'minAmountUsd', 'maxTotalUses', 'maxUsesPerUser', 'currentUses',
+        'expiresAtMs', 'active', 'createdByEmail', 'createdAt', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'code', 'title', 'description', 'type', 'discountPercent', 'bonusUsd',
+        'minAmountUsd', 'maxTotalUses', 'maxUsesPerUser', 'currentUses',
+        'expiresAtMs', 'active', 'createdByEmail', 'createdAt', 'updatedAt'
+      ])
+      && isNonEmptyString(data.code, 24) && data.code.matches('^[A-Z0-9_\\-]{3,24}$') && data.code == codeId
+      && isNonEmptyString(data.title, 80)
+      && isBoundedString(data.description, 240)
+      && data.type in ['withdrawal_fee_waiver', 'withdrawal_fee_discount', 'deposit_bonus_usd', 'milestone_bonus_usd']
+      && data.discountPercent is number && data.discountPercent >= 0 && data.discountPercent <= 100
+      && data.bonusUsd is number && data.bonusUsd >= 0 && data.bonusUsd <= 10000
+      && data.minAmountUsd is number && data.minAmountUsd >= 0 && data.minAmountUsd <= 1000000
+      && data.maxTotalUses is int && data.maxTotalUses >= 1 && data.maxTotalUses <= 1000000
+      && data.maxUsesPerUser is int && data.maxUsesPerUser >= 1 && data.maxUsesPerUser <= 100
+      && data.currentUses is int && data.currentUses >= 0 && data.currentUses <= data.maxTotalUses
+      && data.expiresAtMs is number && data.expiresAtMs >= 0
+      && data.active is bool
+      && isNonEmptyString(data.createdByEmail, 254)
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidPromoRedemption(data) {
+      return data.keys().hasAll([
+        'uid', 'userEmail', 'code', 'type', 'appliedTo', 'referenceId',
+        'feeSavedUsd', 'bonusCreditedUsd', 'createdAt'
+      ]) && data.keys().hasOnly([
+        'uid', 'userEmail', 'code', 'type', 'appliedTo', 'referenceId',
+        'feeSavedUsd', 'bonusCreditedUsd', 'createdAt'
+      ])
+      && isValidId(data.uid)
+      && isNonEmptyString(data.userEmail, 254)
+      && isNonEmptyString(data.code, 24) && data.code.matches('^[A-Z0-9_\\-]{3,24}$')
+      && data.type in ['withdrawal_fee_waiver', 'withdrawal_fee_discount', 'deposit_bonus_usd', 'milestone_bonus_usd']
+      && data.appliedTo in ['withdrawal', 'bonus_claim']
+      && isBoundedString(data.referenceId, 128)
+      && data.feeSavedUsd is number && data.feeSavedUsd >= 0 && data.feeSavedUsd <= 100000
+      && data.bonusCreditedUsd is number && data.bonusCreditedUsd >= 0 && data.bonusCreditedUsd <= 10000
+      && data.createdAt == request.time;
     }
 
     function isValidLoginActivity(data, userId) {
@@ -1204,7 +1298,7 @@ service cloud.firestore {
             && incoming().diff(existing()).affectedKeys().hasOnly([
               'avatarData', 'email', 'fullName',
               'countryCode', 'countryName', 'phoneDialPrefix', 'phoneNumber', 'phoneVerified',
-              'whitelistStrictMode', 'whitelist24hLockEnabled',
+              'whitelistStrictMode', 'whitelist24hLockEnabled', 'autoCompoundConfig',
               'updatedAt'
             ])
           )
@@ -1297,6 +1391,33 @@ service cloud.firestore {
           && exists(/databases/$(database)/documents/users/$(userId))
           && isValidLoginActivity(incoming(), userId);
         allow update, delete: if false;
+      }
+
+      match /priceAlerts/{alertId} {
+        allow get: if isValidId(userId) && isValidId(alertId) && (isOwner(userId) || isAdmin());
+        allow list: if isValidId(userId) && isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+        allow create: if isValidId(userId)
+          && isValidId(alertId)
+          && isVerifiedUser()
+          && isOwner(userId)
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && isValidPriceAlert(incoming(), userId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(userId)
+          && isValidId(alertId)
+          && isVerifiedUser()
+          && (isOwner(userId) || isAdmin())
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && isValidPriceAlert(incoming(), userId)
+          && incoming().uid == existing().uid
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'condition', 'targetPrice', 'notifyEmail', 'notifyInApp',
+            'status', 'triggeredPrice', 'triggeredAtMs', 'emailSent', 'note', 'updatedAt'
+          ]);
+        allow delete: if isValidId(userId) && isValidId(alertId) && isVerifiedUser() && (isOwner(userId) || isAdmin());
       }
 
       match /notifications/{notificationId} {
@@ -1837,6 +1958,43 @@ service cloud.firestore {
           || (docId == 'telegramConfig' && isValidAdminTelegramSecretConfig(incoming()))
         );
       allow delete: if false;
+    }
+
+    match /promoCodes/{codeId} {
+      allow get: if isValidId(codeId) && isSignedIn();
+      allow list: if isAdmin();
+      allow create: if isValidId(codeId)
+        && isAdmin()
+        && isValidPromoCode(incoming(), codeId)
+        && incoming().currentUses == 0
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(codeId)
+        && isValidPromoCode(incoming(), codeId)
+        && incoming().code == existing().code
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            isVerifiedUser()
+            && existing().active == true
+            && incoming().currentUses == existing().currentUses + 1
+            && incoming().currentUses <= existing().maxTotalUses
+            && incoming().diff(existing()).affectedKeys().hasOnly(['currentUses', 'updatedAt'])
+          )
+        );
+      allow delete: if isValidId(codeId) && isAdmin();
+    }
+
+    match /promoRedemptions/{redemptionId} {
+      allow get: if isValidId(redemptionId) && isSignedIn() && (existing().uid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow create: if isValidId(redemptionId)
+        && isVerifiedUser()
+        && isValidPromoRedemption(incoming())
+        && (incoming().uid == request.auth.uid || isAdmin());
+      allow update, delete: if false;
     }
   }
 }

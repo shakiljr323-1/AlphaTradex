@@ -349,7 +349,10 @@ export interface SecurityAuditLog {
     | 'WHITELIST_WALLET_ADDED'
     | 'WHITELIST_WALLET_UPDATED'
     | 'WHITELIST_WALLET_REMOVED'
-    | 'WHITELIST_POLICY_UPDATED';
+    | 'WHITELIST_POLICY_UPDATED'
+    | 'PROMO_CODE_CREATED'
+    | 'PROMO_CODE_UPDATED'
+    | 'PROMO_VOUCHER_REDEEMED';
   targetUid: string;
   network: string;
   txHash: string;
@@ -658,6 +661,7 @@ export interface UserProfile {
   phoneVerified?: boolean;
   whitelistStrictMode?: boolean;
   whitelist24hLockEnabled?: boolean;
+  autoCompoundConfig?: AutoCompoundConfig;
   suspended?: boolean;
   suspensionReason?: string;
   usdBalance: number;
@@ -725,6 +729,8 @@ export interface Withdrawal {
   totalProfitGenerated: number;
   amountUsd: number;
   feeUsd?: number;
+  feeDiscountUsd?: number;
+  promoCode?: string;
   netPayoutUsd?: number;
   network: CryptoNetwork;
   destinationAddress: string;
@@ -736,6 +742,88 @@ export interface Withdrawal {
   reviewedByEmail?: string;
   createdAt?: unknown;
   updatedAt?: unknown;
+}
+
+export type AutoCompoundMode = 'route_to_deposit' | 'auto_activate_package';
+
+export interface AutoCompoundConfig {
+  enabled: boolean;
+  mode: AutoCompoundMode;
+  thresholdUsd: number;
+  targetPackageId: string;
+  autoClaimOnThreshold: boolean;
+  lastExecutedAtMs?: number;
+  totalAutoCompoundedUsd?: number;
+  executionsCount?: number;
+}
+
+export type PriceAlertSymbol =
+  | 'BTC/USD'
+  | 'ETH/USD'
+  | 'SOL/USD'
+  | 'BNB/USD'
+  | 'XAU/USD'
+  | 'EUR/USD'
+  | 'GBP/USD'
+  | 'USD/JPY'
+  | 'AUD/USD';
+
+export type PriceAlertCondition = 'above' | 'below';
+export type PriceAlertStatus = 'active' | 'triggered' | 'paused';
+
+export interface PriceAlert {
+  id: string;
+  uid: string;
+  symbol: PriceAlertSymbol;
+  condition: PriceAlertCondition;
+  targetPrice: number;
+  notifyEmail: boolean;
+  notifyInApp: boolean;
+  status: PriceAlertStatus;
+  triggeredPrice: number;
+  triggeredAtMs: number;
+  emailSent: boolean;
+  note: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
+export type PromoCodeType =
+  | 'withdrawal_fee_waiver'
+  | 'withdrawal_fee_discount'
+  | 'deposit_bonus_usd'
+  | 'milestone_bonus_usd';
+
+export interface PromoCode {
+  id: string; // Uppercase code ID
+  code: string;
+  title: string;
+  description: string;
+  type: PromoCodeType;
+  discountPercent: number; // 0-100 (100 for full fee waiver)
+  bonusUsd: number; // USD credit for bonus voucher types
+  minAmountUsd: number; // Minimum withdrawal or deposit amount
+  maxTotalUses: number;
+  maxUsesPerUser: number;
+  currentUses: number;
+  expiresAtMs: number; // 0 = never expires
+  active: boolean;
+  createdByEmail: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
+export interface PromoRedemption {
+  id: string;
+  uid: string;
+  userEmail: string;
+  code: string;
+  type: PromoCodeType;
+  appliedTo: 'withdrawal' | 'bonus_claim';
+  referenceId: string;
+  feeSavedUsd: number;
+  bonusCreditedUsd: number;
+  createdAt?: unknown;
 }
 
 export interface P2PTransfer {

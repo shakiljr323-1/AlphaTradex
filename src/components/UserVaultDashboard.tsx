@@ -8,6 +8,7 @@ import {
   Award,
   Bell,
   Bot,
+  Calculator,
   Calendar,
   Check,
   CheckCircle2,
@@ -89,14 +90,15 @@ import { GlobalKycVerificationView } from './GlobalKycVerificationView';
 import { WithdrawalManagementView } from './WithdrawalManagementView';
 import { MarketingCardStudio } from './MarketingCardStudio';
 import { HowItWorksGuideModule } from './HowItWorksGuideModule';
-import { TopPerformersLeaderboard } from './TopPerformersLeaderboard';
 import { Web3AutoDepositPanel } from './Web3AutoDepositPanel';
 import { UserSecurityCenter } from './UserSecurityCenter';
 import { UserRewardsMissionsPanel } from './UserRewardsMissionsPanel';
+import { MonthlyStatementPanel } from './MonthlyStatementPanel';
+import { InvestorToolsHub } from './InvestorToolsHub';
 import {
-  downloadAccountStatementPdf,
   downloadProfitCertificatePdf,
 } from '../utils/pdfStatementGenerator';
+import { fetchAllLiveAlertPrices, formatAlertPrice } from '../utils/livePriceFeed';
 
 function formatVaultError(raw: string): string {
   if (raw.startsWith('{') && raw.includes('"error"')) {
@@ -119,6 +121,8 @@ type SidebarSection =
   | 'withdraw'
   | 'payment-methods'
   | 'transaction-history'
+  | 'monthly-statement'
+  | 'investor-tools'
   | 'activate-trading'
   | 'my-packages'
   | 'trade-history'
@@ -131,7 +135,6 @@ type SidebarSection =
   | 'referral-mentor-desk'
   | 'referral-network'
   | 'downline-team'
-  | 'leaderboard'
   | 'rewards-missions'
   | 'marketing-cards'
   | 'video-guide'
@@ -173,6 +176,8 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
     whitelistedWallets,
     loginActivities,
     missionProfile,
+    priceAlerts,
+    promoRedemptions,
     forexTrades,
     copyTradeSubscriptions,
     submitKycUpdate,
@@ -202,13 +207,95 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
     removeWhitelistedWallet,
     claimDailyCheckIn,
     claimMissionReward,
+    saveAutoCompoundConfig,
+    executeAutoCompoundNow,
+    createPriceAlert,
+    updatePriceAlert,
+    deletePriceAlert,
+    validatePromoCode,
+    redeemBonusPromoCode,
   } = usePlatform();
   const { t } = useLanguage();
 
   const [activeNav, setActiveNav] = useState<SidebarSection>(initialSection);
+  const [investorToolsSubTab, setInvestorToolsSubTab] = useState<
+    'calculator' | 'auto-reinvest' | 'price-alerts'
+  >('calculator');
   const [focusedTicketId, setFocusedTicketId] = useState<string>('');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const triggeredAlertIdsRef = useRef<Set<string>>(new Set());
+
+  // Live background monitor for armed Crypto / Gold / Forex Price Alerts
+  useEffect(() => {
+    if (!authUser) return;
+    const activeList = priceAlerts.filter((a) => a.status === 'active');
+    if (activeList.length === 0) return;
+
+    let cancelled = false;
+    const checkAlerts = async () => {
+      try {
+        const quotes = await fetchAllLiveAlertPrices();
+        if (cancelled) return;
+        for (const alert of activeList) {
+          if (triggeredAlertIdsRef.current.has(alert.id)) continue;
+          const livePrice = quotes[alert.symbol]?.price;
+          if (!livePrice || !Number.isFinite(livePrice)) continue;
+          const hit =
+            alert.condition === 'above'
+              ? livePrice >= alert.targetPrice
+              : livePrice <= alert.targetPrice;
+          if (!hit) continue;
+
+          triggeredAlertIdsRef.current.add(alert.id);
+          await updatePriceAlert(alert.id, {
+            status: 'triggered',
+            triggeredPrice: livePrice,
+            triggeredAtMs: Date.now(),
+          });
+
+          if (alert.notifyInApp) {
+            setFeedback({
+              type: 'ok',
+              text: `Price Alert Hit: ${alert.symbol} ${
+                alert.condition === 'above' ? 'crossed above' : 'dropped below'
+              } ${formatAlertPrice(alert.symbol, alert.targetPrice)} (Live: ${formatAlertPrice(
+                alert.symbol,
+                livePrice
+              )})`,
+            });
+          }
+
+          if (alert.notifyEmail && !alert.emailSent) {
+            try {
+              const idToken = await authUser.getIdToken();
+              await fetch('/api/alerts/price-triggered', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: `Bearer ${idToken}`,
+                },
+                body: JSON.stringify({ alertId: alert.id, livePrice }),
+              });
+            } catch {
+              // Non-blocking email dispatch
+            }
+          }
+        }
+      } catch {
+        // Ignore transient network errors
+      }
+    };
+
+    void checkAlerts();
+    const timer = window.setInterval(() => {
+      void checkAlerts();
+    }, 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [authUser, priceAlerts, updatePriceAlert]);
   const [dismissedAnnSig, setDismissedAnnSig] = useState<string>(() => {
     try {
       return localStorage.getItem('vtv_dismissed_announcement') || '';
@@ -639,6 +726,11 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
       items: [
         { id: 'dashboard', label: t('dash.overview', 'Dashboard'), Icon: LayoutDashboard },
         {
+          id: 'investor-tools',
+          label: t('dash.investorTools', 'Calculator, Auto-Reinvest & Alerts'),
+          Icon: Calculator,
+        },
+        {
           id: 'rewards-missions',
           label: t('dash.rewardsMissions', 'Daily Check-In & Missions'),
           Icon: Flame,
@@ -657,6 +749,11 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
         { id: 'withdraw', label: t('dash.withdraw', 'Withdrawal Management'), Icon: ArrowUpRight },
         { id: 'payment-methods', label: 'Payment Methods', Icon: CreditCard },
         { id: 'transaction-history', label: 'Transaction History', Icon: History },
+        {
+          id: 'monthly-statement',
+          label: t('dash.monthlyStatement', 'Monthly PDF Report'),
+          Icon: FileDown,
+        },
       ],
     },
     {
@@ -704,15 +801,6 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
       items: [
         { id: 'referral-network', label: t('dash.referralNetwork', 'Referral Dashboard'), Icon: Network },
         { id: 'downline-team', label: 'Downline Team', Icon: Users },
-        ...(platformConfig.leaderboardConfig?.enabled !== false
-          ? [
-              {
-                id: 'leaderboard' as SidebarSection,
-                label: t('dash.leaderboard', 'Top Performers'),
-                Icon: Trophy,
-              },
-            ]
-          : []),
         ...(platformConfig.marketingCardsConfig?.enabled !== false
           ? [
               {
@@ -1403,21 +1491,11 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
-                        downloadAccountStatementPdf({
-                          companyName: platformConfig.companyName,
-                          user: userProfile,
-                          deposits,
-                          withdrawals,
-                          investments,
-                          commissions: mlmCommissions,
-                        });
-                        notify('ok', 'Account Statement PDF downloaded.');
-                      }}
+                      onClick={() => selectNav('monthly-statement')}
                       className="px-3 py-1.5 rounded-lg border border-indigo-500/45 bg-indigo-500/15 hover:bg-indigo-500/25 text-xs font-semibold text-indigo-200 inline-flex items-center gap-1.5 transition-colors"
                     >
                       <FileDown className="w-3.5 h-3.5 text-indigo-300" />
-                      <span>{t('dash.pdfStatement', 'PDF Statement')}</span>
+                      <span>{t('dash.monthlyStatement', 'Monthly PDF Report')}</span>
                     </button>
                     <button
                       type="button"
@@ -2004,20 +2082,6 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                 </div>
               </div>
 
-              {/* Row 5.5: Real-Time Top Performers Leaderboard Widget */}
-              <TopPerformersLeaderboard
-                userProfile={userProfile}
-                platformConfig={platformConfig}
-                mlmCommissions={mlmCommissions}
-                downlineReferrals={downlineReferrals}
-                investments={investments}
-                forexTrades={forexTrades}
-                compact
-                onOpenReferrals={() => selectNav('referral-network')}
-                onOpenTrading={() => selectNav('forex-market')}
-                onOpenFullView={() => selectNav('leaderboard')}
-              />
-
               {/* Row 6: Active Investments & Capital Control Table */}
               {renderInvestmentsTable()}
 
@@ -2536,6 +2600,7 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
               busyAction={busyAction}
               onRequestWithdrawalOtp={requestWithdrawalOtp}
               onVerifyWithdrawalOtp={verifyWithdrawalOtp}
+              onValidatePromoCode={validatePromoCode}
               onRequestPayout={async ({
                 amountUsd,
                 network,
@@ -2544,6 +2609,7 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                 savePaymentMethod,
                 methodName,
                 otpVerificationToken,
+                promoCode,
               }) => {
                 setBusyAction(true);
                 try {
@@ -2554,6 +2620,7 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                     source,
                     settlementMode: 'pending',
                     otpVerificationToken,
+                    promoCode,
                   });
                   if (
                     savePaymentMethod &&
@@ -2573,7 +2640,9 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
                   }
                   notify(
                     'ok',
-                    `Payout request for $${amountUsd.toFixed(2)} locked safely and queued for Super Admin review.`
+                    `Payout request for $${amountUsd.toFixed(2)}${
+                      promoCode ? ` (Promo ${promoCode} applied)` : ''
+                    } locked safely and queued for Super Admin review.`
                   );
                 } catch (err) {
                   notify('err', (err as Error).message);
@@ -3363,20 +3432,6 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
             />
           )}
 
-          {/* VIEW: TOP PERFORMERS LEADERBOARD */}
-          {activeNav === 'leaderboard' && (
-            <TopPerformersLeaderboard
-              userProfile={userProfile}
-              platformConfig={platformConfig}
-              mlmCommissions={mlmCommissions}
-              downlineReferrals={downlineReferrals}
-              investments={investments}
-              forexTrades={forexTrades}
-              onOpenReferrals={() => selectNav('referral-network')}
-              onOpenTrading={() => selectNav('forex-market')}
-            />
-          )}
-
           {/* VIEW: HOW IT WORKS & MOTION VIDEO GUIDE */}
           {activeNav === 'video-guide' && (
             <HowItWorksGuideModule
@@ -3715,6 +3770,49 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
               getIdToken={() => authUser.getIdToken()}
               onToggleStrictMode={toggleWhitelistStrictMode}
               onToggle24hLock={toggleWhitelist24hLock}
+              onNotify={notify}
+            />
+          )}
+
+          {/* VIEW: MONTHLY PDF STATEMENT & LEDGER REPORT */}
+          {activeNav === 'monthly-statement' && (
+            <MonthlyStatementPanel
+              companyName={platformConfig.companyName}
+              userProfile={userProfile}
+              deposits={deposits}
+              withdrawals={withdrawals}
+              investments={investments}
+              commissions={mlmCommissions}
+              forexTrades={forexTrades}
+              globalPaused={platformConfig.globalPaused}
+              onNotify={notify}
+            />
+          )}
+
+          {/* VIEW: INVESTOR TOOLS (PROFIT CALCULATOR, AUTO-REINVEST & LIVE PRICE ALERTS) */}
+          {activeNav === 'investor-tools' && (
+            <InvestorToolsHub
+              userProfile={userProfile}
+              platformConfig={platformConfig}
+              investments={investments}
+              priceAlerts={priceAlerts}
+              promoRedemptions={promoRedemptions}
+              initialSubTab={investorToolsSubTab}
+              onSaveAutoCompoundConfig={saveAutoCompoundConfig}
+              onExecuteAutoCompoundNow={executeAutoCompoundNow}
+              onCreatePriceAlert={createPriceAlert}
+              onUpdatePriceAlert={async (alertId, patch) => {
+                if (patch.status === 'active') {
+                  triggeredAlertIdsRef.current.delete(alertId);
+                }
+                await updatePriceAlert(alertId, patch);
+              }}
+              onDeletePriceAlert={deletePriceAlert}
+              onRedeemBonusPromoCode={redeemBonusPromoCode}
+              onOpenActivateTrading={() => {
+                setInvestorToolsSubTab('calculator');
+                selectNav('activate-trading');
+              }}
               onNotify={notify}
             />
           )}

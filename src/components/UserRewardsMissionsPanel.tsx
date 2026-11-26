@@ -124,7 +124,7 @@ export const UserRewardsMissionsPanel: React.FC<UserRewardsMissionsPanelProps> =
       {
         id: 'mission_streak_3',
         title: 'Achieve a 3-Day Check-In Streak',
-        description: 'Check in for 3 consecutive days to build momentum and climb the leaderboard.',
+        description: 'Check in for 3 consecutive days to build momentum and earn bonus XP.',
         xpReward: 200,
         badgeName: 'Consistent Trader',
         completed: longestStreak >= 3 || currentStreak >= 3,
@@ -181,14 +181,14 @@ export const UserRewardsMissionsPanel: React.FC<UserRewardsMissionsPanelProps> =
           <div className="space-y-1.5">
             <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-500/15 border border-amber-400/30 text-amber-300 text-[11px] font-semibold">
               <Flame className="w-3.5 h-3.5" />
-              Engagement Rewards &amp; Leaderboard XP
+              Engagement Rewards &amp; Rank XP
             </div>
             <h2 className="font-display font-bold text-xl">
               Daily Check-In Streak &amp; Platform Missions
             </h2>
             <p className="text-xs text-slate-300 max-w-xl">
               Check in every day to build your streak, unlock official AlphaTradex profile badges,
-              and earn XP points linked to your Top Performers community standing.
+              and earn XP points toward your account rank tier.
             </p>
           </div>
 
@@ -204,14 +204,6 @@ export const UserRewardsMissionsPanel: React.FC<UserRewardsMissionsPanelProps> =
                 {totalXp.toLocaleString()} XP
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => onNavigateToTab('leaderboard')}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition"
-            >
-              <Trophy className="w-4 h-4" />
-              Leaderboard
-            </button>
           </div>
         </div>
       </div>
@@ -315,7 +307,7 @@ export const UserRewardsMissionsPanel: React.FC<UserRewardsMissionsPanelProps> =
             Platform Milestones &amp; Bonus Missions
           </h3>
           <p className="text-xs text-slate-500 mt-0.5">
-            Complete key account milestones to unlock verified badges and leaderboard XP.
+            Complete key account milestones to unlock verified badges and account rank XP.
           </p>
         </div>
 

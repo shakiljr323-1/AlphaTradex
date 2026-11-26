@@ -17,8 +17,10 @@ import {
   Search,
   ShieldCheck,
   Star,
+  Tag,
   TrendingUp,
   Wallet,
+  X,
   XCircle,
 } from 'lucide-react';
 import { DEFAULT_WEB3_PAYMENT_CONFIG } from '../constants/defaults';
@@ -72,7 +74,23 @@ interface WithdrawalManagementViewProps {
     savePaymentMethod: boolean;
     methodName: string;
     otpVerificationToken?: string;
+    promoCode?: string;
   }) => Promise<void>;
+  onValidatePromoCode?: (params: {
+    code: string;
+    context: 'withdrawal' | 'bonus';
+    amountUsd?: number;
+  }) => Promise<{
+    code: string;
+    title: string;
+    description: string;
+    type: string;
+    discountPercent: number;
+    bonusUsd: number;
+    minAmountUsd: number;
+    feeSavedUsd: number;
+    discountedFeeUsd: number;
+  }>;
   whitelistedWallets?: WhitelistedWallet[];
   onOpenPaymentMethods: () => void;
   onOpenSecurityCenter?: () => void;
@@ -128,6 +146,7 @@ export const WithdrawalManagementView: React.FC<WithdrawalManagementViewProps> =
   onRequestWithdrawalOtp,
   onVerifyWithdrawalOtp,
   onRequestPayout,
+  onValidatePromoCode,
   onOpenPaymentMethods,
   onOpenSecurityCenter,
   onOpenCapitalWithdraw,
@@ -202,17 +221,62 @@ export const WithdrawalManagementView: React.FC<WithdrawalManagementViewProps> =
     Number(web3Config.maxWithdrawalUsd) || 25000
   );
 
+  // Promo & Fee-Waiver Code state
+  const [promoCodeInput, setPromoCodeInput] = useState<string>('');
+  const [validatingPromo, setValidatingPromo] = useState<boolean>(false);
+  const [appliedPromo, setAppliedPromo] = useState<{
+    code: string;
+    title: string;
+    discountPercent: number;
+  } | null>(null);
+
   const feePercent = Math.max(0, Number(web3Config.withdrawalFeePercent) || 0);
   const flatFeeUsd = Math.max(0, Number(web3Config.withdrawalFlatFeeUsd) || 0);
   const parsedAmount = Number(amountInput) || 0;
-  const computedFeeUsd =
+  const baseFeeUsd =
     parsedAmount > 0
       ? Math.round(((parsedAmount * feePercent) / 100 + flatFeeUsd) * 100) / 100
       : 0;
+  const promoFeeSavingsUsd = appliedPromo
+    ? Math.round(((baseFeeUsd * appliedPromo.discountPercent) / 100) * 100) / 100
+    : 0;
+  const computedFeeUsd = Math.max(0, Math.round((baseFeeUsd - promoFeeSavingsUsd) * 100) / 100);
   const computedNetPayoutUsd = Math.max(
     0,
     Math.round((parsedAmount - computedFeeUsd) * 100) / 100
   );
+
+  const handleApplyPromoCode = async () => {
+    if (!onValidatePromoCode) return;
+    const clean = promoCodeInput.trim().toUpperCase();
+    if (!clean) {
+      onNotify('err', 'Enter a promo or fee-waiver voucher code.');
+      return;
+    }
+    setValidatingPromo(true);
+    try {
+      const res = await onValidatePromoCode({
+        code: clean,
+        context: 'withdrawal',
+        amountUsd: parsedAmount,
+      });
+      setAppliedPromo({
+        code: res.code,
+        title: res.title,
+        discountPercent: res.discountPercent,
+      });
+      setPromoCodeInput(res.code);
+      onNotify(
+        'ok',
+        `Promo "${res.code}" applied (${res.discountPercent}% fee discount — saving $${res.feeSavedUsd.toFixed(2)}).`
+      );
+    } catch (err) {
+      setAppliedPromo(null);
+      onNotify('err', (err as Error).message);
+    } finally {
+      setValidatingPromo(false);
+    }
+  };
 
   const require2fa = Boolean(web3Config.require2faForWithdrawals);
   const currentRequestSig = `${(Number.isFinite(parsedAmount) ? parsedAmount : 0).toFixed(2)}|${activeNetworkId}|${destinationAddress.trim()}`;
@@ -501,6 +565,7 @@ export const WithdrawalManagementView: React.FC<WithdrawalManagementViewProps> =
         savePaymentMethod,
         methodName: selectedMethod?.name || activeNetworkId,
         otpVerificationToken: require2fa ? verifiedOtpToken : undefined,
+        promoCode: appliedPromo?.code || undefined,
       });
       setSavePaymentMethod(false);
       setVerifiedOtpToken('');
@@ -508,6 +573,8 @@ export const WithdrawalManagementView: React.FC<WithdrawalManagementViewProps> =
       setOtpRequestedForSig('');
       setOtpCodeInput('');
       setOtpPreviewCode('');
+      setAppliedPromo(null);
+      setPromoCodeInput('');
       setStatusTab('pending');
     } finally {
       setSubmitting(false);
@@ -937,6 +1004,60 @@ export const WithdrawalManagementView: React.FC<WithdrawalManagementViewProps> =
               <span>Save this payout destination to My Payment Methods</span>
             </label>
 
+            {/* Optional Promo / Fee-Waiver Voucher Code */}
+            {onValidatePromoCode && (
+              <div className="p-3 rounded-xl bg-slate-900/75 border border-slate-700/75 space-y-2">
+                <label className="block text-[11px] font-semibold text-amber-300 flex items-center gap-1.5">
+                  <Tag className="w-3.5 h-3.5" />
+                  <span>Promo / 0% Fee-Waiver Voucher Code (Optional)</span>
+                </label>
+                {appliedPromo ? (
+                  <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-emerald-500/15 border border-emerald-500/40 text-xs">
+                    <div className="text-emerald-200">
+                      <span className="font-mono font-bold text-emerald-300">
+                        {appliedPromo.code}
+                      </span>{' '}
+                      — {appliedPromo.discountPercent}% fee discount applied
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAppliedPromo(null);
+                        setPromoCodeInput('');
+                      }}
+                      className="p-1 rounded hover:bg-emerald-500/20 text-emerald-300"
+                      title="Remove promo code"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      maxLength={24}
+                      value={promoCodeInput}
+                      onChange={(e) => setPromoCodeInput(e.target.value.toUpperCase())}
+                      placeholder="e.g. ZEROFEE30"
+                      className="flex-1 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-950 text-white font-mono text-xs uppercase placeholder:text-slate-500 focus:outline-none focus:border-amber-400"
+                    />
+                    <button
+                      type="button"
+                      disabled={validatingPromo || !promoCodeInput.trim()}
+                      onClick={() => void handleApplyPromoCode()}
+                      className="px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 text-xs font-bold inline-flex items-center gap-1 shrink-0"
+                    >
+                      {validatingPromo ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        'Apply'
+                      )}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Fee & Net Payout Summary */}
             <div className="p-3.5 rounded-xl bg-slate-950/85 border border-slate-800 space-y-1.5 text-xs font-mono">
               <div className="flex items-center justify-between text-slate-400">
@@ -947,8 +1068,14 @@ export const WithdrawalManagementView: React.FC<WithdrawalManagementViewProps> =
                 <span>
                   Withdrawal Fee ({feePercent}%{flatFeeUsd > 0 ? ` + $${flatFeeUsd.toFixed(2)}` : ''})
                 </span>
-                <span className="text-amber-300 tabular-nums">-${computedFeeUsd.toFixed(2)}</span>
+                <span className="text-amber-300 tabular-nums">-${baseFeeUsd.toFixed(2)}</span>
               </div>
+              {promoFeeSavingsUsd > 0 && appliedPromo && (
+                <div className="flex items-center justify-between text-emerald-400">
+                  <span>Voucher Savings ({appliedPromo.code})</span>
+                  <span className="tabular-nums">+${promoFeeSavingsUsd.toFixed(2)}</span>
+                </div>
+              )}
               <div className="flex items-center justify-between pt-1.5 border-t border-slate-800 font-bold text-sm">
                 <span className="text-slate-200 font-sans text-xs">Net Payout to Wallet</span>
                 <span className="text-emerald-400 tabular-nums">${computedNetPayoutUsd.toFixed(2)}</span>

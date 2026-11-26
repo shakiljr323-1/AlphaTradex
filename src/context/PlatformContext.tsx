@@ -41,6 +41,7 @@ import { clearGoogleChatToken } from '../lib/googleChat';
 import {
   AdminActionLog,
   AdminModuleControls,
+  AutoCompoundConfig,
   BannerAdConfig,
   CoinMiningPlan,
   CoinMiningStake,
@@ -84,6 +85,13 @@ import {
   PackageFundingSource,
   PaymentMethodConfig,
   PlatformConfig,
+  PriceAlert,
+  PriceAlertCondition,
+  PriceAlertStatus,
+  PriceAlertSymbol,
+  PromoCode,
+  PromoCodeType,
+  PromoRedemption,
   ReferralLinkRecord,
   ReferralStats,
   SupportAutoResponderConfig,
@@ -156,6 +164,8 @@ interface PlatformContextValue {
   whitelistedWallets: WhitelistedWallet[];
   loginActivities: LoginActivityRecord[];
   missionProfile: UserMissionProfile | null;
+  priceAlerts: PriceAlert[];
+  promoRedemptions: PromoRedemption[];
   // Auth & KYC
   signInWithGoogle: (
     referralCode?: string,
@@ -269,6 +279,7 @@ interface PlatformContextValue {
     source: 'package_profit' | 'mlm_commission' | 'mentor_profit';
     settlementMode?: 'pending' | 'completed';
     otpVerificationToken?: string;
+    promoCode?: string;
   }) => Promise<void>;
   requestManualCapitalWithdrawal: (params: {
     investment: Investment;
@@ -412,6 +423,92 @@ interface PlatformContextValue {
   removeWhitelistedWallet: (walletId: string) => Promise<void>;
   claimDailyCheckIn: () => Promise<{ streak: number; xpEarned: number }>;
   claimMissionReward: (missionId: string, xpReward: number, badgeName: string) => Promise<void>;
+  // Auto-Reinvest, Live Price Alerts & Promo Vouchers
+  saveAutoCompoundConfig: (cfg: AutoCompoundConfig) => Promise<void>;
+  executeAutoCompoundNow: () => Promise<{
+    claimedUsd: number;
+    amountCompoundedUsd: number;
+    actionSummary: string;
+  }>;
+  createPriceAlert: (params: {
+    symbol: PriceAlertSymbol;
+    condition: PriceAlertCondition;
+    targetPrice: number;
+    notifyEmail: boolean;
+    notifyInApp: boolean;
+    note?: string;
+  }) => Promise<void>;
+  updatePriceAlert: (
+    alertId: string,
+    patch: Partial<
+      Pick<
+        PriceAlert,
+        | 'condition'
+        | 'targetPrice'
+        | 'notifyEmail'
+        | 'notifyInApp'
+        | 'status'
+        | 'triggeredPrice'
+        | 'triggeredAtMs'
+        | 'emailSent'
+        | 'note'
+      >
+    >
+  ) => Promise<void>;
+  deletePriceAlert: (alertId: string) => Promise<void>;
+  validatePromoCode: (params: {
+    code: string;
+    context: 'withdrawal' | 'bonus';
+    amountUsd?: number;
+  }) => Promise<{
+    code: string;
+    title: string;
+    description: string;
+    type: PromoCodeType;
+    discountPercent: number;
+    bonusUsd: number;
+    minAmountUsd: number;
+    feeSavedUsd: number;
+    discountedFeeUsd: number;
+  }>;
+  redeemBonusPromoCode: (code: string) => Promise<{
+    code: string;
+    bonusUsd: number;
+    creditedWallet: string;
+    message: string;
+  }>;
+  createPromoCode: (params: {
+    code: string;
+    title: string;
+    description: string;
+    type: PromoCodeType;
+    discountPercent: number;
+    bonusUsd: number;
+    minAmountUsd: number;
+    maxTotalUses: number;
+    maxUsesPerUser: number;
+    expiresAtMs: number;
+    active: boolean;
+  }) => Promise<void>;
+  updatePromoCode: (
+    codeId: string,
+    patch: Partial<
+      Pick<
+        PromoCode,
+        | 'title'
+        | 'description'
+        | 'type'
+        | 'discountPercent'
+        | 'bonusUsd'
+        | 'minAmountUsd'
+        | 'maxTotalUses'
+        | 'maxUsesPerUser'
+        | 'expiresAtMs'
+        | 'active'
+      >
+    >
+  ) => Promise<void>;
+  deletePromoCode: (codeId: string) => Promise<void>;
 }
 
 const PlatformContext = createContext<PlatformContextValue | null>(null);
@@ -474,6 +571,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [loginActivities, setLoginActivities] = useState<LoginActivityRecord[]>([]);
   const [loginActivitiesLoaded, setLoginActivitiesLoaded] = useState(false);
   const [missionProfile, setMissionProfile] = useState<UserMissionProfile | null>(null);
+  const [priceAlerts, setPriceAlerts] = useState<PriceAlert[]>([]);
+  const [promoRedemptions, setPromoRedemptions] = useState<PromoRedemption[]>([]);
 
   const dispatchNotificationEvent = useCallback(
     async (
@@ -1024,6 +1123,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setLoginActivities([]);
         setLoginActivitiesLoaded(false);
         setMissionProfile(null);
+        setPriceAlerts([]);
+        setPromoRedemptions([]);
         return;
       }
 
@@ -1326,6 +1427,32 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       (err) => handleFirestoreError(err, OperationType.GET, `userMissions/${uid}`)
     );
 
+    const unsubPriceAlerts = onSnapshot(
+      query(collection(db, 'users', uid, 'priceAlerts'), where('uid', '==', uid)),
+      (snap) => {
+        const list = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<PriceAlert, 'id'>),
+        }));
+        list.sort((a, b) => createdAtSeconds(b.createdAt) - createdAtSeconds(a.createdAt));
+        setPriceAlerts(list);
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, `users/${uid}/priceAlerts`)
+    );
+
+    const unsubPromoRedemptions = onSnapshot(
+      query(collection(db, 'promoRedemptions'), where('uid', '==', uid)),
+      (snap) => {
+        const list = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<PromoRedemption, 'id'>),
+        }));
+        list.sort((a, b) => createdAtSeconds(b.createdAt) - createdAtSeconds(a.createdAt));
+        setPromoRedemptions(list);
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'promoRedemptions')
+    );
+
     return () => {
       unsubUser();
       unsubInv();
@@ -1349,6 +1476,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       unsubWhitelisted();
       unsubLogins();
       unsubMissions();
+      unsubPriceAlerts();
+      unsubPromoRedemptions();
     };
   }, [authUser, authSyncTick]);
 
@@ -2452,6 +2581,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     source: 'package_profit' | 'mlm_commission' | 'mentor_profit';
     settlementMode?: 'pending' | 'completed';
     otpVerificationToken?: string;
+    promoCode?: string;
   }) => {
     if (!authUser || !userProfile) throw new Error('Authentication required.');
     if (userProfile.suspended) {
@@ -2492,7 +2622,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       throw new Error('Insufficient withdrawable profit balance.');
     }
 
-    // Route through secure server-side endpoint (validates 2FA OTP, KYC, limits, fees, and atomically locks balance in Pending Admin Approval state)
+    // Route through secure server-side endpoint (validates 2FA OTP, KYC, limits, fees, promo codes, and atomically locks balance in Pending Admin Approval state)
     const idToken = await authUser.getIdToken(true);
     const res = await fetch('/api/withdrawals/submit', {
       method: 'POST',
@@ -2506,6 +2636,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         destinationAddress: params.destinationAddress.trim().slice(0, 160),
         source: params.source,
         otpVerificationToken: params.otpVerificationToken || '',
+        ...(params.promoCode?.trim() ? { promoCode: params.promoCode.trim().toUpperCase().slice(0, 24) } : {}),
       }),
     });
     const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
@@ -5344,6 +5475,379 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
+  // =========================================================================
+  // Auto-Reinvest / Compounding Rules, Live Price Alerts & Promo Vouchers
+  // =========================================================================
+
+  const saveAutoCompoundConfig = async (cfg: AutoCompoundConfig) => {
+    if (!authUser || !userProfile) throw new Error('Authentication required.');
+    const thresholdUsd = Math.max(10, Math.min(1000000, Number(Number(cfg.thresholdUsd || 100).toFixed(2))));
+    const sanitized: AutoCompoundConfig = {
+      enabled: Boolean(cfg.enabled),
+      mode: cfg.mode === 'auto_activate_package' ? 'auto_activate_package' : 'route_to_deposit',
+      thresholdUsd,
+      targetPackageId: String(cfg.targetPackageId || platformConfig.packages[0]?.id || '').trim().slice(0, 64),
+      autoClaimOnThreshold: Boolean(cfg.autoClaimOnThreshold),
+      lastExecutedAtMs: Math.max(0, Number(cfg.lastExecutedAtMs ?? userProfile.autoCompoundConfig?.lastExecutedAtMs ?? 0)),
+      totalAutoCompoundedUsd: Math.max(
+        0,
+        Number(cfg.totalAutoCompoundedUsd ?? userProfile.autoCompoundConfig?.totalAutoCompoundedUsd ?? 0)
+      ),
+      executionsCount: Math.max(
+        0,
+        Math.floor(Number(cfg.executionsCount ?? userProfile.autoCompoundConfig?.executionsCount ?? 0))
+      ),
+    };
+    try {
+      await updateDoc(doc(db, 'users', authUser.uid), {
+        autoCompoundConfig: sanitized,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `users/${authUser.uid}`);
+    }
+  };
+
+  const executeAutoCompoundNow = async (): Promise<{
+    claimedUsd: number;
+    amountCompoundedUsd: number;
+    actionSummary: string;
+  }> => {
+    if (!authUser || !userProfile) throw new Error('Authentication required.');
+    const cfg = userProfile.autoCompoundConfig;
+    if (!cfg || !cfg.enabled) {
+      throw new Error('Enable Auto-Reinvest rules first before running a compounding cycle.');
+    }
+
+    let claimedUsd = 0;
+    if (cfg.autoClaimOnThreshold) {
+      for (const inv of investments) {
+        if (inv.status !== 'active') continue;
+        const m = computeInvestmentMetrics(inv, platformConfig.globalPaused);
+        if (m.unclaimedProfit >= 0.01) {
+          const got = await claimInvestmentProfit(inv);
+          claimedUsd = Number((claimedUsd + got).toFixed(2));
+        }
+      }
+    }
+
+    const latestSnap = await getDoc(doc(db, 'users', authUser.uid));
+    const latestProfile = (latestSnap.exists() ? latestSnap.data() : userProfile) as UserProfile;
+    const availIncome = Number(latestProfile.profitBalance || 0);
+    const threshold = Math.max(10, Number(cfg.thresholdUsd || 100));
+
+    let amountCompoundedUsd = 0;
+    let actionSummary = '';
+
+    if (cfg.mode === 'route_to_deposit') {
+      if (availIncome < threshold) {
+        throw new Error(
+          `Income Wallet ($${availIncome.toFixed(2)}) has not reached your $${threshold.toFixed(2)} auto-reinvest threshold yet${
+            claimedUsd > 0 ? ` (claimed +$${claimedUsd.toFixed(2)} into Income Wallet)` : ''
+          }.`
+        );
+      }
+      const transferAmt = Number(availIncome.toFixed(2));
+      await transferIncomeToDepositWallet(transferAmt);
+      amountCompoundedUsd = transferAmt;
+      actionSummary = `Routed $${transferAmt.toFixed(2)} from Income Wallet to Deposit Wallet.`;
+    } else {
+      const targetPkg =
+        platformConfig.packages.find((p) => p.id === cfg.targetPackageId) ||
+        platformConfig.packages[0];
+      if (!targetPkg) {
+        throw new Error('No valid target AI package is configured for Auto-Reinvest.');
+      }
+      const requiredUsd = Math.max(threshold, targetPkg.capital);
+      if (availIncome < requiredUsd) {
+        throw new Error(
+          `Income Wallet ($${availIncome.toFixed(2)}) needs at least $${requiredUsd.toFixed(2)} to auto-activate ${targetPkg.name}${
+            claimedUsd > 0 ? ` (claimed +$${claimedUsd.toFixed(2)} into Income Wallet)` : ''
+          }.`
+        );
+      }
+      await activatePackage(targetPkg, 'income_wallet');
+      amountCompoundedUsd = targetPkg.capital;
+      actionSummary = `Auto-activated ${targetPkg.name} ($${targetPkg.capital.toLocaleString()}) directly from Income Wallet.`;
+    }
+
+    const nextCfg: AutoCompoundConfig = {
+      ...cfg,
+      lastExecutedAtMs: Date.now(),
+      totalAutoCompoundedUsd: Number(
+        ((cfg.totalAutoCompoundedUsd || 0) + amountCompoundedUsd).toFixed(2)
+      ),
+      executionsCount: (cfg.executionsCount || 0) + 1,
+    };
+    await updateDoc(doc(db, 'users', authUser.uid), {
+      autoCompoundConfig: nextCfg,
+      updatedAt: serverTimestamp(),
+    });
+
+    return { claimedUsd, amountCompoundedUsd, actionSummary };
+  };
+
+  const createPriceAlert = async (params: {
+    symbol: PriceAlertSymbol;
+    condition: PriceAlertCondition;
+    targetPrice: number;
+    notifyEmail: boolean;
+    notifyInApp: boolean;
+    note?: string;
+  }) => {
+    if (!authUser) throw new Error('Authentication required.');
+    const targetPrice = Number(params.targetPrice);
+    if (!Number.isFinite(targetPrice) || targetPrice <= 0 || targetPrice > 100_000_000) {
+      throw new Error('Enter a valid positive target price.');
+    }
+    const alertId = makeId('pal');
+    try {
+      await setDoc(doc(db, 'users', authUser.uid, 'priceAlerts', alertId), {
+        uid: authUser.uid,
+        symbol: params.symbol,
+        condition: params.condition === 'below' ? 'below' : 'above',
+        targetPrice,
+        notifyEmail: Boolean(params.notifyEmail),
+        notifyInApp: Boolean(params.notifyInApp),
+        status: 'active' as PriceAlertStatus,
+        triggeredPrice: 0,
+        triggeredAtMs: 0,
+        emailSent: false,
+        note: String(params.note || '').trim().slice(0, 160),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `users/${authUser.uid}/priceAlerts/${alertId}`);
+    }
+  };
+
+  const updatePriceAlert = async (
+    alertId: string,
+    patch: Partial<
+      Pick<
+        PriceAlert,
+        | 'condition'
+        | 'targetPrice'
+        | 'notifyEmail'
+        | 'notifyInApp'
+        | 'status'
+        | 'triggeredPrice'
+        | 'triggeredAtMs'
+        | 'emailSent'
+        | 'note'
+      >
+    >
+  ) => {
+    if (!authUser) throw new Error('Authentication required.');
+    const cleanPatch: Record<string, unknown> = { updatedAt: serverTimestamp() };
+    if (patch.condition !== undefined) cleanPatch.condition = patch.condition;
+    if (patch.targetPrice !== undefined) cleanPatch.targetPrice = Number(patch.targetPrice);
+    if (patch.notifyEmail !== undefined) cleanPatch.notifyEmail = Boolean(patch.notifyEmail);
+    if (patch.notifyInApp !== undefined) cleanPatch.notifyInApp = Boolean(patch.notifyInApp);
+    if (patch.status !== undefined) cleanPatch.status = patch.status;
+    if (patch.triggeredPrice !== undefined) cleanPatch.triggeredPrice = Number(patch.triggeredPrice);
+    if (patch.triggeredAtMs !== undefined) cleanPatch.triggeredAtMs = Number(patch.triggeredAtMs);
+    if (patch.emailSent !== undefined) cleanPatch.emailSent = Boolean(patch.emailSent);
+    if (patch.note !== undefined) cleanPatch.note = String(patch.note).trim().slice(0, 160);
+    try {
+      await updateDoc(doc(db, 'users', authUser.uid, 'priceAlerts', alertId), cleanPatch);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `users/${authUser.uid}/priceAlerts/${alertId}`);
+    }
+  };
+
+  const deletePriceAlert = async (alertId: string) => {
+    if (!authUser) throw new Error('Authentication required.');
+    try {
+      await deleteDoc(doc(db, 'users', authUser.uid, 'priceAlerts', alertId));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `users/${authUser.uid}/priceAlerts/${alertId}`);
+    }
+  };
+
+  const validatePromoCode = async (params: {
+    code: string;
+    context: 'withdrawal' | 'bonus';
+    amountUsd?: number;
+  }) => {
+    if (!authUser) throw new Error('Authentication required.');
+    const idToken = await authUser.getIdToken(true);
+    const res = await fetch('/api/promo/validate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: JSON.stringify({
+        code: params.code.trim().toUpperCase(),
+        context: params.context,
+        amountUsd: Number(params.amountUsd || 0),
+      }),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      error?: string;
+      promo?: {
+        code: string;
+        title: string;
+        description: string;
+        type: PromoCodeType;
+        discountPercent: number;
+        bonusUsd: number;
+        minAmountUsd: number;
+        feeSavedUsd: number;
+        discountedFeeUsd: number;
+      };
+    };
+    if (!res.ok || !data.ok || !data.promo) {
+      throw new Error(data.error || 'Promo code could not be validated.');
+    }
+    return data.promo;
+  };
+
+  const redeemBonusPromoCode = async (code: string) => {
+    if (!authUser) throw new Error('Authentication required.');
+    const idToken = await authUser.getIdToken(true);
+    const res = await fetch('/api/promo/redeem-bonus', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: JSON.stringify({ code: code.trim().toUpperCase() }),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      error?: string;
+      code?: string;
+      bonusUsd?: number;
+      creditedWallet?: string;
+      message?: string;
+    };
+    if (!res.ok || !data.ok) {
+      throw new Error(data.error || 'Unable to redeem promo voucher.');
+    }
+    return {
+      code: data.code || code.trim().toUpperCase(),
+      bonusUsd: Number(data.bonusUsd || 0),
+      creditedWallet: data.creditedWallet || 'Deposit Wallet',
+      message: data.message || 'Promo voucher redeemed successfully!',
+    };
+  };
+
+  const createPromoCode = async (params: {
+    code: string;
+    title: string;
+    description: string;
+    type: PromoCodeType;
+    discountPercent: number;
+    bonusUsd: number;
+    minAmountUsd: number;
+    maxTotalUses: number;
+    maxUsesPerUser: number;
+    expiresAtMs: number;
+    active: boolean;
+  }) => {
+    if (!authUser || !isAdminUser) throw new Error('Super Admin authorization required.');
+    const cleanCode = params.code
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9_-]/g, '')
+      .slice(0, 24);
+    if (!/^[A-Z0-9_-]{3,24}$/.test(cleanCode)) {
+      throw new Error('Promo code must be 3–24 uppercase letters, numbers, underscores, or hyphens.');
+    }
+    const existing = await getDoc(doc(db, 'promoCodes', cleanCode));
+    if (existing.exists()) {
+      throw new Error(`Promo code "${cleanCode}" already exists. Choose a unique code.`);
+    }
+    const discountPercent =
+      params.type === 'withdrawal_fee_waiver'
+        ? 100
+        : params.type === 'withdrawal_fee_discount'
+        ? Math.max(1, Math.min(100, Number(params.discountPercent) || 50))
+        : 0;
+    const bonusUsd =
+      params.type === 'deposit_bonus_usd' || params.type === 'milestone_bonus_usd'
+        ? Math.max(1, Math.min(10000, Number(Number(params.bonusUsd || 0).toFixed(2))))
+        : 0;
+
+    try {
+      await setDoc(doc(db, 'promoCodes', cleanCode), {
+        code: cleanCode,
+        title: params.title.trim().slice(0, 80) || cleanCode,
+        description: params.description.trim().slice(0, 240),
+        type: params.type,
+        discountPercent,
+        bonusUsd,
+        minAmountUsd: Math.max(0, Math.min(1000000, Number(params.minAmountUsd || 0))),
+        maxTotalUses: Math.max(1, Math.min(1000000, Math.floor(Number(params.maxTotalUses || 100)))),
+        maxUsesPerUser: Math.max(1, Math.min(100, Math.floor(Number(params.maxUsesPerUser || 1)))),
+        currentUses: 0,
+        expiresAtMs: Math.max(0, Number(params.expiresAtMs || 0)),
+        active: Boolean(params.active),
+        createdByEmail: (authUser.email || SUPER_ADMIN_EMAIL).slice(0, 254),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `promoCodes/${cleanCode}`);
+    }
+  };
+
+  const updatePromoCode = async (
+    codeId: string,
+    patch: Partial<
+      Pick<
+        PromoCode,
+        | 'title'
+        | 'description'
+        | 'type'
+        | 'discountPercent'
+        | 'bonusUsd'
+        | 'minAmountUsd'
+        | 'maxTotalUses'
+        | 'maxUsesPerUser'
+        | 'expiresAtMs'
+        | 'active'
+      >
+    >
+  ) => {
+    if (!authUser || !isAdminUser) throw new Error('Super Admin authorization required.');
+    const cleanPatch: Record<string, unknown> = { updatedAt: serverTimestamp() };
+    if (patch.title !== undefined) cleanPatch.title = patch.title.trim().slice(0, 80);
+    if (patch.description !== undefined) cleanPatch.description = patch.description.trim().slice(0, 240);
+    if (patch.type !== undefined) cleanPatch.type = patch.type;
+    if (patch.discountPercent !== undefined)
+      cleanPatch.discountPercent = Math.max(0, Math.min(100, Number(patch.discountPercent)));
+    if (patch.bonusUsd !== undefined)
+      cleanPatch.bonusUsd = Math.max(0, Math.min(10000, Number(patch.bonusUsd)));
+    if (patch.minAmountUsd !== undefined)
+      cleanPatch.minAmountUsd = Math.max(0, Math.min(1000000, Number(patch.minAmountUsd)));
+    if (patch.maxTotalUses !== undefined)
+      cleanPatch.maxTotalUses = Math.max(1, Math.min(1000000, Math.floor(Number(patch.maxTotalUses))));
+    if (patch.maxUsesPerUser !== undefined)
+      cleanPatch.maxUsesPerUser = Math.max(1, Math.min(100, Math.floor(Number(patch.maxUsesPerUser))));
+    if (patch.expiresAtMs !== undefined)
+      cleanPatch.expiresAtMs = Math.max(0, Number(patch.expiresAtMs));
+    if (patch.active !== undefined) cleanPatch.active = Boolean(patch.active);
+    try {
+      await updateDoc(doc(db, 'promoCodes', codeId), cleanPatch);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `promoCodes/${codeId}`);
+    }
+  };
+
+  const deletePromoCode = async (codeId: string) => {
+    if (!authUser || !isAdminUser) throw new Error('Super Admin authorization required.');
+    try {
+      await deleteDoc(doc(db, 'promoCodes', codeId));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `promoCodes/${codeId}`);
+    }
+  };
+
   return (
     <PlatformContext.Provider
       value={{
@@ -5376,6 +5880,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         whitelistedWallets,
         loginActivities,
         missionProfile,
+        priceAlerts,
+        promoRedemptions,
         signInWithGoogle,
         signInWithEmail,
         signUpWithKyc,
@@ -5443,6 +5949,16 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         removeWhitelistedWallet,
         claimDailyCheckIn,
         claimMissionReward,
+        saveAutoCompoundConfig,
+        executeAutoCompoundNow,
+        createPriceAlert,
+        updatePriceAlert,
+        deletePriceAlert,
+        validatePromoCode,
+        redeemBonusPromoCode,
+        createPromoCode,
+        updatePromoCode,
+        deletePromoCode,
       }}
     >
       {children}
