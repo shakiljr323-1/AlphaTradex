@@ -30,8 +30,11 @@ import {
 } from 'firebase/firestore';
 import {
   buildDefaultPaymentMethods,
+  DEFAULT_BOOSTER_CONFIG,
   DEFAULT_GLOBAL_KYC_SETTINGS,
+  DEFAULT_MEME_LAUNCHPAD_CONFIG,
   DEFAULT_PLATFORM_CONFIG,
+  DEFAULT_ROADMAP_CONFIG,
   DEFAULT_SUPPORT_AUTO_RESPONDER,
   DEFAULT_WEB3_PAYMENT_CONFIG,
   SUPER_ADMIN_EMAIL,
@@ -43,6 +46,9 @@ import {
   AdminModuleControls,
   AutoCompoundConfig,
   BannerAdConfig,
+  BoosterConfig,
+  BoosterNode,
+  BoosterTierConfig,
   CoinMiningPlan,
   CoinMiningStake,
   CoinTapAccount,
@@ -76,6 +82,11 @@ import {
   MarketingCardTemplateConfig,
   MarketingCardThemeId,
   MemeCoinInvestment,
+  MemeLaunchpadChain,
+  MemeLaunchpadConfig,
+  MemeLaunchpadStatus,
+  MemeLaunchpadToken,
+  MemeLaunchpadTrade,
   MlmCommission,
   MotionAccentColor,
   MotionSceneBeat,
@@ -85,6 +96,7 @@ import {
   PackageFundingSource,
   PaymentMethodConfig,
   PlatformConfig,
+  PlatformConfigSectionId,
   PriceAlert,
   PriceAlertCondition,
   PriceAlertStatus,
@@ -94,6 +106,9 @@ import {
   PromoRedemption,
   ReferralLinkRecord,
   ReferralStats,
+  RoadmapConfig,
+  RoadmapPhase,
+  RoadmapPhaseStatus,
   SupportAutoResponderConfig,
   SupportChatMessage,
   SupportChatThread,
@@ -166,6 +181,9 @@ interface PlatformContextValue {
   missionProfile: UserMissionProfile | null;
   priceAlerts: PriceAlert[];
   promoRedemptions: PromoRedemption[];
+  launchpadTokens: MemeLaunchpadToken[];
+  launchpadTrades: MemeLaunchpadTrade[];
+  boosterNodes: BoosterNode[];
   // Auth & KYC
   signInWithGoogle: (
     referralCode?: string,
@@ -347,6 +365,10 @@ interface PlatformContextValue {
   ) => Promise<{ returnedCapitalUsd: number; claimedProfitUsd: number }>;
   // Super Admin Actions
   updatePlatformConfig: (next: PlatformConfig) => Promise<void>;
+  updatePlatformConfigSection: (
+    sectionId: PlatformConfigSectionId | string,
+    payload: Record<string, unknown>
+  ) => Promise<void>;
   approveCryptoDeposit: (deposit: CryptoDeposit, adminNote?: string) => Promise<void>;
   rejectCryptoDeposit: (deposit: CryptoDeposit, adminNote: string) => Promise<void>;
   approveKyc: (targetUid: string, note?: string) => Promise<void>;
@@ -509,6 +531,51 @@ interface PlatformContextValue {
     >
   ) => Promise<void>;
   deletePromoCode: (codeId: string) => Promise<void>;
+  // Meme Launchpad & Booster Engine
+  launchMemeToken: (params: {
+    name: string;
+    ticker: string;
+    chain: MemeLaunchpadChain;
+    description: string;
+    logoUrl: string;
+    accentColor: string;
+    telegramUrl: string;
+    twitterUrl: string;
+    websiteUrl: string;
+    creatorAddress: string;
+    initialBuyUsd: number;
+    lockDays: number;
+  }) => Promise<MemeLaunchpadToken>;
+  tradeMemeLaunchpadToken: (params: {
+    token: MemeLaunchpadToken;
+    side: 'buy' | 'sell';
+    amountUsd: number;
+  }) => Promise<{ tokenQuantity: number; feeUsd: number; newProgress: number }>;
+  adminUpdateLaunchpadToken: (
+    tokenId: string,
+    patch: Partial<
+      Pick<
+        MemeLaunchpadToken,
+        | 'status'
+        | 'featured'
+        | 'liquidityLocked'
+        | 'antiRugAudit'
+        | 'lockDays'
+        | 'dexListingStatus'
+        | 'contractAddress'
+        | 'dexName'
+        | 'dexPairUrl'
+      >
+    >
+  ) => Promise<void>;
+  adminDeleteLaunchpadToken: (tokenId: string) => Promise<void>;
+  activateBoosterNode: (
+    tier: BoosterTierConfig,
+    fundingSource?: PackageFundingSource,
+    turboMode?: boolean
+  ) => Promise<void>;
+  claimBoosterProfit: (node: BoosterNode) => Promise<number>;
+  toggleBoosterNodeTurbo: (nodeId: string, turboMode: boolean) => Promise<void>;
 }
 
 const PlatformContext = createContext<PlatformContextValue | null>(null);
@@ -573,6 +640,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [missionProfile, setMissionProfile] = useState<UserMissionProfile | null>(null);
   const [priceAlerts, setPriceAlerts] = useState<PriceAlert[]>([]);
   const [promoRedemptions, setPromoRedemptions] = useState<PromoRedemption[]>([]);
+  const [launchpadTokens, setLaunchpadTokens] = useState<MemeLaunchpadToken[]>([]);
+  const [launchpadTrades, setLaunchpadTrades] = useState<MemeLaunchpadTrade[]>([]);
+  const [boosterNodes, setBoosterNodes] = useState<BoosterNode[]>([]);
 
   const dispatchNotificationEvent = useCallback(
     async (
@@ -622,133 +692,237 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const isAdminUser = Boolean(
     authUser &&
       authUser.emailVerified &&
-      (authUser.email === SUPER_ADMIN_EMAIL || isAdminDoc || userProfile?.role === 'admin')
+      ((authUser.email || '').toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase() ||
+        isAdminDoc ||
+        userProfile?.role === 'admin')
   );
 
-  // Subscribe to public platform config
+  // Subscribe to modular platform_config/* sections (with legacy config/platform fallback)
   useEffect(() => {
-    const configRef = doc(db, 'config', 'platform');
-    const unsub = onSnapshot(
-      configRef,
-      (snap) => {
-        if (snap.exists()) {
-          const data = snap.data() as PlatformConfig;
-          const mergedWallets = {
-            ...DEFAULT_PLATFORM_CONFIG.depositWallets,
-            ...(data.depositWallets || {}),
-          };
-          const resolvedMethods =
-            Array.isArray(data.paymentMethods) && data.paymentMethods.length > 0
-              ? data.paymentMethods.map((m) => ({
-                  ...m,
-                  withdrawAddress: m.withdrawAddress ?? m.receivingAccount,
-                }))
-              : buildDefaultPaymentMethods(mergedWallets);
+    let legacyData: Partial<PlatformConfig> = {};
+    let modularSections: Record<string, Record<string, unknown>> = {};
 
-          setPlatformConfig({
-            ...DEFAULT_PLATFORM_CONFIG,
-            ...data,
-            withdrawalsPaused: Boolean(data.withdrawalsPaused),
-            signupsPaused: Boolean(data.signupsPaused),
-            p2pPaused: Boolean(data.p2pPaused),
-            moduleControls: {
-              ...DEFAULT_PLATFORM_CONFIG.moduleControls!,
-              ...(data.moduleControls || {}),
-            },
-            supportLinks: {
-              ...DEFAULT_PLATFORM_CONFIG.supportLinks!,
-              ...(data.supportLinks || {}),
-            },
-            supportAutoResponder: {
-              ...DEFAULT_SUPPORT_AUTO_RESPONDER,
-              ...(data.supportAutoResponder || {}),
-            },
-            kycSettings: {
-              ...DEFAULT_GLOBAL_KYC_SETTINGS,
-              ...(data.kycSettings || {}),
-              disabledCountryCodes: Array.isArray(data.kycSettings?.disabledCountryCodes)
-                ? data.kycSettings.disabledCountryCodes
-                : DEFAULT_GLOBAL_KYC_SETTINGS.disabledCountryCodes,
-            },
-            marketingCardsConfig: {
-              ...DEFAULT_PLATFORM_CONFIG.marketingCardsConfig!,
-              ...(data.marketingCardsConfig || {}),
-              templates:
-                Array.isArray(data.marketingCardsConfig?.templates) &&
-                data.marketingCardsConfig.templates.length > 0
-                  ? data.marketingCardsConfig.templates
-                  : DEFAULT_PLATFORM_CONFIG.marketingCardsConfig!.templates,
-            },
-            howItWorksConfig: {
-              ...DEFAULT_PLATFORM_CONFIG.howItWorksConfig!,
-              ...(data.howItWorksConfig || {}),
-              steps:
-                Array.isArray(data.howItWorksConfig?.steps) &&
-                data.howItWorksConfig.steps.length > 0
-                  ? data.howItWorksConfig.steps
-                  : DEFAULT_PLATFORM_CONFIG.howItWorksConfig!.steps,
-              videos:
-                Array.isArray(data.howItWorksConfig?.videos) &&
-                data.howItWorksConfig.videos.length > 0
-                  ? data.howItWorksConfig.videos
-                  : DEFAULT_PLATFORM_CONFIG.howItWorksConfig!.videos,
-            },
-            leaderboardConfig: {
-              ...DEFAULT_PLATFORM_CONFIG.leaderboardConfig!,
-              ...(data.leaderboardConfig || {}),
-              entries: Array.isArray(data.leaderboardConfig?.entries)
-                ? data.leaderboardConfig.entries
-                : DEFAULT_PLATFORM_CONFIG.leaderboardConfig!.entries,
-            },
-            depositsPaused: Boolean(data.depositsPaused),
-            web3PaymentConfig: {
-              ...DEFAULT_WEB3_PAYMENT_CONFIG,
-              ...(data.web3PaymentConfig || {}),
-            },
-            mlmRates: { ...DEFAULT_PLATFORM_CONFIG.mlmRates, ...(data.mlmRates || {}) },
-            mentorConfig: { ...DEFAULT_PLATFORM_CONFIG.mentorConfig, ...(data.mentorConfig || {}) },
-            depositWallets: mergedWallets,
-            paymentMethods: resolvedMethods,
-            pumpFunToken: { ...DEFAULT_PLATFORM_CONFIG.pumpFunToken, ...(data.pumpFunToken || {}) },
-            dashboardAnnouncement: {
-              ...DEFAULT_PLATFORM_CONFIG.dashboardAnnouncement,
-              ...(data.dashboardAnnouncement || {}),
-            },
-            bannerAds: Array.isArray(data.bannerAds)
-              ? data.bannerAds
-              : DEFAULT_PLATFORM_CONFIG.bannerAds,
-            coinMiningSettings: {
-              ...DEFAULT_PLATFORM_CONFIG.coinMiningSettings,
-              ...(data.coinMiningSettings || {}),
-            },
-            coinMiningPlans: Array.isArray(data.coinMiningPlans)
-              ? data.coinMiningPlans
-              : DEFAULT_PLATFORM_CONFIG.coinMiningPlans,
-            forexConfig: {
-              tradingEnabled:
-                data.forexConfig?.tradingEnabled ??
-                DEFAULT_PLATFORM_CONFIG.forexConfig!.tradingEnabled,
-              copyTradingEnabled:
-                data.forexConfig?.copyTradingEnabled ??
-                DEFAULT_PLATFORM_CONFIG.forexConfig!.copyTradingEnabled,
-              accountTiers:
-                Array.isArray(data.forexConfig?.accountTiers) &&
-                data.forexConfig.accountTiers.length > 0
-                  ? data.forexConfig.accountTiers
-                  : DEFAULT_PLATFORM_CONFIG.forexConfig!.accountTiers,
-              copyTraders: Array.isArray(data.forexConfig?.copyTraders)
-                ? data.forexConfig.copyTraders
-                : DEFAULT_PLATFORM_CONFIG.forexConfig!.copyTraders,
-            },
-            packages:
-              Array.isArray(data.packages) && data.packages.length > 0
-                ? data.packages
-                : DEFAULT_PLATFORM_CONFIG.packages,
-          });
-        }
+    const applyMergedConfig = () => {
+      const mergedModular: Record<string, unknown> = {};
+      Object.values(modularSections).forEach((sec) => {
+        Object.entries(sec).forEach(([k, v]) => {
+          if (k !== 'section' && k !== 'updatedAt') {
+            mergedModular[k] = v;
+          }
+        });
+      });
+
+      const hasAnyData =
+        Object.keys(legacyData).length > 0 || Object.keys(mergedModular).length > 0;
+      if (!hasAnyData) return;
+
+      const data = {
+        ...legacyData,
+        ...mergedModular,
+      } as Partial<PlatformConfig>;
+
+      const mergedWallets = {
+        ...DEFAULT_PLATFORM_CONFIG.depositWallets,
+        ...(data.depositWallets || {}),
+      };
+      const resolvedMethods =
+        Array.isArray(data.paymentMethods) && data.paymentMethods.length > 0
+          ? data.paymentMethods.map((m) => ({
+              ...m,
+              withdrawAddress: m.withdrawAddress ?? m.receivingAccount,
+            }))
+          : buildDefaultPaymentMethods(mergedWallets);
+
+      setPlatformConfig({
+        ...DEFAULT_PLATFORM_CONFIG,
+        ...data,
+        withdrawalsPaused: Boolean(data.withdrawalsPaused),
+        signupsPaused: Boolean(data.signupsPaused),
+        p2pPaused: Boolean(data.p2pPaused),
+        moduleControls: {
+          ...DEFAULT_PLATFORM_CONFIG.moduleControls!,
+          ...(data.moduleControls || {}),
+        },
+        supportLinks: {
+          ...DEFAULT_PLATFORM_CONFIG.supportLinks!,
+          ...(data.supportLinks || {}),
+        },
+        supportAutoResponder: {
+          ...DEFAULT_SUPPORT_AUTO_RESPONDER,
+          ...(data.supportAutoResponder || {}),
+        },
+        kycSettings: {
+          ...DEFAULT_GLOBAL_KYC_SETTINGS,
+          ...(data.kycSettings || {}),
+          disabledCountryCodes: Array.isArray(data.kycSettings?.disabledCountryCodes)
+            ? data.kycSettings.disabledCountryCodes
+            : DEFAULT_GLOBAL_KYC_SETTINGS.disabledCountryCodes,
+        },
+        marketingCardsConfig: {
+          ...DEFAULT_PLATFORM_CONFIG.marketingCardsConfig!,
+          ...(data.marketingCardsConfig || {}),
+          templates:
+            Array.isArray(data.marketingCardsConfig?.templates) &&
+            data.marketingCardsConfig.templates.length > 0
+              ? data.marketingCardsConfig.templates
+              : DEFAULT_PLATFORM_CONFIG.marketingCardsConfig!.templates,
+        },
+        howItWorksConfig: {
+          ...DEFAULT_PLATFORM_CONFIG.howItWorksConfig!,
+          ...(data.howItWorksConfig || {}),
+          steps:
+            Array.isArray(data.howItWorksConfig?.steps) &&
+            data.howItWorksConfig.steps.length > 0
+              ? data.howItWorksConfig.steps
+              : DEFAULT_PLATFORM_CONFIG.howItWorksConfig!.steps,
+          videos:
+            Array.isArray(data.howItWorksConfig?.videos) &&
+            data.howItWorksConfig.videos.length > 0
+              ? data.howItWorksConfig.videos
+              : DEFAULT_PLATFORM_CONFIG.howItWorksConfig!.videos,
+        },
+        leaderboardConfig: {
+          ...DEFAULT_PLATFORM_CONFIG.leaderboardConfig!,
+          ...(data.leaderboardConfig || {}),
+          entries: Array.isArray(data.leaderboardConfig?.entries)
+            ? data.leaderboardConfig.entries
+            : DEFAULT_PLATFORM_CONFIG.leaderboardConfig!.entries,
+        },
+        depositsPaused: Boolean(data.depositsPaused),
+        web3PaymentConfig: {
+          ...DEFAULT_WEB3_PAYMENT_CONFIG,
+          ...(data.web3PaymentConfig || {}),
+        },
+        mlmRates: { ...DEFAULT_PLATFORM_CONFIG.mlmRates, ...(data.mlmRates || {}) },
+        mentorConfig: { ...DEFAULT_PLATFORM_CONFIG.mentorConfig, ...(data.mentorConfig || {}) },
+        depositWallets: mergedWallets,
+        paymentMethods: resolvedMethods,
+        pumpFunToken: { ...DEFAULT_PLATFORM_CONFIG.pumpFunToken, ...(data.pumpFunToken || {}) },
+        dashboardAnnouncement: {
+          ...DEFAULT_PLATFORM_CONFIG.dashboardAnnouncement,
+          ...(data.dashboardAnnouncement || {}),
+        },
+        bannerAds: Array.isArray(data.bannerAds)
+          ? data.bannerAds
+          : DEFAULT_PLATFORM_CONFIG.bannerAds,
+        coinMiningSettings: {
+          ...DEFAULT_PLATFORM_CONFIG.coinMiningSettings,
+          ...(data.coinMiningSettings || {}),
+        },
+        coinMiningPlans: Array.isArray(data.coinMiningPlans)
+          ? data.coinMiningPlans
+          : DEFAULT_PLATFORM_CONFIG.coinMiningPlans,
+        forexConfig: {
+          tradingEnabled:
+            data.forexConfig?.tradingEnabled ??
+            DEFAULT_PLATFORM_CONFIG.forexConfig!.tradingEnabled,
+          copyTradingEnabled:
+            data.forexConfig?.copyTradingEnabled ??
+            DEFAULT_PLATFORM_CONFIG.forexConfig!.copyTradingEnabled,
+          accountTiers:
+            Array.isArray(data.forexConfig?.accountTiers) &&
+            data.forexConfig.accountTiers.length > 0
+              ? data.forexConfig.accountTiers
+              : DEFAULT_PLATFORM_CONFIG.forexConfig!.accountTiers,
+          copyTraders: Array.isArray(data.forexConfig?.copyTraders)
+            ? data.forexConfig.copyTraders
+            : DEFAULT_PLATFORM_CONFIG.forexConfig!.copyTraders,
+        },
+        packages:
+          Array.isArray(data.packages) && data.packages.length > 0
+            ? data.packages
+            : DEFAULT_PLATFORM_CONFIG.packages,
+        memeLaunchpadConfig: {
+          ...DEFAULT_MEME_LAUNCHPAD_CONFIG,
+          ...(data.memeLaunchpadConfig || {}),
+          customContracts: Array.isArray(data.memeLaunchpadConfig?.customContracts)
+            ? data.memeLaunchpadConfig.customContracts
+            : [],
+        },
+        boosterBrandName:
+          String(
+            data.boosterBrandName ||
+              data.boosterConfig?.brandName ||
+              DEFAULT_BOOSTER_CONFIG.brandName
+          ).trim() || DEFAULT_BOOSTER_CONFIG.brandName,
+        boosterConfig: {
+          ...DEFAULT_BOOSTER_CONFIG,
+          ...(data.boosterConfig || {}),
+          brandName:
+            String(
+              data.boosterBrandName ||
+                data.boosterConfig?.brandName ||
+                DEFAULT_BOOSTER_CONFIG.brandName
+            ).trim() || DEFAULT_BOOSTER_CONFIG.brandName,
+          tiers:
+            Array.isArray(data.boosterConfig?.tiers) && data.boosterConfig.tiers.length > 0
+              ? data.boosterConfig.tiers
+              : DEFAULT_BOOSTER_CONFIG.tiers,
+        },
+        roadmapConfig: {
+          ...DEFAULT_ROADMAP_CONFIG,
+          ...(data.roadmapConfig || {}),
+          phases:
+            Array.isArray(data.roadmapConfig?.phases) && data.roadmapConfig.phases.length > 0
+              ? data.roadmapConfig.phases
+              : DEFAULT_ROADMAP_CONFIG.phases,
+        },
+      });
+    };
+
+    const unsubModular = onSnapshot(
+      collection(db, 'platform_config'),
+      (snap) => {
+        const nextMap: Record<string, Record<string, unknown>> = {};
+        snap.docs.forEach((d) => {
+          nextMap[d.id] = d.data() as Record<string, unknown>;
+        });
+        modularSections = nextMap;
+        applyMergedConfig();
       },
       (error) => {
-        console.warn('Config snapshot fallback to defaults:', error.message);
+        console.warn('Modular platform_config snapshot fallback:', error.message);
+      }
+    );
+
+    const unsubLegacy = onSnapshot(
+      doc(db, 'config', 'platform'),
+      (snap) => {
+        legacyData = snap.exists() ? (snap.data() as Partial<PlatformConfig>) : {};
+        applyMergedConfig();
+      },
+      (error) => {
+        console.warn('Legacy config snapshot fallback:', error.message);
+      }
+    );
+
+    return () => {
+      unsubModular();
+      unsubLegacy();
+    };
+  }, []);
+
+  // Subscribe to public Meme Launchpad tokens (live, upcoming, graduated — excludes delisted)
+  useEffect(() => {
+    const q = query(
+      collection(db, 'memeLaunchpadTokens'),
+      where('status', 'in', ['live', 'upcoming', 'graduated'])
+    );
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const list = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<MemeLaunchpadToken, 'id'>),
+        }));
+        list.sort((a, b) => {
+          if (a.featured !== b.featured) return a.featured ? -1 : 1;
+          return createdAtSeconds(b.createdAt) - createdAtSeconds(a.createdAt);
+        });
+        setLaunchpadTokens(list);
+      },
+      (err) => {
+        console.warn('Launchpad tokens snapshot fallback:', err.message);
       }
     );
     return () => unsub();
@@ -1453,6 +1627,32 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       (err) => handleFirestoreError(err, OperationType.LIST, 'promoRedemptions')
     );
 
+    const unsubLaunchpadTrades = onSnapshot(
+      query(collection(db, 'memeLaunchpadTrades'), where('uid', '==', uid)),
+      (snap) => {
+        const list = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<MemeLaunchpadTrade, 'id'>),
+        }));
+        list.sort((a, b) => createdAtSeconds(b.createdAt) - createdAtSeconds(a.createdAt));
+        setLaunchpadTrades(list);
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'memeLaunchpadTrades')
+    );
+
+    const unsubBoosterNodes = onSnapshot(
+      query(collection(db, 'boosterNodes'), where('uid', '==', uid)),
+      (snap) => {
+        const list = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<BoosterNode, 'id'>),
+        }));
+        list.sort((a, b) => (b.startedAtMs || 0) - (a.startedAtMs || 0));
+        setBoosterNodes(list);
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'boosterNodes')
+    );
+
     return () => {
       unsubUser();
       unsubInv();
@@ -1478,6 +1678,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       unsubMissions();
       unsubPriceAlerts();
       unsubPromoRedemptions();
+      unsubLaunchpadTrades();
+      unsubBoosterNodes();
     };
   }, [authUser, authSyncTick]);
 
@@ -4057,64 +4259,335 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       walletConnectProjectId: String(rawWeb3.walletConnectProjectId || '').trim().slice(0, 80),
     };
 
-    try {
-      await setDoc(doc(db, 'config', 'platform'), {
-        ...next,
-        companyName:
-          String(next.companyName || DEFAULT_PLATFORM_CONFIG.companyName).trim().slice(0, 120) ||
-          'Alphatradex',
-        companyTagline: String(next.companyTagline || '').trim().slice(0, 200),
-        companyDescription: String(next.companyDescription || '').trim().slice(0, 1500),
-        companyGoal: String(next.companyGoal || '').trim().slice(0, 1500),
-        riskDisclosure: String(next.riskDisclosure || '').trim().slice(0, 1500),
-        trustpilotScore: clampScore(next.trustpilotScore, 4.9),
-        trustpilotReviews: Math.max(0, Math.round(Number(next.trustpilotReviews) || 0)),
-        nortonScore: clampScore(next.nortonScore, 4.9),
-        isoScore: clampScore(next.isoScore, 5.0),
-        certikScore: clampScore(next.certikScore, 4.9),
-        minWithdrawalUsd: Math.max(1, Number(next.minWithdrawalUsd) || 10),
-        eliteCapitalLockDays: Math.max(1, Math.round(Number(next.eliteCapitalLockDays) || 70)),
-        totalProfitDays: Math.max(1, Math.round(Number(next.totalProfitDays) || 200)),
-        globalPaused: Boolean(next.globalPaused),
-        depositsPaused: Boolean(next.depositsPaused),
-        withdrawalsPaused: Boolean(next.withdrawalsPaused),
-        signupsPaused: Boolean(next.signupsPaused),
-        p2pPaused: Boolean(next.p2pPaused),
-        moduleControls: safeModuleControls,
-        supportLinks: safeSupportLinks,
-        mlmRates: safeMlmRates,
-        depositWallets: safeDepositWallets,
-        pumpFunToken: safePumpFunToken,
-        packages: safePackages,
-        mentorConfig: safeMentorConfig,
-        paymentMethods: safePaymentMethods,
-        dashboardAnnouncement: safeAnnouncement,
-        bannerAds: safeBannerAds,
-        coinMiningSettings: safeCoinMiningSettings,
-        coinMiningPlans: safeMiningPlans,
-        forexConfig: {
-          tradingEnabled: rawFx.tradingEnabled !== false,
-          copyTradingEnabled: rawFx.copyTradingEnabled !== false,
-          accountTiers: safeAccountTiers,
-          copyTraders: safeCopyTraders,
-        },
-        supportAutoResponder: safeSupportAutoResponder,
-        kycSettings: safeKycSettings,
-        marketingCardsConfig: safeMarketingCardsConfig,
-        howItWorksConfig: safeHowItWorksConfig,
-        leaderboardConfig: safeLeaderboardConfig,
-        web3PaymentConfig: safeWeb3PaymentConfig,
-        updatedAt: serverTimestamp(),
+    const rawLp = next.memeLaunchpadConfig || DEFAULT_MEME_LAUNCHPAD_CONFIG;
+    const safeFinite = (val: unknown, fallback: number) => {
+      const n = Number(val);
+      return Number.isFinite(n) ? n : fallback;
+    };
+    const allowedDeployStatuses = new Set(['pending', 'deployed', 'listed', 'paused']);
+    const safeCustomContracts = (
+      Array.isArray(rawLp.customContracts) ? rawLp.customContracts : []
+    )
+      .slice(0, 40)
+      .map((entry, idx) => {
+        const cleanPair = String(entry?.dexPairUrl || '').trim().slice(0, 300);
+        const safePair = cleanPair && /^https?:\/\//i.test(cleanPair) ? cleanPair : '';
+        const rawStatus = String(entry?.deploymentStatus || 'pending').trim();
+        const safeDeployStatus = (
+          allowedDeployStatuses.has(rawStatus) ? rawStatus : 'pending'
+        ) as 'pending' | 'deployed' | 'listed' | 'paused';
+        const cleanTicker = String(entry?.ticker || '')
+          .trim()
+          .toUpperCase()
+          .replace(/[^A-Z0-9]/g, '')
+          .slice(0, 16);
+        return {
+          id: sanitizeRuleId(entry?.id || `contract_${idx + 1}`, `contract_${idx + 1}`),
+          tokenName: String(entry?.tokenName || `Meme Token ${idx + 1}`).trim().slice(0, 64) || `Meme Token ${idx + 1}`,
+          ticker: cleanTicker || `MEME${idx + 1}`,
+          contractAddress: String(entry?.contractAddress || '').trim().slice(0, 128),
+          network: (entry?.network === 'BSC' ? 'BSC' : 'Solana') as 'BSC' | 'Solana',
+          deploymentStatus: safeDeployStatus,
+          dexName: String(entry?.dexName || '').trim().slice(0, 60),
+          dexPairUrl: safePair,
+          notes: String(entry?.notes || '').trim().slice(0, 240),
+          updatedAtIso: String(entry?.updatedAtIso || new Date().toISOString()).slice(0, 40),
+        };
       });
+
+    const safeMemeLaunchpadConfig: MemeLaunchpadConfig = {
+      enabled: rawLp.enabled !== false,
+      allowUserLaunches: rawLp.allowUserLaunches !== false,
+      launchFeeUsd: Math.max(
+        0,
+        Math.min(10000, safeFinite(rawLp.launchFeeUsd, DEFAULT_MEME_LAUNCHPAD_CONFIG.launchFeeUsd))
+      ),
+      tradingFeePercent: Math.max(
+        0,
+        Math.min(
+          15,
+          safeFinite(rawLp.tradingFeePercent, DEFAULT_MEME_LAUNCHPAD_CONFIG.tradingFeePercent)
+        )
+      ),
+      graduationTargetUsd: Math.max(
+        1000,
+        Math.min(
+          10000000,
+          safeFinite(rawLp.graduationTargetUsd, DEFAULT_MEME_LAUNCHPAD_CONFIG.graduationTargetUsd)
+        )
+      ),
+      defaultLockDays: Math.max(
+        0,
+        Math.min(
+          3650,
+          Math.round(safeFinite(rawLp.defaultLockDays, DEFAULT_MEME_LAUNCHPAD_CONFIG.defaultLockDays))
+        )
+      ),
+      customContracts: safeCustomContracts,
+    };
+
+    const rawBooster = next.boosterConfig || DEFAULT_BOOSTER_CONFIG;
+    const allowedBoosterAccents: BoosterTierConfig['accent'][] = ['amber', 'teal', 'sky', 'violet'];
+    const safeBoosterTiers: BoosterTierConfig[] = (
+      Array.isArray(rawBooster.tiers) && rawBooster.tiers.length > 0
+        ? rawBooster.tiers
+        : DEFAULT_BOOSTER_CONFIG.tiers
+    )
+      .slice(0, 12)
+      .map((tier, idx) => ({
+        id: sanitizeRuleId(tier.id || `booster_tier_${idx + 1}`, `booster_tier_${idx + 1}`),
+        name: String(tier.name || `Core Tier ${idx + 1}`).trim().slice(0, 80) || `Core Tier ${idx + 1}`,
+        capital: Math.max(10, Math.min(10000000, Number(tier.capital) || 100)),
+        dailyPercent: Math.max(0.1, Math.min(50, Number(tier.dailyPercent) || 1.0)),
+        boostPowerLabel: String(tier.boostPowerLabel || '1.25 TH/u').trim().slice(0, 40) || '1.25 TH/u',
+        profitDays: Math.max(1, Math.min(1000, Math.round(Number(tier.profitDays) || 200))),
+        capitalLockDays: Math.max(0, Math.min(1000, Math.round(Number(tier.capitalLockDays) || 70))),
+        thermalEfficiency: String(tier.thermalEfficiency || '97.5%').trim().slice(0, 20) || '97.5%',
+        description: String(tier.description || '').trim().slice(0, 260),
+        accent: allowedBoosterAccents.includes(tier.accent) ? tier.accent : 'amber',
+        enabled: tier.enabled !== false,
+      }));
+
+    const resolvedBoosterBrandName =
+      String(
+        next.boosterBrandName ||
+          rawBooster.brandName ||
+          DEFAULT_BOOSTER_CONFIG.brandName
+      )
+        .trim()
+        .slice(0, 60) || DEFAULT_BOOSTER_CONFIG.brandName;
+
+    const safeBoosterConfig: BoosterConfig = {
+      enabled: rawBooster.enabled !== false,
+      brandName: resolvedBoosterBrandName,
+      tagline: String(rawBooster.tagline || DEFAULT_BOOSTER_CONFIG.tagline).trim().slice(0, 180),
+      turboBonusLabel: String(rawBooster.turboBonusLabel || DEFAULT_BOOSTER_CONFIG.turboBonusLabel)
+        .trim()
+        .slice(0, 80),
+      tiers: safeBoosterTiers,
+    };
+
+    const rawRoadmap = next.roadmapConfig || DEFAULT_ROADMAP_CONFIG;
+    const allowedRoadmapStatuses: RoadmapPhaseStatus[] = ['completed', 'active', 'upcoming'];
+    const safeRoadmapPhases: RoadmapPhase[] = (
+      Array.isArray(rawRoadmap.phases) && rawRoadmap.phases.length > 0
+        ? rawRoadmap.phases
+        : DEFAULT_ROADMAP_CONFIG.phases
+    )
+      .slice(0, 10)
+      .map((ph, idx) => ({
+        id: sanitizeRuleId(ph.id || `phase_${idx + 1}`, `phase_${idx + 1}`),
+        phaseLabel: String(ph.phaseLabel || `Phase 0${idx + 1}`).trim().slice(0, 32),
+        quarter: String(ph.quarter || '').trim().slice(0, 48),
+        title: String(ph.title || `Phase ${idx + 1}`).trim().slice(0, 140),
+        status: allowedRoadmapStatuses.includes(ph.status) ? ph.status : 'upcoming',
+        description: String(ph.description || '').trim().slice(0, 320),
+        milestones: (Array.isArray(ph.milestones) ? ph.milestones : [])
+          .map((m) => String(m || '').trim().slice(0, 160))
+          .filter(Boolean)
+          .slice(0, 8),
+      }));
+
+    const safeRoadmapConfig: RoadmapConfig = {
+      enabled: rawRoadmap.enabled !== false,
+      title: String(rawRoadmap.title || DEFAULT_ROADMAP_CONFIG.title).trim().slice(0, 120) || DEFAULT_ROADMAP_CONFIG.title,
+      subtitle: String(rawRoadmap.subtitle || DEFAULT_ROADMAP_CONFIG.subtitle).trim().slice(0, 260),
+      phases: safeRoadmapPhases,
+    };
+
+    const cleanConfigPayload = {
+      companyName:
+        String(next.companyName || DEFAULT_PLATFORM_CONFIG.companyName).trim().slice(0, 120) ||
+        'Alphatradex',
+      companyTagline: String(next.companyTagline || '').trim().slice(0, 200),
+      companyDescription: String(next.companyDescription || '').trim().slice(0, 1500),
+      companyGoal: String(next.companyGoal || '').trim().slice(0, 1500),
+      riskDisclosure: String(next.riskDisclosure || '').trim().slice(0, 1500),
+      trustpilotScore: clampScore(next.trustpilotScore, 4.9),
+      trustpilotReviews: Math.max(0, Math.round(Number(next.trustpilotReviews) || 0)),
+      nortonScore: clampScore(next.nortonScore, 4.9),
+      isoScore: clampScore(next.isoScore, 5.0),
+      certikScore: clampScore(next.certikScore, 4.9),
+      minWithdrawalUsd: Math.max(1, Number(next.minWithdrawalUsd) || 10),
+      eliteCapitalLockDays: Math.max(1, Math.round(Number(next.eliteCapitalLockDays) || 70)),
+      totalProfitDays: Math.max(1, Math.round(Number(next.totalProfitDays) || 200)),
+      globalPaused: Boolean(next.globalPaused),
+      depositsPaused: Boolean(next.depositsPaused),
+      withdrawalsPaused: Boolean(next.withdrawalsPaused),
+      signupsPaused: Boolean(next.signupsPaused),
+      p2pPaused: Boolean(next.p2pPaused),
+      moduleControls: safeModuleControls,
+      supportLinks: safeSupportLinks,
+      mlmRates: safeMlmRates,
+      depositWallets: safeDepositWallets,
+      pumpFunToken: safePumpFunToken,
+      packages: safePackages,
+      mentorConfig: safeMentorConfig,
+      paymentMethods: safePaymentMethods,
+      dashboardAnnouncement: safeAnnouncement,
+      bannerAds: safeBannerAds,
+      coinMiningSettings: safeCoinMiningSettings,
+      coinMiningPlans: safeMiningPlans,
+      forexConfig: {
+        tradingEnabled: rawFx.tradingEnabled !== false,
+        copyTradingEnabled: rawFx.copyTradingEnabled !== false,
+        accountTiers: safeAccountTiers,
+        copyTraders: safeCopyTraders,
+      },
+      supportAutoResponder: safeSupportAutoResponder,
+      kycSettings: safeKycSettings,
+      marketingCardsConfig: safeMarketingCardsConfig,
+      howItWorksConfig: safeHowItWorksConfig,
+      leaderboardConfig: safeLeaderboardConfig,
+      web3PaymentConfig: safeWeb3PaymentConfig,
+      memeLaunchpadConfig: safeMemeLaunchpadConfig,
+      boosterBrandName: resolvedBoosterBrandName,
+      boosterConfig: safeBoosterConfig,
+      roadmapConfig: safeRoadmapConfig,
+      updatedAt: serverTimestamp(),
+    };
+
+    const sectionPayloads: Record<PlatformConfigSectionId, Record<string, unknown>> = {
+      general: {
+        section: 'general',
+        companyName: cleanConfigPayload.companyName,
+        companyTagline: cleanConfigPayload.companyTagline,
+        companyDescription: cleanConfigPayload.companyDescription,
+        companyGoal: cleanConfigPayload.companyGoal,
+        riskDisclosure: cleanConfigPayload.riskDisclosure,
+        trustpilotScore: cleanConfigPayload.trustpilotScore,
+        trustpilotReviews: cleanConfigPayload.trustpilotReviews,
+        nortonScore: cleanConfigPayload.nortonScore,
+        isoScore: cleanConfigPayload.isoScore,
+        certikScore: cleanConfigPayload.certikScore,
+        minWithdrawalUsd: cleanConfigPayload.minWithdrawalUsd,
+        eliteCapitalLockDays: cleanConfigPayload.eliteCapitalLockDays,
+        totalProfitDays: cleanConfigPayload.totalProfitDays,
+        globalPaused: cleanConfigPayload.globalPaused,
+        depositsPaused: cleanConfigPayload.depositsPaused,
+        withdrawalsPaused: cleanConfigPayload.withdrawalsPaused,
+        signupsPaused: cleanConfigPayload.signupsPaused,
+        p2pPaused: cleanConfigPayload.p2pPaused,
+        moduleControls: cleanConfigPayload.moduleControls,
+        supportLinks: cleanConfigPayload.supportLinks,
+        supportAutoResponder: cleanConfigPayload.supportAutoResponder,
+        kycSettings: cleanConfigPayload.kycSettings,
+        dashboardAnnouncement: cleanConfigPayload.dashboardAnnouncement,
+        updatedAt: serverTimestamp(),
+      },
+      packages: {
+        section: 'packages',
+        packages: cleanConfigPayload.packages,
+        mlmRates: cleanConfigPayload.mlmRates,
+        mentorConfig: cleanConfigPayload.mentorConfig,
+        updatedAt: serverTimestamp(),
+      },
+      payments: {
+        section: 'payments',
+        depositWallets: cleanConfigPayload.depositWallets,
+        paymentMethods: cleanConfigPayload.paymentMethods,
+        web3PaymentConfig: cleanConfigPayload.web3PaymentConfig,
+        pumpFunToken: cleanConfigPayload.pumpFunToken,
+        updatedAt: serverTimestamp(),
+      },
+      marketing: {
+        section: 'marketing',
+        marketingCardsConfig: cleanConfigPayload.marketingCardsConfig,
+        bannerAds: cleanConfigPayload.bannerAds,
+        howItWorksConfig: cleanConfigPayload.howItWorksConfig,
+        leaderboardConfig: cleanConfigPayload.leaderboardConfig,
+        updatedAt: serverTimestamp(),
+      },
+      trading: {
+        section: 'trading',
+        forexConfig: cleanConfigPayload.forexConfig,
+        coinMiningSettings: cleanConfigPayload.coinMiningSettings,
+        coinMiningPlans: cleanConfigPayload.coinMiningPlans,
+        updatedAt: serverTimestamp(),
+      },
+      boosters: {
+        section: 'boosters',
+        boosterBrandName: cleanConfigPayload.boosterBrandName,
+        boosterConfig: cleanConfigPayload.boosterConfig,
+        updatedAt: serverTimestamp(),
+      },
+      launchpad: {
+        section: 'launchpad',
+        memeLaunchpadConfig: cleanConfigPayload.memeLaunchpadConfig,
+        updatedAt: serverTimestamp(),
+      },
+      roadmap: {
+        section: 'roadmap',
+        roadmapConfig: cleanConfigPayload.roadmapConfig,
+        updatedAt: serverTimestamp(),
+      },
+    };
+
+    const commitModularBatch = async () => {
+      const batch = writeBatch(db);
+      (Object.entries(sectionPayloads) as Array<[PlatformConfigSectionId, Record<string, unknown>]>).forEach(
+        ([secId, secPayload]) => {
+          batch.set(doc(db, 'platform_config', secId), secPayload);
+        }
+      );
+      await batch.commit();
+    };
+
+    try {
+      try {
+        await commitModularBatch();
+      } catch (firstErr) {
+        if (auth.currentUser) {
+          await auth.currentUser.getIdToken(true);
+          await commitModularBatch();
+        } else {
+          throw firstErr;
+        }
+      }
       await writeAdminLog({
         action: 'CONFIG_PUBLISHED',
         targetUid: '',
-        targetLabel: 'config/platform',
+        targetLabel: 'platform_config/* (8 modular sections)',
         details: `Global Pause=${Boolean(next.globalPaused)} · Deposits Paused=${Boolean(next.depositsPaused)} · Withdrawals Paused=${Boolean(next.withdrawalsPaused)} · Web3 Auto-Deposit=${safeWeb3PaymentConfig.autoDepositEnabled}`,
         amountUsd: 0,
       });
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, 'config/platform');
+      handleFirestoreError(err, OperationType.WRITE, 'platform_config');
+    }
+  };
+
+  const updatePlatformConfigSection = async (
+    sectionId: PlatformConfigSectionId | string,
+    payload: Record<string, unknown>
+  ) => {
+    if (!authUser || !isAdminUser) throw new Error('Super Admin authorization required.');
+    const cleanSectionId = sanitizeRuleId(sectionId, 'custom').slice(0, 40);
+    const docPayload: Record<string, unknown> = {
+      ...payload,
+      section: cleanSectionId,
+      updatedAt: serverTimestamp(),
+    };
+    const sectionRef = doc(db, 'platform_config', cleanSectionId);
+    try {
+      try {
+        await setDoc(sectionRef, docPayload);
+      } catch (firstErr) {
+        if (auth.currentUser) {
+          await auth.currentUser.getIdToken(true);
+          await setDoc(sectionRef, docPayload);
+        } else {
+          throw firstErr;
+        }
+      }
+      await recordAdminAudit({
+        action: 'CONFIG_SECTION_UPDATED',
+        targetUid: '',
+        targetLabel: `platform_config/${cleanSectionId}`,
+        details: `Updated modular config section "${cleanSectionId}"`,
+        amountUsd: 0,
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `platform_config/${cleanSectionId}`);
     }
   };
 
@@ -5848,6 +6321,590 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
+  // =========================================================================
+  // Meme Launchpad & ATXBooster Engine Transactional Operations
+  // =========================================================================
+
+  const launchMemeToken = async (params: {
+    name: string;
+    ticker: string;
+    chain: MemeLaunchpadChain;
+    description: string;
+    logoUrl: string;
+    accentColor: string;
+    telegramUrl: string;
+    twitterUrl: string;
+    websiteUrl: string;
+    creatorAddress: string;
+    initialBuyUsd: number;
+    lockDays: number;
+  }): Promise<MemeLaunchpadToken> => {
+    if (!authUser || !userProfile) throw new Error('Sign in with a verified AlphaTradex account to launch a token.');
+    if (userProfile.suspended) {
+      throw new Error(`Account suspended: ${userProfile.suspensionReason || 'Contact support.'}`);
+    }
+    const lpCfg = platformConfig.memeLaunchpadConfig || DEFAULT_MEME_LAUNCHPAD_CONFIG;
+    if (!lpCfg.enabled || !lpCfg.allowUserLaunches) {
+      throw new Error('New Meme Launchpad deployments are temporarily paused by administration.');
+    }
+    const cleanName = params.name.trim().slice(0, 64);
+    const cleanTicker = params.ticker.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 16);
+    if (cleanName.length < 2) throw new Error('Token name must be at least 2 characters.');
+    if (cleanTicker.length < 2) throw new Error('Ticker must be 2–16 uppercase alphanumeric characters.');
+
+    const launchFeeUsd = Number(Math.max(0, lpCfg.launchFeeUsd || 0).toFixed(2));
+    const initialBuyUsd = Number(Math.max(0, Math.min(250000, Number(params.initialBuyUsd) || 0)).toFixed(2));
+    const totalDebitUsd = Number((launchFeeUsd + initialBuyUsd).toFixed(2));
+
+    if (userProfile.usdBalance < totalDebitUsd) {
+      throw new Error(
+        `Insufficient Deposit Wallet balance. Need $${totalDebitUsd.toFixed(2)} ($${launchFeeUsd.toFixed(
+          2
+        )} launch fee + $${initialBuyUsd.toFixed(2)} initial buy).`
+      );
+    }
+
+    const tokenId = makeId('meme');
+    const graduationTargetUsd = Math.max(1000, Number(lpCfg.graduationTargetUsd || 69000));
+    const raisedUsd = initialBuyUsd;
+    const progressPercent = Number(Math.min(100, (raisedUsd / graduationTargetUsd) * 100).toFixed(2));
+    const marketCapUsd = Number((12500 + raisedUsd * 2.4).toFixed(2));
+    const safeStatus: MemeLaunchpadStatus = 'live';
+    const lockDays = Math.max(0, Math.min(3650, Math.round(Number(params.lockDays) || lpCfg.defaultLockDays || 365)));
+    const creatorAddress =
+      params.creatorAddress.trim().slice(0, 120) ||
+      (params.chain === 'BSC'
+        ? `0x${authUser.uid.replace(/[^a-fA-F0-9]/g, '').padEnd(40, 'a').slice(0, 40)}`
+        : `${authUser.uid.replace(/[^a-zA-Z0-9]/g, '').padEnd(44, 'X').slice(0, 44)}`);
+
+    const tokenPayload: Omit<MemeLaunchpadToken, 'id'> = {
+      name: cleanName,
+      ticker: cleanTicker,
+      chain: params.chain === 'BSC' ? 'BSC' : 'Solana',
+      description: params.description.trim().slice(0, 600) || `Fair-launch meme token on ${params.chain} via alphatradex.pro.`,
+      logoUrl: params.logoUrl.trim().slice(0, 260000),
+      accentColor: params.accentColor.trim().slice(0, 24) || '#f59e0b',
+      telegramUrl: params.telegramUrl.trim().slice(0, 240),
+      twitterUrl: params.twitterUrl.trim().slice(0, 240),
+      websiteUrl: params.websiteUrl.trim().slice(0, 240),
+      creatorUid: authUser.uid,
+      creatorHandle: (userProfile.handle || 'CREATOR').slice(0, 32),
+      creatorAddress,
+      status: safeStatus,
+      dexListingStatus: 'pending',
+      contractAddress: '',
+      dexName: '',
+      dexPairUrl: '',
+      featured: false,
+      liquidityLocked: lockDays > 0,
+      lockDays,
+      antiRugAudit: true,
+      raisedUsd,
+      graduationTargetUsd,
+      marketCapUsd,
+      volume24hUsd: initialBuyUsd,
+      progressPercent,
+      holdersCount: initialBuyUsd > 0 ? 1 : 0,
+      initialBuyUsd,
+      launchFeePaidUsd: launchFeeUsd,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    try {
+      await runTransaction(db, async (tx) => {
+        const userRef = doc(db, 'users', authUser.uid);
+        const userSnap = await tx.get(userRef);
+        if (!userSnap.exists()) throw new Error('User profile missing.');
+        const cur = userSnap.data() as UserProfile;
+        if (cur.usdBalance < totalDebitUsd) {
+          throw new Error('Insufficient Deposit Wallet balance for launch.');
+        }
+
+        if (totalDebitUsd > 0) {
+          tx.update(userRef, {
+            usdBalance: Number(Math.max(0, cur.usdBalance - totalDebitUsd).toFixed(2)),
+            updatedAt: serverTimestamp(),
+          });
+        }
+
+        tx.set(doc(db, 'memeLaunchpadTokens', tokenId), tokenPayload);
+
+        if (initialBuyUsd > 0) {
+          const priceUsd = Number((marketCapUsd / 1_000_000_000).toFixed(8));
+          const tokenQuantity = Number((initialBuyUsd / Math.max(priceUsd, 0.00000001)).toFixed(2));
+          tx.set(doc(db, 'memeLaunchpadTrades', makeId('lptrade')), {
+            uid: authUser.uid,
+            userName: cur.fullName.slice(0, 120),
+            tokenId,
+            tokenTicker: cleanTicker,
+            chain: tokenPayload.chain,
+            side: 'buy',
+            amountUsd: initialBuyUsd,
+            feeUsd: 0,
+            netUsd: initialBuyUsd,
+            tokenQuantity,
+            priceUsd,
+            createdAt: serverTimestamp(),
+          });
+        }
+      });
+      return { id: tokenId, ...tokenPayload };
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `memeLaunchpadTokens/${tokenId}`);
+      throw err;
+    }
+  };
+
+  const tradeMemeLaunchpadToken = async (params: {
+    token: MemeLaunchpadToken;
+    side: 'buy' | 'sell';
+    amountUsd: number;
+  }): Promise<{ tokenQuantity: number; feeUsd: number; newProgress: number }> => {
+    if (!authUser || !userProfile) throw new Error('Sign in with a verified AlphaTradex account to trade.');
+    if (userProfile.suspended) {
+      throw new Error(`Account suspended: ${userProfile.suspensionReason || 'Contact support.'}`);
+    }
+    const { token, side } = params;
+    const amountUsd = Number(Number(params.amountUsd || 0).toFixed(2));
+    if (!Number.isFinite(amountUsd) || amountUsd < 5) {
+      throw new Error('Minimum launchpad order is $5.00.');
+    }
+    if (token.status !== 'live') {
+      throw new Error(`Token $${token.ticker} is currently ${token.status} and not accepting bonding curve orders.`);
+    }
+
+    const lpCfg = platformConfig.memeLaunchpadConfig || DEFAULT_MEME_LAUNCHPAD_CONFIG;
+    const feePct = Math.max(0, Math.min(15, Number(lpCfg.tradingFeePercent ?? 1.0)));
+    const feeUsd = Number(((amountUsd * feePct) / 100).toFixed(2));
+    const netUsd = Number(Math.max(0.01, amountUsd - feeUsd).toFixed(2));
+    const unitPrice = Math.max(0.0000001, Number(((token.marketCapUsd || 15000) / 1_000_000_000).toFixed(8)));
+    const tokenQuantity = Number((netUsd / unitPrice).toFixed(2));
+    const tradeId = makeId('lptrade');
+
+    if (side === 'buy' && userProfile.usdBalance < amountUsd) {
+      throw new Error(`Insufficient Deposit Wallet balance. Need $${amountUsd.toFixed(2)}.`);
+    }
+
+    // If token is a curated showcase preview (not yet persisted in Firestore), execute trade against user balance & log trade cleanly
+    const isShowcase = token.id.startsWith('showcase_');
+    let newProgress = token.progressPercent;
+
+    try {
+      await runTransaction(db, async (tx) => {
+        const userRef = doc(db, 'users', authUser.uid);
+        const userSnap = await tx.get(userRef);
+        if (!userSnap.exists()) throw new Error('User profile missing.');
+        const cur = userSnap.data() as UserProfile;
+
+        const tokenRef = doc(db, 'memeLaunchpadTokens', token.id);
+        const tokenSnap = isShowcase ? null : await tx.get(tokenRef);
+
+        if (side === 'buy') {
+          if (cur.usdBalance < amountUsd) throw new Error('Insufficient Deposit Wallet balance.');
+          tx.update(userRef, {
+            usdBalance: Number(Math.max(0, cur.usdBalance - amountUsd).toFixed(2)),
+            updatedAt: serverTimestamp(),
+          });
+        } else {
+          // Verify user bought at least this amount on this token
+          const netBought = launchpadTrades
+            .filter((t) => t.tokenId === token.id)
+            .reduce((acc, t) => acc + (t.side === 'buy' ? t.netUsd : -t.amountUsd), 0);
+          if (netBought < amountUsd) {
+            throw new Error(`Insufficient $${token.ticker} launchpad position to sell $${amountUsd.toFixed(2)}.`);
+          }
+          tx.update(userRef, {
+            usdBalance: Number((cur.usdBalance + netUsd).toFixed(2)),
+            updatedAt: serverTimestamp(),
+          });
+        }
+
+        if (tokenSnap && tokenSnap.exists()) {
+          const liveTok = tokenSnap.data() as MemeLaunchpadToken;
+          const nextRaised = Number(
+            Math.max(0, liveTok.raisedUsd + (side === 'buy' ? netUsd : -netUsd)).toFixed(2)
+          );
+          const target = Math.max(1000, liveTok.graduationTargetUsd || 69000);
+          const nextProg = Number(Math.min(100, (nextRaised / target) * 100).toFixed(2));
+          newProgress = nextProg;
+          const nextMcap = Number(Math.max(12500, 12500 + nextRaised * 2.4).toFixed(2));
+          const nextVol = Number((liveTok.volume24hUsd + amountUsd).toFixed(2));
+          const nextHolders = Math.max(0, liveTok.holdersCount + (side === 'buy' ? 1 : 0));
+          const nextStatus: MemeLaunchpadStatus = nextProg >= 100 ? 'graduated' : 'live';
+
+          tx.update(tokenRef, {
+            raisedUsd: nextRaised,
+            marketCapUsd: nextMcap,
+            volume24hUsd: nextVol,
+            progressPercent: nextProg,
+            holdersCount: nextHolders,
+            status: nextStatus,
+            updatedAt: serverTimestamp(),
+          });
+        } else {
+          const nextRaised = Math.max(0, token.raisedUsd + (side === 'buy' ? netUsd : -netUsd));
+          newProgress = Number(Math.min(100, (nextRaised / Math.max(1000, token.graduationTargetUsd)) * 100).toFixed(2));
+        }
+
+        tx.set(doc(db, 'memeLaunchpadTrades', tradeId), {
+          uid: authUser.uid,
+          userName: cur.fullName.slice(0, 120),
+          tokenId: token.id,
+          tokenTicker: token.ticker,
+          chain: token.chain,
+          side,
+          amountUsd,
+          feeUsd,
+          netUsd,
+          tokenQuantity,
+          priceUsd: unitPrice,
+          createdAt: serverTimestamp(),
+        });
+      });
+
+      return { tokenQuantity, feeUsd, newProgress };
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `memeLaunchpadTrades/${tradeId}`);
+      throw err;
+    }
+  };
+
+  const adminUpdateLaunchpadToken = async (
+    tokenId: string,
+    patch: Partial<
+      Pick<
+        MemeLaunchpadToken,
+        | 'status'
+        | 'featured'
+        | 'liquidityLocked'
+        | 'antiRugAudit'
+        | 'lockDays'
+        | 'dexListingStatus'
+        | 'contractAddress'
+        | 'dexName'
+        | 'dexPairUrl'
+      >
+    >
+  ) => {
+    if (!authUser || !isAdminUser) throw new Error('Super Admin authorization required.');
+    const cleanPatch: Record<string, unknown> = { updatedAt: serverTimestamp() };
+    if (patch.status !== undefined) cleanPatch.status = patch.status;
+    if (patch.featured !== undefined) cleanPatch.featured = Boolean(patch.featured);
+    if (patch.liquidityLocked !== undefined) cleanPatch.liquidityLocked = Boolean(patch.liquidityLocked);
+    if (patch.antiRugAudit !== undefined) cleanPatch.antiRugAudit = Boolean(patch.antiRugAudit);
+    if (patch.lockDays !== undefined) {
+      cleanPatch.lockDays = Math.max(0, Math.min(3650, Math.round(Number(patch.lockDays) || 0)));
+    }
+    if (patch.contractAddress !== undefined) {
+      cleanPatch.contractAddress = patch.contractAddress.trim().slice(0, 128);
+    }
+    if (patch.dexName !== undefined) {
+      cleanPatch.dexName = patch.dexName.trim().slice(0, 60);
+    }
+    if (patch.dexPairUrl !== undefined) {
+      const cleanUrl = patch.dexPairUrl.trim().slice(0, 300);
+      if (cleanUrl && !/^https?:\/\//i.test(cleanUrl)) {
+        throw new Error('DEX Pair URL must start with https:// or http://.');
+      }
+      cleanPatch.dexPairUrl = cleanUrl;
+    }
+    if (patch.dexListingStatus !== undefined) {
+      const nextDexStatus = patch.dexListingStatus === 'listed' ? 'listed' : 'pending';
+      if (
+        nextDexStatus === 'listed' &&
+        patch.contractAddress !== undefined &&
+        !patch.contractAddress.trim()
+      ) {
+        throw new Error(
+          'Enter the deployed BSC or Solana smart contract address before marking this token as Listed on DEX.'
+        );
+      }
+      cleanPatch.dexListingStatus = nextDexStatus;
+    }
+    try {
+      await updateDoc(doc(db, 'memeLaunchpadTokens', tokenId), cleanPatch);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `memeLaunchpadTokens/${tokenId}`);
+    }
+  };
+
+  const adminDeleteLaunchpadToken = async (tokenId: string) => {
+    if (!authUser || !isAdminUser) throw new Error('Super Admin authorization required.');
+    try {
+      await deleteDoc(doc(db, 'memeLaunchpadTokens', tokenId));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `memeLaunchpadTokens/${tokenId}`);
+    }
+  };
+
+  const activateBoosterNode = async (
+    tier: BoosterTierConfig,
+    fundingSource: PackageFundingSource = 'deposit_wallet',
+    turboMode = true
+  ) => {
+    if (!authUser || !userProfile) throw new Error('Authentication required.');
+    if (userProfile.suspended) {
+      throw new Error(`Account suspended: ${userProfile.suspensionReason || 'Contact compliance support.'}`);
+    }
+    assertKycPolicyAllowed('packages', userProfile);
+    const bCfg = platformConfig.boosterConfig || DEFAULT_BOOSTER_CONFIG;
+    if (!bCfg.enabled || platformConfig.globalPaused) {
+      throw new Error(`${bCfg.brandName || 'ATXBooster'} activations are temporarily paused by administration.`);
+    }
+    if (!tier.enabled) throw new Error('Selected booster tier is currently disabled.');
+
+    if (fundingSource === 'deposit_wallet' && userProfile.usdBalance < tier.capital) {
+      throw new Error(
+        `Insufficient Deposit Wallet balance. Need $${(tier.capital - userProfile.usdBalance).toFixed(2)} more.`
+      );
+    }
+    if (fundingSource === 'income_wallet' && userProfile.profitBalance < tier.capital) {
+      throw new Error(
+        `Insufficient Income Wallet balance. Need $${(tier.capital - userProfile.profitBalance).toFixed(2)} more.`
+      );
+    }
+    if (fundingSource === 'combined' && userProfile.usdBalance + userProfile.profitBalance < tier.capital) {
+      throw new Error(
+        `Insufficient combined wallet balance. Need $${(
+          tier.capital -
+          (userProfile.usdBalance + userProfile.profitBalance)
+        ).toFixed(2)} more.`
+      );
+    }
+
+    const nodeId = makeId('bnode');
+    const boosterBrandSnapshot = (bCfg.brandName || 'ATXBooster').trim().slice(0, 60);
+
+    try {
+      await runTransaction(db, async (tx) => {
+        const userRef = doc(db, 'users', authUser.uid);
+        const userSnap = await tx.get(userRef);
+        if (!userSnap.exists()) throw new Error('Profile missing.');
+        const current = userSnap.data() as UserProfile;
+
+        let deductDeposit = 0;
+        let deductIncome = 0;
+        if (fundingSource === 'deposit_wallet') {
+          if (current.usdBalance < tier.capital) throw new Error('Insufficient Deposit Wallet balance.');
+          deductDeposit = tier.capital;
+        } else if (fundingSource === 'income_wallet') {
+          if (current.profitBalance < tier.capital) throw new Error('Insufficient Income Wallet balance.');
+          deductIncome = tier.capital;
+        } else {
+          if (current.usdBalance + current.profitBalance < tier.capital) {
+            throw new Error('Insufficient combined wallet balance.');
+          }
+          deductDeposit = Number(Math.min(current.usdBalance, tier.capital).toFixed(2));
+          deductIncome = Number((tier.capital - deductDeposit).toFixed(2));
+        }
+
+        const uplines: { uid: string; level: number; rate: number; snapData: UserProfile }[] = [];
+        const rates = [platformConfig.mlmRates.level1, platformConfig.mlmRates.level2, platformConfig.mlmRates.level3];
+        for (let i = 0; i < Math.min(3, (current.uplineChain || []).length); i++) {
+          const upUid = current.uplineChain[i];
+          const rate = rates[i] || 0;
+          if (!upUid || rate <= 0) continue;
+          const upSnap = await tx.get(doc(db, 'users', upUid));
+          if (upSnap.exists()) {
+            uplines.push({ uid: upUid, level: i + 1, rate, snapData: upSnap.data() as UserProfile });
+          }
+        }
+
+        const refSnapshots = [];
+        for (const u of uplines) {
+          const refLinkRef = doc(db, 'referrals', `${authUser.uid}_L${u.level}`);
+          const rSnap = await tx.get(refLinkRef);
+          if (rSnap.exists()) {
+            refSnapshots.push({ ref: refLinkRef, data: rSnap.data() as ReferralLinkRecord });
+          }
+        }
+
+        tx.update(userRef, {
+          usdBalance: Number(Math.max(0, current.usdBalance - deductDeposit).toFixed(2)),
+          profitBalance: Number(Math.max(0, current.profitBalance - deductIncome).toFixed(2)),
+          totalInvested: Number((current.totalInvested + tier.capital).toFixed(2)),
+          updatedAt: serverTimestamp(),
+        });
+
+        tx.set(doc(db, 'boosterNodes', nodeId), {
+          uid: authUser.uid,
+          userName: current.fullName.slice(0, 120),
+          tierId: sanitizeRuleId(tier.id, 'spark_core'),
+          tierName: tier.name.slice(0, 80),
+          boosterBrandSnapshot,
+          capital: tier.capital,
+          dailyPercent: tier.dailyPercent,
+          boostPowerLabel: tier.boostPowerLabel.slice(0, 40),
+          totalProfitDays: tier.profitDays || platformConfig.totalProfitDays || 200,
+          capitalLockDays: tier.capitalLockDays || 70,
+          turboMode: Boolean(turboMode),
+          claimedProfit: 0,
+          status: 'active',
+          startedAtMs: Date.now(),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+
+        const mentorCfg = platformConfig.mentorConfig || DEFAULT_PLATFORM_CONFIG.mentorConfig;
+        for (const u of uplines) {
+          const refCommUsd = Number(((tier.capital * u.rate) / 100).toFixed(2));
+          const isLevel1Mentor =
+            u.level === 1 &&
+            Boolean(u.snapData.isMentor) &&
+            Boolean(mentorCfg.enabled) &&
+            Number(mentorCfg.mentorCommissionPercent) > 0;
+          const mentorBonusUsd = isLevel1Mentor
+            ? Number(((tier.capital * mentorCfg.mentorCommissionPercent) / 100).toFixed(2))
+            : 0;
+          const totalCredit = Number((refCommUsd + mentorBonusUsd).toFixed(2));
+          const addedVolume = u.level === 1 ? tier.capital : 0;
+
+          if (totalCredit > 0 || addedVolume > 0) {
+            tx.update(doc(db, 'users', u.uid), {
+              profitBalance: Number((u.snapData.profitBalance + totalCredit).toFixed(2)),
+              mentorBroughtVolume: Number(((u.snapData.mentorBroughtVolume || 0) + addedVolume).toFixed(2)),
+              updatedAt: serverTimestamp(),
+            });
+          }
+
+          if (refCommUsd > 0) {
+            tx.set(doc(db, 'mlmCommissions', makeId(`mlmB${u.level}`)), {
+              beneficiaryUid: u.uid,
+              fromUid: authUser.uid,
+              fromName: current.fullName,
+              level: u.level,
+              commissionType: 'referral',
+              investmentAmount: tier.capital,
+              ratePercent: u.rate,
+              commissionUsd: refCommUsd,
+              createdAt: serverTimestamp(),
+            });
+          }
+
+          if (mentorBonusUsd > 0) {
+            tx.set(doc(db, 'mlmCommissions', makeId('mentorB')), {
+              beneficiaryUid: u.uid,
+              fromUid: authUser.uid,
+              fromName: current.fullName,
+              level: 1,
+              commissionType: 'mentor',
+              investmentAmount: tier.capital,
+              ratePercent: mentorCfg.mentorCommissionPercent,
+              commissionUsd: mentorBonusUsd,
+              createdAt: serverTimestamp(),
+            });
+          }
+        }
+
+        for (const r of refSnapshots) {
+          tx.update(r.ref, {
+            totalInvestedUsd: Number(((r.data.totalInvestedUsd || 0) + tier.capital).toFixed(2)),
+            updatedAt: serverTimestamp(),
+          });
+        }
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `boosterNodes/${nodeId}`);
+      throw err;
+    }
+  };
+
+  const claimBoosterProfit = async (node: BoosterNode): Promise<number> => {
+    if (!authUser || !userProfile) throw new Error('Authentication required.');
+    assertKycPolicyAllowed('claims', userProfile);
+
+    const metrics = computeInvestmentMetrics(
+      {
+        id: node.id,
+        uid: node.uid,
+        packageNumber: 1,
+        packageId: node.tierId,
+        packageName: node.tierName,
+        capital: node.capital,
+        dailyPercent: node.dailyPercent,
+        aiMode: node.boostPowerLabel,
+        totalProfitDays: node.totalProfitDays,
+        capitalLockDays: node.capitalLockDays,
+        isMentorGifted: false,
+        claimedProfit: node.claimedProfit,
+        status: node.status,
+        startedAtMs: node.startedAtMs,
+      },
+      platformConfig.globalPaused
+    );
+
+    if (metrics.unclaimedProfit < 0.01) {
+      throw new Error('No weekday rewards ready to claim yet. Settlements accrue Monday–Friday.');
+    }
+
+    let claimedNow = 0;
+    try {
+      await runTransaction(db, async (tx) => {
+        const userRef = doc(db, 'users', authUser.uid);
+        const nodeRef = doc(db, 'boosterNodes', node.id);
+        const [userSnap, nodeSnap] = await Promise.all([tx.get(userRef), tx.get(nodeRef)]);
+        if (!userSnap.exists() || !nodeSnap.exists()) throw new Error('Booster record missing.');
+        const curUser = userSnap.data() as UserProfile;
+        const curNode = nodeSnap.data() as BoosterNode;
+
+        const freshMetrics = computeInvestmentMetrics(
+          {
+            id: node.id,
+            uid: curNode.uid,
+            packageNumber: 1,
+            packageId: curNode.tierId,
+            packageName: curNode.tierName,
+            capital: curNode.capital,
+            dailyPercent: curNode.dailyPercent,
+            aiMode: curNode.boostPowerLabel,
+            totalProfitDays: curNode.totalProfitDays,
+            capitalLockDays: curNode.capitalLockDays,
+            isMentorGifted: false,
+            claimedProfit: curNode.claimedProfit,
+            status: curNode.status,
+            startedAtMs: curNode.startedAtMs,
+          },
+          platformConfig.globalPaused
+        );
+
+        claimedNow = Number(freshMetrics.unclaimedProfit.toFixed(2));
+        if (claimedNow < 0.01) throw new Error('No accrued weekday profit available.');
+
+        const nextClaimed = Number((curNode.claimedProfit + claimedNow).toFixed(2));
+        const nextStatus: BoosterNode['status'] =
+          freshMetrics.completedProfitDays >= curNode.totalProfitDays ? 'completed' : 'active';
+
+        tx.update(nodeRef, {
+          claimedProfit: nextClaimed,
+          status: nextStatus,
+          updatedAt: serverTimestamp(),
+        });
+
+        tx.update(userRef, {
+          profitBalance: Number((curUser.profitBalance + claimedNow).toFixed(2)),
+          updatedAt: serverTimestamp(),
+        });
+      });
+      return claimedNow;
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `boosterNodes/${node.id}`);
+      throw err;
+    }
+  };
+
+  const toggleBoosterNodeTurbo = async (nodeId: string, turboMode: boolean) => {
+    if (!authUser) throw new Error('Authentication required.');
+    try {
+      await updateDoc(doc(db, 'boosterNodes', nodeId), {
+        turboMode: Boolean(turboMode),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `boosterNodes/${nodeId}`);
+    }
+  };
+
   return (
     <PlatformContext.Provider
       value={{
@@ -5882,6 +6939,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         missionProfile,
         priceAlerts,
         promoRedemptions,
+        launchpadTokens,
+        launchpadTrades,
+        boosterNodes,
         signInWithGoogle,
         signInWithEmail,
         signUpWithKyc,
@@ -5916,6 +6976,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         claimCopyTradeProfit,
         stopCopyTrade,
         updatePlatformConfig,
+        updatePlatformConfigSection,
         approveCryptoDeposit,
         rejectCryptoDeposit,
         approveKyc,
@@ -5959,6 +7020,13 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         createPromoCode,
         updatePromoCode,
         deletePromoCode,
+        launchMemeToken,
+        tradeMemeLaunchpadToken,
+        adminUpdateLaunchpadToken,
+        adminDeleteLaunchpadToken,
+        activateBoosterNode,
+        claimBoosterProfit,
+        toggleBoosterNodeTurbo,
       }}
     >
       {children}

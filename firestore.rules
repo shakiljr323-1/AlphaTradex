@@ -38,7 +38,9 @@ service cloud.firestore {
 
     function isAdmin() {
       return isVerifiedUser() && (
-        request.auth.token.email == 'shakiljr323@gmail.com' ||
+        request.auth.token.admin == true ||
+        request.auth.token.role == 'admin' ||
+        (request.auth.token.email is string && request.auth.token.email.lower() == 'shakiljr323@gmail.com') ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
     }
@@ -55,313 +57,14 @@ service cloud.firestore {
     // Entity Validation Blueprints
     // =========================================================================
 
-    function isValidPlatformConfig(data) {
-      return data.keys().hasAll([
-        'companyName', 'companyTagline', 'companyDescription', 'companyGoal',
-        'riskDisclosure', 'trustpilotScore', 'trustpilotReviews', 'nortonScore',
-        'isoScore', 'certikScore', 'minWithdrawalUsd', 'eliteCapitalLockDays',
-        'totalProfitDays', 'globalPaused', 'packages', 'mlmRates',
-        'depositWallets', 'pumpFunToken', 'updatedAt'
-      ]) && data.keys().hasOnly([
-        'companyName', 'companyTagline', 'companyDescription', 'companyGoal',
-        'riskDisclosure', 'trustpilotScore', 'trustpilotReviews', 'nortonScore',
-        'isoScore', 'certikScore', 'minWithdrawalUsd', 'eliteCapitalLockDays',
-        'totalProfitDays', 'globalPaused', 'depositsPaused', 'withdrawalsPaused', 'signupsPaused', 'p2pPaused',
-        'moduleControls', 'supportLinks', 'packages', 'mlmRates', 'mentorConfig',
-        'depositWallets', 'paymentMethods', 'pumpFunToken', 'dashboardAnnouncement',
-        'bannerAds', 'coinMiningSettings', 'coinMiningPlans', 'forexConfig',
-        'supportAutoResponder', 'kycSettings', 'marketingCardsConfig', 'howItWorksConfig',
-        'leaderboardConfig', 'web3PaymentConfig', 'updatedAt'
-      ])
-      && isNonEmptyString(data.companyName, 120)
-      && isBoundedString(data.companyTagline, 200)
-      && isBoundedString(data.companyDescription, 1500)
-      && isBoundedString(data.companyGoal, 1500)
-      && isBoundedString(data.riskDisclosure, 1500)
-      && data.trustpilotScore is number && data.trustpilotScore >= 0 && data.trustpilotScore <= 5
-      && data.trustpilotReviews is number && data.trustpilotReviews >= 0
-      && data.nortonScore is number && data.nortonScore >= 0 && data.nortonScore <= 5
-      && data.isoScore is number && data.isoScore >= 0 && data.isoScore <= 5
-      && data.certikScore is number && data.certikScore >= 0 && data.certikScore <= 5
-      && data.minWithdrawalUsd is number && data.minWithdrawalUsd >= 1
-      && data.eliteCapitalLockDays is number && data.eliteCapitalLockDays >= 1
-      && data.totalProfitDays is number && data.totalProfitDays >= 1
-      && data.globalPaused is bool
-      && (!('depositsPaused' in data) || data.depositsPaused is bool)
-      && (!('withdrawalsPaused' in data) || data.withdrawalsPaused is bool)
-      && (!('signupsPaused' in data) || data.signupsPaused is bool)
-      && (!('p2pPaused' in data) || data.p2pPaused is bool)
-      && (!('moduleControls' in data) || (
-        data.moduleControls is map &&
-        data.moduleControls.keys().hasAll([
-          'aiTradingEnabled', 'forexMarketEnabled', 'coinMiningEnabled',
-          'p2pEnabled', 'requireSignupForTradingModules'
-        ]) &&
-        data.moduleControls.keys().hasOnly([
-          'aiTradingEnabled', 'forexMarketEnabled', 'coinMiningEnabled',
-          'p2pEnabled', 'requireSignupForTradingModules'
-        ]) &&
-        data.moduleControls.aiTradingEnabled is bool &&
-        data.moduleControls.forexMarketEnabled is bool &&
-        data.moduleControls.coinMiningEnabled is bool &&
-        data.moduleControls.p2pEnabled is bool &&
-        data.moduleControls.requireSignupForTradingModules is bool
-      ))
-      && (!('supportLinks' in data) || (
-        data.supportLinks is map &&
-        data.supportLinks.keys().hasAll(['telegramUrl', 'whatsappUrl', 'supportEmail']) &&
-        data.supportLinks.keys().hasOnly(['telegramUrl', 'whatsappUrl', 'supportEmail']) &&
-        isBoundedString(data.supportLinks.telegramUrl, 250) &&
-        isBoundedString(data.supportLinks.whatsappUrl, 250) &&
-        isBoundedString(data.supportLinks.supportEmail, 254)
-      ))
-      && data.packages is list && data.packages.size() >= 1 && data.packages.size() <= 25
-      && data.packages[0] is map
-      && data.mlmRates is map
-      && (!('mentorConfig' in data) || (
-        data.mentorConfig is map &&
-        data.mentorConfig.keys().hasAll([
-          'enabled', 'mentorCommissionPercent', 'volumeMultiplier',
-          'defaultGiftCapital', 'defaultDailyPercent'
-        ]) &&
-        data.mentorConfig.keys().hasOnly([
-          'enabled', 'mentorCommissionPercent', 'volumeMultiplier',
-          'defaultGiftCapital', 'defaultDailyPercent'
-        ]) &&
-        data.mentorConfig.enabled is bool &&
-        data.mentorConfig.mentorCommissionPercent is number &&
-        data.mentorConfig.mentorCommissionPercent >= 0 &&
-        data.mentorConfig.mentorCommissionPercent <= 50 &&
-        data.mentorConfig.volumeMultiplier is number &&
-        data.mentorConfig.volumeMultiplier >= 1 &&
-        data.mentorConfig.volumeMultiplier <= 20 &&
-        data.mentorConfig.defaultGiftCapital is number &&
-        data.mentorConfig.defaultGiftCapital >= 1 &&
-        data.mentorConfig.defaultDailyPercent is number &&
-        data.mentorConfig.defaultDailyPercent >= 0.1 &&
-        data.mentorConfig.defaultDailyPercent <= 50
-      ))
-      && data.depositWallets is map
-      && (!('paymentMethods' in data) || (
-        data.paymentMethods is list &&
-        data.paymentMethods.size() >= 1 &&
-        data.paymentMethods.size() <= 25 &&
-        data.paymentMethods[0] is map
-      ))
-      && (!('dashboardAnnouncement' in data) || (
-        data.dashboardAnnouncement is map &&
-        data.dashboardAnnouncement.keys().hasAll(['enabled', 'tone', 'title', 'message']) &&
-        data.dashboardAnnouncement.keys().hasOnly(['enabled', 'tone', 'title', 'message', 'updatedBy']) &&
-        data.dashboardAnnouncement.enabled is bool &&
-        data.dashboardAnnouncement.tone in ['info', 'warning', 'urgent', 'success'] &&
-        isBoundedString(data.dashboardAnnouncement.title, 120) &&
-        isBoundedString(data.dashboardAnnouncement.message, 500) &&
-        (!('updatedBy' in data.dashboardAnnouncement) || isBoundedString(data.dashboardAnnouncement.updatedBy, 120))
-      ))
-      && (!('bannerAds' in data) || (
-        data.bannerAds is list &&
-        data.bannerAds.size() <= 15 &&
-        (data.bannerAds.size() == 0 || data.bannerAds[0] is map)
-      ))
-      && (!('coinMiningSettings' in data) || (
-        data.coinMiningSettings is map &&
-        data.coinMiningSettings.keys().hasAll([
-          'paidMiningEnabled', 'tapToMineEnabled', 'tapRewardCoins',
-          'tapUsdPerCoin', 'maxEnergy', 'energyCostPerTap',
-          'energyRegenPerSec', 'dailyTapLimitCoins'
-        ]) &&
-        data.coinMiningSettings.keys().hasOnly([
-          'paidMiningEnabled', 'tapToMineEnabled', 'tapRewardCoins',
-          'tapUsdPerCoin', 'maxEnergy', 'energyCostPerTap',
-          'energyRegenPerSec', 'dailyTapLimitCoins'
-        ]) &&
-        data.coinMiningSettings.paidMiningEnabled is bool &&
-        data.coinMiningSettings.tapToMineEnabled is bool &&
-        data.coinMiningSettings.tapRewardCoins is number && data.coinMiningSettings.tapRewardCoins >= 0.1 &&
-        data.coinMiningSettings.tapUsdPerCoin is number && data.coinMiningSettings.tapUsdPerCoin >= 0 &&
-        data.coinMiningSettings.maxEnergy is number && data.coinMiningSettings.maxEnergy >= 10 &&
-        data.coinMiningSettings.energyCostPerTap is number && data.coinMiningSettings.energyCostPerTap >= 1 &&
-        data.coinMiningSettings.energyRegenPerSec is number && data.coinMiningSettings.energyRegenPerSec >= 0 &&
-        data.coinMiningSettings.dailyTapLimitCoins is number && data.coinMiningSettings.dailyTapLimitCoins >= 1
-      ))
-      && (!('coinMiningPlans' in data) || (
-        data.coinMiningPlans is list &&
-        data.coinMiningPlans.size() <= 20 &&
-        (data.coinMiningPlans.size() == 0 || data.coinMiningPlans[0] is map)
-      ))
-      && (!('forexConfig' in data) || (
-        data.forexConfig is map &&
-        data.forexConfig.keys().hasAll(['tradingEnabled', 'copyTradingEnabled', 'accountTiers', 'copyTraders']) &&
-        data.forexConfig.keys().hasOnly(['tradingEnabled', 'copyTradingEnabled', 'accountTiers', 'copyTraders']) &&
-        data.forexConfig.tradingEnabled is bool &&
-        data.forexConfig.copyTradingEnabled is bool &&
-        data.forexConfig.accountTiers is list &&
-        data.forexConfig.accountTiers.size() >= 1 &&
-        data.forexConfig.accountTiers.size() <= 6 &&
-        data.forexConfig.accountTiers[0] is map &&
-        data.forexConfig.copyTraders is list &&
-        data.forexConfig.copyTraders.size() <= 20 &&
-        (data.forexConfig.copyTraders.size() == 0 || data.forexConfig.copyTraders[0] is map)
-      ))
-      && (!('supportAutoResponder' in data) || (
-        data.supportAutoResponder is map &&
-        data.supportAutoResponder.keys().hasAll([
-          'enabled', 'notifyOnStatusChange', 'senderName', 'subjectTemplate',
-          'bodyTemplate', 'slaUrgent', 'slaHigh', 'slaMedium', 'slaLow'
-        ]) &&
-        data.supportAutoResponder.keys().hasOnly([
-          'enabled', 'notifyOnStatusChange', 'senderName', 'subjectTemplate',
-          'bodyTemplate', 'slaUrgent', 'slaHigh', 'slaMedium', 'slaLow'
-        ]) &&
-        data.supportAutoResponder.enabled is bool &&
-        data.supportAutoResponder.notifyOnStatusChange is bool &&
-        isNonEmptyString(data.supportAutoResponder.senderName, 120) &&
-        isNonEmptyString(data.supportAutoResponder.subjectTemplate, 200) &&
-        isNonEmptyString(data.supportAutoResponder.bodyTemplate, 2000) &&
-        isNonEmptyString(data.supportAutoResponder.slaUrgent, 80) &&
-        isNonEmptyString(data.supportAutoResponder.slaHigh, 80) &&
-        isNonEmptyString(data.supportAutoResponder.slaMedium, 80) &&
-        isNonEmptyString(data.supportAutoResponder.slaLow, 80)
-      ))
-      && (!('kycSettings' in data) || (
-        data.kycSettings is map &&
-        data.kycSettings.keys().hasAll([
-          'enabled', 'requireKycForDeposits', 'requireKycForPackages', 'requireKycForClaims',
-          'requireKycForWithdrawals', 'allowFreeAiOcr', 'requireBackSideForCards',
-          'requireLiveSelfie', 'activeProvider', 'disabledCountryCodes'
-        ]) &&
-        data.kycSettings.keys().hasOnly([
-          'enabled', 'requireKycForDeposits', 'requireKycForPackages', 'requireKycForClaims',
-          'requireKycForWithdrawals', 'allowFreeAiOcr', 'requireBackSideForCards',
-          'requireLiveSelfie', 'activeProvider', 'disabledCountryCodes'
-        ]) &&
-        data.kycSettings.enabled is bool &&
-        data.kycSettings.requireKycForDeposits is bool &&
-        data.kycSettings.requireKycForPackages is bool &&
-        data.kycSettings.requireKycForClaims is bool &&
-        data.kycSettings.requireKycForWithdrawals is bool &&
-        data.kycSettings.allowFreeAiOcr is bool &&
-        data.kycSettings.requireBackSideForCards is bool &&
-        data.kycSettings.requireLiveSelfie is bool &&
-        data.kycSettings.activeProvider in ['free_qr_mrz_ocr', 'free_ai_ocr', 'didit_free', 'sumsub', 'veriff', 'shufti_pro', 'custom_webhook'] &&
-        data.kycSettings.disabledCountryCodes is list &&
-        data.kycSettings.disabledCountryCodes.size() <= 250 &&
-        (data.kycSettings.disabledCountryCodes.size() == 0 || data.kycSettings.disabledCountryCodes[0] is string)
-      ))
-      && (!('marketingCardsConfig' in data) || (
-        data.marketingCardsConfig is map &&
-        data.marketingCardsConfig.keys().hasAll([
-          'enabled', 'allowQrCode', 'allowReferralCode', 'allowRankBadge',
-          'allowPackageBadge', 'defaultHeadline', 'defaultTagline', 'disclaimerText', 'templates'
-        ]) &&
-        data.marketingCardsConfig.keys().hasOnly([
-          'enabled', 'allowQrCode', 'allowReferralCode', 'allowRankBadge',
-          'allowPackageBadge', 'defaultHeadline', 'defaultTagline', 'disclaimerText', 'templates'
-        ]) &&
-        data.marketingCardsConfig.enabled is bool &&
-        data.marketingCardsConfig.allowQrCode is bool &&
-        data.marketingCardsConfig.allowReferralCode is bool &&
-        data.marketingCardsConfig.allowRankBadge is bool &&
-        data.marketingCardsConfig.allowPackageBadge is bool &&
-        isBoundedString(data.marketingCardsConfig.defaultHeadline, 140) &&
-        isBoundedString(data.marketingCardsConfig.defaultTagline, 240) &&
-        isBoundedString(data.marketingCardsConfig.disclaimerText, 300) &&
-        data.marketingCardsConfig.templates is list &&
-        data.marketingCardsConfig.templates.size() <= 20 &&
-        (data.marketingCardsConfig.templates.size() == 0 || data.marketingCardsConfig.templates[0] is map)
-      ))
-      && (!('howItWorksConfig' in data) || (
-        data.howItWorksConfig is map &&
-        data.howItWorksConfig.keys().hasAll([
-          'enabled', 'showOnHomepage', 'defaultLanguage', 'disclaimerText', 'steps', 'videos'
-        ]) &&
-        data.howItWorksConfig.keys().hasOnly([
-          'enabled', 'showOnHomepage', 'defaultLanguage', 'disclaimerText', 'steps', 'videos'
-        ]) &&
-        data.howItWorksConfig.enabled is bool &&
-        data.howItWorksConfig.showOnHomepage is bool &&
-        data.howItWorksConfig.defaultLanguage in ['en', 'hi', 'es'] &&
-        isBoundedString(data.howItWorksConfig.disclaimerText, 360) &&
-        data.howItWorksConfig.steps is list &&
-        data.howItWorksConfig.steps.size() <= 8 &&
-        (data.howItWorksConfig.steps.size() == 0 || data.howItWorksConfig.steps[0] is map) &&
-        data.howItWorksConfig.videos is list &&
-        data.howItWorksConfig.videos.size() <= 10 &&
-        (data.howItWorksConfig.videos.size() == 0 || data.howItWorksConfig.videos[0] is map)
-      ))
-      && (!('leaderboardConfig' in data) || (
-        data.leaderboardConfig is map &&
-        data.leaderboardConfig.keys().hasAll([
-          'enabled', 'title', 'subtitle', 'activeTimeframe', 'maxVisibleRows',
-          'showReferralTab', 'showTradersTab', 'allowClientSelfRank', 'disclaimerText', 'entries'
-        ]) &&
-        data.leaderboardConfig.keys().hasOnly([
-          'enabled', 'title', 'subtitle', 'activeTimeframe', 'maxVisibleRows',
-          'showReferralTab', 'showTradersTab', 'allowClientSelfRank', 'disclaimerText',
-          'lastLiveSyncAtIso', 'entries'
-        ]) &&
-        data.leaderboardConfig.enabled is bool &&
-        isBoundedString(data.leaderboardConfig.title, 120) &&
-        isBoundedString(data.leaderboardConfig.subtitle, 220) &&
-        data.leaderboardConfig.activeTimeframe in ['weekly', 'monthly', 'all_time'] &&
-        data.leaderboardConfig.maxVisibleRows is number &&
-        data.leaderboardConfig.maxVisibleRows >= 3 &&
-        data.leaderboardConfig.maxVisibleRows <= 25 &&
-        data.leaderboardConfig.showReferralTab is bool &&
-        data.leaderboardConfig.showTradersTab is bool &&
-        data.leaderboardConfig.allowClientSelfRank is bool &&
-        isBoundedString(data.leaderboardConfig.disclaimerText, 360) &&
-        (!('lastLiveSyncAtIso' in data.leaderboardConfig) || isBoundedString(data.leaderboardConfig.lastLiveSyncAtIso, 64)) &&
-        data.leaderboardConfig.entries is list &&
-        data.leaderboardConfig.entries.size() <= 40 &&
-        (data.leaderboardConfig.entries.size() == 0 || data.leaderboardConfig.entries[0] is map)
-      ))
-      && (!('web3PaymentConfig' in data) || (
-        data.web3PaymentConfig is map &&
-        data.web3PaymentConfig.keys().hasAll([
-          'autoDepositEnabled', 'bep20Enabled', 'polygonEnabled',
-          'bep20ReceivingAddress', 'polygonReceivingAddress', 'trc20ReceivingAddress',
-          'minConfirmationsBsc', 'minConfirmationsPolygon',
-          'minDepositUsd', 'maxDepositUsd', 'minWithdrawalUsd', 'maxWithdrawalUsd',
-          'withdrawalFeePercent', 'withdrawalFlatFeeUsd',
-          'require2faForWithdrawals', 'requireKycForWithdrawals', 'requirePayoutTxHashOnApprove'
-        ]) &&
-        data.web3PaymentConfig.keys().hasOnly([
-          'autoDepositEnabled', 'bep20Enabled', 'polygonEnabled',
-          'bep20ReceivingAddress', 'polygonReceivingAddress', 'trc20ReceivingAddress',
-          'minConfirmationsBsc', 'minConfirmationsPolygon',
-          'minDepositUsd', 'maxDepositUsd', 'minWithdrawalUsd', 'maxWithdrawalUsd',
-          'withdrawalFeePercent', 'withdrawalFlatFeeUsd',
-          'require2faForWithdrawals', 'requireKycForWithdrawals', 'requirePayoutTxHashOnApprove',
-          'walletConnectProjectId'
-        ]) &&
-        data.web3PaymentConfig.autoDepositEnabled is bool &&
-        data.web3PaymentConfig.bep20Enabled is bool &&
-        data.web3PaymentConfig.polygonEnabled is bool &&
-        isBoundedString(data.web3PaymentConfig.bep20ReceivingAddress, 64) &&
-        data.web3PaymentConfig.bep20ReceivingAddress.matches('^(0x[a-fA-F0-9]{40})?$') &&
-        isBoundedString(data.web3PaymentConfig.polygonReceivingAddress, 64) &&
-        data.web3PaymentConfig.polygonReceivingAddress.matches('^(0x[a-fA-F0-9]{40})?$') &&
-        isBoundedString(data.web3PaymentConfig.trc20ReceivingAddress, 64) &&
-        data.web3PaymentConfig.minConfirmationsBsc is number &&
-        data.web3PaymentConfig.minConfirmationsBsc >= 1 && data.web3PaymentConfig.minConfirmationsBsc <= 30 &&
-        data.web3PaymentConfig.minConfirmationsPolygon is number &&
-        data.web3PaymentConfig.minConfirmationsPolygon >= 1 && data.web3PaymentConfig.minConfirmationsPolygon <= 60 &&
-        data.web3PaymentConfig.minDepositUsd is number && data.web3PaymentConfig.minDepositUsd >= 1 &&
-        data.web3PaymentConfig.maxDepositUsd is number && data.web3PaymentConfig.maxDepositUsd >= data.web3PaymentConfig.minDepositUsd &&
-        data.web3PaymentConfig.minWithdrawalUsd is number && data.web3PaymentConfig.minWithdrawalUsd >= 1 &&
-        data.web3PaymentConfig.maxWithdrawalUsd is number && data.web3PaymentConfig.maxWithdrawalUsd >= data.web3PaymentConfig.minWithdrawalUsd &&
-        data.web3PaymentConfig.withdrawalFeePercent is number &&
-        data.web3PaymentConfig.withdrawalFeePercent >= 0 && data.web3PaymentConfig.withdrawalFeePercent <= 15 &&
-        data.web3PaymentConfig.withdrawalFlatFeeUsd is number &&
-        data.web3PaymentConfig.withdrawalFlatFeeUsd >= 0 && data.web3PaymentConfig.withdrawalFlatFeeUsd <= 50 &&
-        data.web3PaymentConfig.require2faForWithdrawals is bool &&
-        data.web3PaymentConfig.requireKycForWithdrawals is bool &&
-        data.web3PaymentConfig.requirePayoutTxHashOnApprove is bool &&
-        (!('walletConnectProjectId' in data.web3PaymentConfig) || isBoundedString(data.web3PaymentConfig.walletConnectProjectId, 80))
-      ))
-      && data.pumpFunToken is map
-      && data.updatedAt == request.time;
+    // Lean modular validation blueprint for platform_config/{sectionId} & legacy config/{docId}.
+    // Keeps runtime expression evaluation under ~20 ops even with unlimited modules and meme coins.
+    function isValidPlatformConfigSection(data) {
+      return data is map
+        && data.keys().size() >= 1
+        && data.keys().size() <= 45
+        && data.updatedAt == request.time
+        && (!('section' in data) || isNonEmptyString(data.section, 40));
     }
 
     function isValidMarketingCardStats(data) {
@@ -864,6 +567,108 @@ service cloud.firestore {
       && data.createdAt == request.time;
     }
 
+    function isValidMemeLaunchpadToken(data) {
+      return data.keys().hasAll([
+        'name', 'ticker', 'chain', 'description', 'logoUrl', 'accentColor',
+        'telegramUrl', 'twitterUrl', 'websiteUrl', 'creatorUid', 'creatorHandle',
+        'creatorAddress', 'status', 'featured', 'liquidityLocked', 'lockDays',
+        'antiRugAudit', 'raisedUsd', 'graduationTargetUsd', 'marketCapUsd',
+        'volume24hUsd', 'progressPercent', 'holdersCount', 'initialBuyUsd',
+        'launchFeePaidUsd', 'createdAt', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'name', 'ticker', 'chain', 'description', 'logoUrl', 'accentColor',
+        'telegramUrl', 'twitterUrl', 'websiteUrl', 'creatorUid', 'creatorHandle',
+        'creatorAddress', 'status', 'dexListingStatus', 'contractAddress', 'dexName',
+        'dexPairUrl', 'featured', 'liquidityLocked', 'lockDays',
+        'antiRugAudit', 'raisedUsd', 'graduationTargetUsd', 'marketCapUsd',
+        'volume24hUsd', 'progressPercent', 'holdersCount', 'initialBuyUsd',
+        'launchFeePaidUsd', 'createdAt', 'updatedAt'
+      ])
+      && isNonEmptyString(data.name, 64)
+      && isNonEmptyString(data.ticker, 16) && data.ticker.matches('^[A-Z0-9]{2,16}$')
+      && data.chain in ['BSC', 'Solana']
+      && isBoundedString(data.description, 600)
+      && isBoundedString(data.logoUrl, 260000)
+      && isBoundedString(data.accentColor, 24)
+      && isBoundedString(data.telegramUrl, 240)
+      && isBoundedString(data.twitterUrl, 240)
+      && isBoundedString(data.websiteUrl, 240)
+      && isValidId(data.creatorUid)
+      && isBoundedString(data.creatorHandle, 32)
+      && isBoundedString(data.creatorAddress, 120)
+      && data.status in ['live', 'upcoming', 'graduated', 'delisted']
+      && (!('dexListingStatus' in data) || data.dexListingStatus in ['pending', 'listed'])
+      && (!('contractAddress' in data) || isBoundedString(data.contractAddress, 128))
+      && (!('dexName' in data) || isBoundedString(data.dexName, 60))
+      && (!('dexPairUrl' in data) || isBoundedString(data.dexPairUrl, 300))
+      && data.featured is bool
+      && data.liquidityLocked is bool
+      && data.lockDays is number && data.lockDays >= 0 && data.lockDays <= 3650
+      && data.antiRugAudit is bool
+      && data.raisedUsd is number && data.raisedUsd >= 0 && data.raisedUsd <= 100000000
+      && data.graduationTargetUsd is number && data.graduationTargetUsd >= 1000 && data.graduationTargetUsd <= 10000000
+      && data.marketCapUsd is number && data.marketCapUsd >= 0 && data.marketCapUsd <= 1000000000
+      && data.volume24hUsd is number && data.volume24hUsd >= 0 && data.volume24hUsd <= 1000000000
+      && data.progressPercent is number && data.progressPercent >= 0 && data.progressPercent <= 100
+      && data.holdersCount is number && data.holdersCount >= 0 && data.holdersCount <= 10000000
+      && data.initialBuyUsd is number && data.initialBuyUsd >= 0 && data.initialBuyUsd <= 1000000
+      && data.launchFeePaidUsd is number && data.launchFeePaidUsd >= 0 && data.launchFeePaidUsd <= 10000
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidMemeLaunchpadTrade(data) {
+      return data.keys().hasAll([
+        'uid', 'userName', 'tokenId', 'tokenTicker', 'chain', 'side',
+        'amountUsd', 'feeUsd', 'netUsd', 'tokenQuantity', 'priceUsd', 'createdAt'
+      ]) && data.keys().hasOnly([
+        'uid', 'userName', 'tokenId', 'tokenTicker', 'chain', 'side',
+        'amountUsd', 'feeUsd', 'netUsd', 'tokenQuantity', 'priceUsd', 'createdAt'
+      ])
+      && isValidId(data.uid)
+      && isNonEmptyString(data.userName, 120)
+      && isValidId(data.tokenId)
+      && isNonEmptyString(data.tokenTicker, 16)
+      && data.chain in ['BSC', 'Solana']
+      && data.side in ['buy', 'sell']
+      && data.amountUsd is number && data.amountUsd > 0 && data.amountUsd <= 1000000
+      && data.feeUsd is number && data.feeUsd >= 0 && data.feeUsd <= 100000
+      && data.netUsd is number && data.netUsd >= 0 && data.netUsd <= 1000000
+      && data.tokenQuantity is number && data.tokenQuantity > 0
+      && data.priceUsd is number && data.priceUsd > 0
+      && data.createdAt == request.time;
+    }
+
+    function isValidBoosterNode(data) {
+      return data.keys().hasAll([
+        'uid', 'userName', 'tierId', 'tierName', 'boosterBrandSnapshot',
+        'capital', 'dailyPercent', 'boostPowerLabel', 'totalProfitDays',
+        'capitalLockDays', 'turboMode', 'claimedProfit', 'status',
+        'startedAtMs', 'createdAt', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'uid', 'userName', 'tierId', 'tierName', 'boosterBrandSnapshot',
+        'capital', 'dailyPercent', 'boostPowerLabel', 'totalProfitDays',
+        'capitalLockDays', 'turboMode', 'claimedProfit', 'status',
+        'startedAtMs', 'createdAt', 'updatedAt'
+      ])
+      && isValidId(data.uid)
+      && isNonEmptyString(data.userName, 120)
+      && isValidId(data.tierId) && data.tierId.size() <= 64
+      && isNonEmptyString(data.tierName, 80)
+      && isNonEmptyString(data.boosterBrandSnapshot, 60)
+      && data.capital is number && data.capital > 0 && data.capital <= 10000000
+      && data.dailyPercent is number && data.dailyPercent > 0 && data.dailyPercent <= 50
+      && isNonEmptyString(data.boostPowerLabel, 40)
+      && data.totalProfitDays is number && data.totalProfitDays >= 1 && data.totalProfitDays <= 1000
+      && data.capitalLockDays is number && data.capitalLockDays >= 0 && data.capitalLockDays <= 1000
+      && data.turboMode is bool
+      && data.claimedProfit is number && data.claimedProfit >= 0
+      && data.status in ['active', 'completed']
+      && data.startedAtMs is number && data.startedAtMs > 0
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
     function isValidLoginActivity(data, userId) {
       return data.keys().hasAll([
         'uid', 'deviceSignature', 'browser', 'os', 'deviceType',
@@ -1228,9 +1033,16 @@ service cloud.firestore {
       allow get: if true;
     }
 
+    match /platform_config/{sectionId} {
+      allow get: if isValidId(sectionId);
+      allow list: if true;
+      allow create, update: if isValidId(sectionId) && isAdmin() && isValidPlatformConfigSection(incoming());
+      allow delete: if isValidId(sectionId) && isAdmin();
+    }
+
     match /config/{docId} {
       allow get: if isValidId(docId);
-      allow create, update: if isValidId(docId) && isAdmin() && isValidPlatformConfig(incoming());
+      allow create, update: if isValidId(docId) && isAdmin() && isValidPlatformConfigSection(incoming());
       allow delete: if false;
     }
 
@@ -1995,6 +1807,92 @@ service cloud.firestore {
         && isValidPromoRedemption(incoming())
         && (incoming().uid == request.auth.uid || isAdmin());
       allow update, delete: if false;
+    }
+
+    match /memeLaunchpadTokens/{tokenId} {
+      allow get: if isValidId(tokenId) && (existing().status != 'delisted' || isAdmin());
+      allow list: if resource.data.status != 'delisted' || isAdmin();
+      allow create: if isValidId(tokenId)
+        && isVerifiedUser()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && isValidMemeLaunchpadToken(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            incoming().creatorUid == request.auth.uid
+            && incoming().status == 'live'
+            && incoming().featured == false
+            && (!('dexListingStatus' in incoming()) || incoming().dexListingStatus == 'pending')
+            && (!('contractAddress' in incoming()) || incoming().contractAddress == '')
+            && (!('dexName' in incoming()) || incoming().dexName == '')
+            && (!('dexPairUrl' in incoming()) || incoming().dexPairUrl == '')
+          )
+        );
+      allow update: if isValidId(tokenId)
+        && isValidMemeLaunchpadToken(incoming())
+        && incoming().creatorUid == existing().creatorUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            isVerifiedUser()
+            && existing().status == 'live'
+            && incoming().status in ['live', 'graduated']
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'raisedUsd', 'marketCapUsd', 'volume24hUsd', 'progressPercent',
+              'holdersCount', 'status', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(tokenId) && isAdmin();
+    }
+
+    match /memeLaunchpadTrades/{tradeId} {
+      allow get: if isValidId(tradeId) && isSignedIn() && (existing().uid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow create: if isValidId(tradeId)
+        && isVerifiedUser()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && isValidMemeLaunchpadTrade(incoming())
+        && incoming().uid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /boosterNodes/{nodeId} {
+      allow get: if isValidId(nodeId) && isSignedIn() && (existing().uid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow create: if isValidId(nodeId)
+        && isVerifiedUser()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && isValidBoosterNode(incoming())
+        && incoming().uid == request.auth.uid
+        && incoming().claimedProfit == 0
+        && incoming().status == 'active'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(nodeId)
+        && isValidBoosterNode(incoming())
+        && incoming().uid == existing().uid
+        && incoming().capital == existing().capital
+        && incoming().dailyPercent == existing().dailyPercent
+        && incoming().startedAtMs == existing().startedAtMs
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            isVerifiedUser()
+            && existing().uid == request.auth.uid
+            && incoming().claimedProfit >= existing().claimedProfit
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'claimedProfit', 'status', 'turboMode', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if false;
     }
   }
 }

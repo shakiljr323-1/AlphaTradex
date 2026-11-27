@@ -42,6 +42,13 @@
         "howItWorksConfig": { "type": "object" },
         "leaderboardConfig": { "type": "object" },
         "web3PaymentConfig": { "type": "object" },
+        "memeLaunchpadConfig": {
+          "type": "object",
+          "description": "Meme Launchpad fees, limits, and bounded customContracts array (max 40 BSC/Solana smart contract entries with deploymentStatus)."
+        },
+        "boosterBrandName": { "type": "string", "maxLength": 60 },
+        "boosterConfig": { "type": "object" },
+        "roadmapConfig": { "type": "object" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": [
@@ -57,6 +64,16 @@
         "depositWallets",
         "pumpFunToken"
       ]
+    },
+    "PlatformConfigSection": {
+      "title": "PlatformConfigSection",
+      "description": "Modular platform configuration section document stored under platform_config/{sectionId} (e.g., general, packages, payments, marketing, trading, boosters, launchpad, roadmap) to avoid monolithic document limits.",
+      "type": "object",
+      "properties": {
+        "section": { "type": "string", "maxLength": 40 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["updatedAt"]
     },
     "UserProfile": {
       "title": "UserProfile",
@@ -1035,6 +1052,104 @@
         "uid", "userEmail", "code", "type", "appliedTo", "referenceId",
         "feeSavedUsd", "bonusCreditedUsd", "createdAt"
       ]
+    },
+    "MemeLaunchpadToken": {
+      "title": "MemeLaunchpadToken",
+      "description": "Fair-launch meme token listing on alphatradex.pro (BSC / Solana) with bonding curve metrics and anti-rug lock metadata.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 64 },
+        "ticker": { "type": "string", "maxLength": 16, "pattern": "^[A-Z0-9]{2,16}$" },
+        "chain": { "type": "string", "enum": ["BSC", "Solana"] },
+        "description": { "type": "string", "maxLength": 600 },
+        "logoUrl": { "type": "string", "maxLength": 260000 },
+        "accentColor": { "type": "string", "maxLength": 24 },
+        "telegramUrl": { "type": "string", "maxLength": 240 },
+        "twitterUrl": { "type": "string", "maxLength": 240 },
+        "websiteUrl": { "type": "string", "maxLength": 240 },
+        "creatorUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "creatorHandle": { "type": "string", "maxLength": 32 },
+        "creatorAddress": { "type": "string", "maxLength": 120 },
+        "status": { "type": "string", "enum": ["live", "upcoming", "graduated", "delisted"] },
+        "dexListingStatus": { "type": "string", "enum": ["pending", "listed"] },
+        "contractAddress": { "type": "string", "maxLength": 128 },
+        "dexName": { "type": "string", "maxLength": 60 },
+        "dexPairUrl": { "type": "string", "maxLength": 300 },
+        "featured": { "type": "boolean" },
+        "liquidityLocked": { "type": "boolean" },
+        "lockDays": { "type": "number" },
+        "antiRugAudit": { "type": "boolean" },
+        "raisedUsd": { "type": "number" },
+        "graduationTargetUsd": { "type": "number" },
+        "marketCapUsd": { "type": "number" },
+        "volume24hUsd": { "type": "number" },
+        "progressPercent": { "type": "number" },
+        "holdersCount": { "type": "number" },
+        "initialBuyUsd": { "type": "number" },
+        "launchFeePaidUsd": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "name", "ticker", "chain", "description", "logoUrl", "accentColor",
+        "telegramUrl", "twitterUrl", "websiteUrl", "creatorUid", "creatorHandle",
+        "creatorAddress", "status", "featured", "liquidityLocked", "lockDays",
+        "antiRugAudit", "raisedUsd", "graduationTargetUsd", "marketCapUsd",
+        "volume24hUsd", "progressPercent", "holdersCount", "initialBuyUsd",
+        "launchFeePaidUsd", "createdAt", "updatedAt"
+      ]
+    },
+    "MemeLaunchpadTrade": {
+      "title": "MemeLaunchpadTrade",
+      "description": "Immutable bonding curve buy/sell allocation order placed on the AlphaTradex Meme Launchpad.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userName": { "type": "string", "maxLength": 120 },
+        "tokenId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "tokenTicker": { "type": "string", "maxLength": 16 },
+        "chain": { "type": "string", "enum": ["BSC", "Solana"] },
+        "side": { "type": "string", "enum": ["buy", "sell"] },
+        "amountUsd": { "type": "number" },
+        "feeUsd": { "type": "number" },
+        "netUsd": { "type": "number" },
+        "tokenQuantity": { "type": "number" },
+        "priceUsd": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid", "userName", "tokenId", "tokenTicker", "chain", "side",
+        "amountUsd", "feeUsd", "netUsd", "tokenQuantity", "priceUsd", "createdAt"
+      ]
+    },
+    "BoosterNode": {
+      "title": "BoosterNode",
+      "description": "Active AlphaTradex Booster compute node synced to the 200 Mon-Fri profit-day payout engine.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userName": { "type": "string", "maxLength": 120 },
+        "tierId": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "tierName": { "type": "string", "maxLength": 80 },
+        "boosterBrandSnapshot": { "type": "string", "maxLength": 60 },
+        "capital": { "type": "number" },
+        "dailyPercent": { "type": "number" },
+        "boostPowerLabel": { "type": "string", "maxLength": 40 },
+        "totalProfitDays": { "type": "number" },
+        "capitalLockDays": { "type": "number" },
+        "turboMode": { "type": "boolean" },
+        "claimedProfit": { "type": "number" },
+        "status": { "type": "string", "enum": ["active", "completed"] },
+        "startedAtMs": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid", "userName", "tierId", "tierName", "boosterBrandSnapshot",
+        "capital", "dailyPercent", "boostPowerLabel", "totalProfitDays",
+        "capitalLockDays", "turboMode", "claimedProfit", "status",
+        "startedAtMs", "createdAt", "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -1173,6 +1288,22 @@
     "/adminSecrets/{docId}": {
       "schema": { "$ref": "#/entities/AdminEmailSecretConfig" },
       "description": "Strictly Super-Admin-only integration secrets (emailConfig for SMTP/Resend and telegramConfig for Admin Bot alerts)."
+    },
+    "/memeLaunchpadTokens/{tokenId}": {
+      "schema": { "$ref": "#/entities/MemeLaunchpadToken" },
+      "description": "Fair-launch meme tokens on alphatradex.pro (BSC / Solana) moderated by Super Admin."
+    },
+    "/memeLaunchpadTrades/{tradeId}": {
+      "schema": { "$ref": "#/entities/MemeLaunchpadTrade" },
+      "description": "Immutable Meme Launchpad bonding curve buy/sell orders."
+    },
+    "/boosterNodes/{nodeId}": {
+      "schema": { "$ref": "#/entities/BoosterNode" },
+      "description": "Active user Booster compute nodes running on the 200 Mon-Fri weekday settlement schedule."
+    },
+    "/platform_config/{sectionId}": {
+      "schema": { "$ref": "#/entities/PlatformConfigSection" },
+      "description": "Modular public platform configuration sections (general, packages, payments, marketing, trading, boosters, launchpad, roadmap, and future custom modules) writable exclusively by verified admins."
     }
   }
 }

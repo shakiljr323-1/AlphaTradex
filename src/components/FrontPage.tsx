@@ -46,6 +46,10 @@ import { HomepageFaqAccordion } from './HomepageFaqAccordion';
 import { HowItWorksGuideModule } from './HowItWorksGuideModule';
 import { AlphatradexLogo3D } from './AlphatradexLogo3D';
 import { TermsAgreementCheckbox, TermsAndConditionsView } from './TermsAndConditionsView';
+import { MemeLaunchpadView } from './MemeLaunchpadView';
+import { BoosterEngineView } from './BoosterEngineView';
+import { BoosterWalkthroughMotion } from './BoosterWalkthroughMotion';
+import { PlatformRoadmapView } from './PlatformRoadmapView';
 
 interface FrontPageProps {
   activeSection: NavSection;
@@ -55,7 +59,9 @@ interface FrontPageProps {
   onOpenAuth: (mode: 'signin' | 'signup') => void;
   authGateNotice?: string | null;
   onClearAuthNotice?: () => void;
-  onOpenDashboard?: (targetNav?: 'dashboard' | 'forex-market' | 'pump-fun') => void;
+  onOpenDashboard?: (
+    targetNav?: 'dashboard' | 'forex-market' | 'pump-fun' | 'meme-launchpad' | 'booster'
+  ) => void;
 }
 
 export const FrontPage: React.FC<FrontPageProps> = ({
@@ -1833,6 +1839,28 @@ export const FrontPage: React.FC<FrontPageProps> = ({
             </div>
           </div>
 
+          {/* Featured Meme Launchpad Showcase */}
+          <MemeLaunchpadView
+            compactPreview
+            onOpenFullPage={() => onSelectSection('meme-launchpad')}
+            onRequireAuth={() => onOpenAuth('signin')}
+          />
+
+          {/* Original Booster 360° Core Engine + Interactive 4-Language Motion Walkthrough */}
+          <BoosterEngineView
+            compactPreview
+            onOpenFullPage={() => onSelectSection('booster')}
+            onRequireAuth={() => onOpenAuth('signin')}
+          />
+          <BoosterWalkthroughMotion
+            onActionCta={() =>
+              authUser && onOpenDashboard ? onOpenDashboard('booster') : onSelectSection('booster')
+            }
+          />
+
+          {/* Clear AlphaTradex Platform Roadmap */}
+          <PlatformRoadmapView compact />
+
           {/* Interactive 3-Step Onboarding & Motion Video Guide */}
           <HowItWorksGuideModule
             platformConfig={platformConfig}
@@ -2349,6 +2377,19 @@ export const FrontPage: React.FC<FrontPageProps> = ({
 
       {/* 7. DEDICATED FOREX & CRYPTO NEWS HUB (Myfxbook-Style Auto-Publishing Desk) */}
       {activeSection === 'forex-news' && <ForexNewsHub />}
+
+      {/* 7B. DEDICATED MEME LAUNCHPAD PAGE */}
+      {activeSection === 'meme-launchpad' && (
+        <MemeLaunchpadView onRequireAuth={() => onOpenAuth('signin')} />
+      )}
+
+      {/* 7C. DEDICATED BOOSTER ENGINE & WALKTHROUGH PAGE */}
+      {activeSection === 'booster' && (
+        <BoosterEngineView onRequireAuth={() => onOpenAuth('signin')} />
+      )}
+
+      {/* 7D. DEDICATED PLATFORM ROADMAP PAGE */}
+      {activeSection === 'roadmap' && <PlatformRoadmapView />}
 
       {/* 8. DEDICATED TERMS & CONDITIONS PAGE */}
       {activeSection === 'terms' && (

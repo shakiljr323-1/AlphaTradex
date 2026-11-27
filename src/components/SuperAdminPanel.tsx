@@ -23,6 +23,7 @@ import {
   Headphones,
   Image as ImageIcon,
   LayoutDashboard,
+  Link2,
   Lock,
   LogOut,
   Mail,
@@ -60,6 +61,7 @@ import {
   BannerAdConfig,
   BannerAdPlacement,
   BannerAdTheme,
+  BoosterNode,
   CoinMiningPlan,
   CoinMiningStake,
   CopyTraderProfile,
@@ -71,6 +73,8 @@ import {
   ForexTrade,
   Investment,
   MemeCoinInvestment,
+  MemeLaunchpadToken,
+  MemeLaunchpadTrade,
   MlmCommission,
   P2PTransfer,
   PaymentMethodCategory,
@@ -97,6 +101,9 @@ import { AdminResendEmailSettingsPanel } from './AdminResendEmailSettingsPanel';
 import { AdminCashflowAnalyticsCard } from './AdminCashflowAnalyticsCard';
 import { AdminPromoVouchersPanel } from './AdminPromoVouchersPanel';
 import { AdminFinancialExportPanel } from './AdminFinancialExportPanel';
+import { AdminEcosystemControlsPanel } from './AdminEcosystemControlsPanel';
+import { BoosterManagement } from './BoosterManagement';
+import { LaunchpadConfig } from './LaunchpadConfig';
 
 function formatUiError(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err || 'Action failed.');
@@ -128,6 +135,9 @@ type AdminTab =
   | 'company'
   | 'web3-payments'
   | 'wallets-meme'
+  | 'booster-engine'
+  | 'launchpad-config'
+  | 'ecosystem-controls'
   | 'promo-vouchers'
   | 'financial-export'
   | 'email-api'
@@ -186,6 +196,9 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
   const [allSupportTickets, setAllSupportTickets] = useState<SupportTicket[]>([]);
   const [allPromoCodes, setAllPromoCodes] = useState<PromoCode[]>([]);
   const [allPromoRedemptions, setAllPromoRedemptions] = useState<PromoRedemption[]>([]);
+  const [allLaunchpadTokens, setAllLaunchpadTokens] = useState<MemeLaunchpadToken[]>([]);
+  const [allLaunchpadTrades, setAllLaunchpadTrades] = useState<MemeLaunchpadTrade[]>([]);
+  const [allBoosterNodes, setAllBoosterNodes] = useState<BoosterNode[]>([]);
 
   const [clientSearch, setClientSearch] = useState('');
   const [clientKycFilter, setClientKycFilter] = useState<'all' | 'pending' | 'approved' | 'unsubmitted' | 'rejected'>('all');
@@ -361,6 +374,30 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
         ),
       (err) => handleFirestoreError(err, OperationType.LIST, 'promoRedemptions')
     );
+    const u18 = onSnapshot(
+      query(collection(db, 'memeLaunchpadTokens'), orderBy('createdAt', 'desc')),
+      (snap) =>
+        setAllLaunchpadTokens(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<MemeLaunchpadToken, 'id'>) }))
+        ),
+      (err) => handleFirestoreError(err, OperationType.LIST, 'memeLaunchpadTokens')
+    );
+    const u19 = onSnapshot(
+      query(collection(db, 'memeLaunchpadTrades'), orderBy('createdAt', 'desc')),
+      (snap) =>
+        setAllLaunchpadTrades(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<MemeLaunchpadTrade, 'id'>) }))
+        ),
+      (err) => handleFirestoreError(err, OperationType.LIST, 'memeLaunchpadTrades')
+    );
+    const u20 = onSnapshot(
+      query(collection(db, 'boosterNodes'), orderBy('createdAt', 'desc')),
+      (snap) =>
+        setAllBoosterNodes(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<BoosterNode, 'id'>) }))
+        ),
+      (err) => handleFirestoreError(err, OperationType.LIST, 'boosterNodes')
+    );
 
     return () => {
       u1();
@@ -380,6 +417,9 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
       u15();
       u16();
       u17();
+      u18();
+      u19();
+      u20();
     };
   }, []);
 
@@ -582,6 +622,21 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
         { id: 'how-it-works', label: 'How It Works & Video', Icon: Film },
         { id: 'web3-payments', label: 'Web3 Payments & Security', Icon: Zap },
         { id: 'wallets-meme', label: 'Addresses & Meme Coin', Icon: Coins },
+        {
+          id: 'booster-engine',
+          label: `${platformConfig.boosterBrandName?.trim() || platformConfig.boosterConfig?.brandName?.trim() || 'ATXBooster'} Engine`,
+          Icon: Cpu,
+        },
+        {
+          id: 'launchpad-config',
+          label: `Launchpad Contracts (${(platformConfig.memeLaunchpadConfig?.customContracts || []).length})`,
+          Icon: Link2,
+        },
+        {
+          id: 'ecosystem-controls',
+          label: 'Meme Launchpad & Roadmap',
+          Icon: Sparkles,
+        },
         { id: 'company', label: 'Company & Trust Ratings', Icon: Shield },
       ],
     },
@@ -1695,7 +1750,7 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                   { label: 'p2pTransfers', count: allP2P.length },
                   { label: 'mlmCommissions', count: allMlm.length },
                   { label: 'memeCoin', count: allMeme.length },
-                  { label: 'config/platform', count: 1 },
+                  { label: 'platform_config', count: 8 },
                 ].map((item) => (
                   <div key={item.label} className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2">
                     <div className="font-mono text-[11px] text-slate-500 truncate">{item.label}</div>
@@ -4746,6 +4801,23 @@ export const SuperAdminPanel: React.FC<{ onExitAdmin: () => void }> = ({ onExitA
                   setBusy(false);
                 }
               }}
+            />
+          )}
+
+          {tab === 'booster-engine' && (
+            <BoosterManagement
+              allBoosterNodes={allBoosterNodes}
+              onNotify={notify}
+            />
+          )}
+
+          {tab === 'launchpad-config' && <LaunchpadConfig onNotify={notify} />}
+
+          {tab === 'ecosystem-controls' && (
+            <AdminEcosystemControlsPanel
+              allLaunchpadTokens={allLaunchpadTokens}
+              allLaunchpadTrades={allLaunchpadTrades}
+              allBoosterNodes={allBoosterNodes}
             />
           )}
 

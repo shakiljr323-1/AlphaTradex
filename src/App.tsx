@@ -42,7 +42,9 @@ const AppRouter: React.FC = () => {
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
   const [authGateNotice, setAuthGateNotice] = useState<string | null>(null);
   const [showHomeView, setShowHomeView] = useState<boolean>(() => checkIsTermsRoute());
-  const [dashTargetTab, setDashTargetTab] = useState<'dashboard' | 'forex-market' | 'pump-fun'>('dashboard');
+  const [dashTargetTab, setDashTargetTab] = useState<
+    'dashboard' | 'forex-market' | 'pump-fun' | 'meme-launchpad' | 'booster'
+  >('dashboard');
   const [dashboardMode, setDashboardMode] = useState<'client' | 'mentor'>(() =>
     checkIsMentorRoute() ? 'mentor' : 'client'
   );
@@ -232,7 +234,9 @@ const AppRouter: React.FC = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const openDashboardFromHome = (targetNav: 'dashboard' | 'forex-market' | 'pump-fun' = 'dashboard') => {
+  const openDashboardFromHome = (
+    targetNav: 'dashboard' | 'forex-market' | 'pump-fun' | 'meme-launchpad' | 'booster' = 'dashboard'
+  ) => {
     setDashTargetTab(targetNav);
     setDashboardMode('client');
     clearMentorRouteFromUrl();
@@ -244,6 +248,10 @@ const AppRouter: React.FC = () => {
   const hasSupportLinks = Boolean(
     supportLinks && (supportLinks.telegramUrl || supportLinks.whatsappUrl || supportLinks.supportEmail)
   );
+  const boosterBrandName =
+    platformConfig.boosterBrandName?.trim() ||
+    platformConfig.boosterConfig?.brandName?.trim() ||
+    'ATXBooster';
 
   return (
     <div className="relative min-h-screen flex flex-col text-slate-100">
@@ -251,6 +259,7 @@ const AppRouter: React.FC = () => {
       <Navbar
         companyName={platformConfig.companyName}
         coinName={platformConfig.pumpFunToken.name}
+        boosterName={boosterBrandName}
         activeSection={activeSection}
         authMode={authMode}
         onSelectSection={handleSelectSection}
@@ -280,7 +289,7 @@ const AppRouter: React.FC = () => {
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
             <span>
-              © {new Date().getFullYear()} {platformConfig.companyName}. Institutional Multi-Asset Portal.
+              © {new Date().getFullYear()} {platformConfig.companyName} (alphatradex.pro). Institutional Multi-Asset Portal.
             </span>
             <button
               type="button"

@@ -14,7 +14,9 @@ import {
   CheckCircle2,
   Clock,
   Coins,
+  Compass,
   Copy,
+  Cpu,
   CreditCard,
   ExternalLink,
   FileCheck,
@@ -93,6 +95,9 @@ import { HowItWorksGuideModule } from './HowItWorksGuideModule';
 import { Web3AutoDepositPanel } from './Web3AutoDepositPanel';
 import { UserSecurityCenter } from './UserSecurityCenter';
 import { UserRewardsMissionsPanel } from './UserRewardsMissionsPanel';
+import { MemeLaunchpadView } from './MemeLaunchpadView';
+import { BoosterEngineView } from './BoosterEngineView';
+import { PlatformRoadmapView } from './PlatformRoadmapView';
 import { MonthlyStatementPanel } from './MonthlyStatementPanel';
 import { InvestorToolsHub } from './InvestorToolsHub';
 import {
@@ -127,6 +132,9 @@ type SidebarSection =
   | 'my-packages'
   | 'trade-history'
   | 'capital-withdraw'
+  | 'meme-launchpad'
+  | 'booster'
+  | 'roadmap'
   | 'pump-fun'
   | 'forex-market'
   | 'forex-news'
@@ -145,7 +153,7 @@ type SidebarSection =
   | 'track-ticket';
 
 interface UserVaultDashboardProps {
-  initialSection?: 'dashboard' | 'forex-market' | 'pump-fun';
+  initialSection?: 'dashboard' | 'forex-market' | 'pump-fun' | 'meme-launchpad' | 'booster';
   onOpenHomePage?: (section?: NavSection) => void;
   onOpenMentorDashboard?: () => void;
 }
@@ -771,8 +779,23 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
         { id: 'my-packages', label: t('dash.myPackages', 'My Packages'), Icon: Bot },
         { id: 'trade-history', label: 'Trade History', Icon: Activity },
         { id: 'capital-withdraw', label: 'Capital Withdraw', Icon: Lock },
+        ...(platformConfig.boosterConfig?.enabled !== false
+          ? [
+              {
+                id: 'booster' as SidebarSection,
+                label:
+                  platformConfig.boosterBrandName?.trim() ||
+                  platformConfig.boosterConfig?.brandName?.trim() ||
+                  'ATXBooster',
+                Icon: Cpu,
+              },
+            ]
+          : []),
+        ...(platformConfig.memeLaunchpadConfig?.enabled !== false
+          ? [{ id: 'meme-launchpad' as SidebarSection, label: 'Meme Launchpad', Icon: Rocket }]
+          : []),
         ...(moduleControls?.coinMiningEnabled !== false
-          ? [{ id: 'pump-fun' as SidebarSection, label: `${platformConfig.pumpFunToken.name} Coin`, Icon: Rocket }]
+          ? [{ id: 'pump-fun' as SidebarSection, label: `${platformConfig.pumpFunToken.name} Coin`, Icon: Coins }]
           : []),
         ...(moduleControls?.forexMarketEnabled !== false
           ? [
@@ -784,6 +807,9 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
             ]
           : []),
         { id: 'forex-news', label: 'Forex News', Icon: Newspaper },
+        ...(platformConfig.roadmapConfig?.enabled !== false
+          ? [{ id: 'roadmap' as SidebarSection, label: 'Platform Roadmap', Icon: Compass }]
+          : []),
       ],
     },
     {
@@ -3131,6 +3157,15 @@ export const UserVaultDashboard: React.FC<UserVaultDashboardProps> = ({
               onNavigate={(sec) => selectNav(sec)}
             />
           )}
+
+          {/* VIEW: MEME LAUNCHPAD */}
+          {activeNav === 'meme-launchpad' && <MemeLaunchpadView />}
+
+          {/* VIEW: PROPRIETARY BOOSTER ENGINE & WALKTHROUGH */}
+          {activeNav === 'booster' && <BoosterEngineView />}
+
+          {/* VIEW: PLATFORM ROADMAP */}
+          {activeNav === 'roadmap' && <PlatformRoadmapView />}
 
           {/* VIEW: ALPHATRADEX COIN MINING, TAP-TO-MINE, BANNER ADS & PUMP.FUN */}
           {activeNav === 'pump-fun' && (

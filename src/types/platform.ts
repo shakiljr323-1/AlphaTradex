@@ -262,7 +262,161 @@ export interface PlatformConfig {
   howItWorksConfig?: HowItWorksConfig;
   leaderboardConfig?: LeaderboardConfig;
   web3PaymentConfig?: Web3PaymentConfig;
+  memeLaunchpadConfig?: MemeLaunchpadConfig;
+  boosterBrandName?: string;
+  boosterConfig?: BoosterConfig;
+  roadmapConfig?: RoadmapConfig;
   updatedAt?: unknown;
+}
+
+export type PlatformConfigSectionId =
+  | 'general'
+  | 'packages'
+  | 'payments'
+  | 'marketing'
+  | 'trading'
+  | 'boosters'
+  | 'launchpad'
+  | 'roadmap';
+
+export type MemeLaunchpadChain = 'BSC' | 'Solana';
+export type MemeLaunchpadStatus = 'live' | 'upcoming' | 'graduated' | 'delisted';
+export type MemeDexListingStatus = 'pending' | 'listed';
+export type LaunchpadContractDeploymentStatus = 'pending' | 'deployed' | 'listed' | 'paused';
+
+export interface CustomMemeContractEntry {
+  id: string;
+  tokenName: string;
+  ticker: string;
+  contractAddress: string;
+  network: MemeLaunchpadChain;
+  deploymentStatus: LaunchpadContractDeploymentStatus;
+  dexName?: string;
+  dexPairUrl?: string;
+  notes?: string;
+  updatedAtIso?: string;
+}
+
+export interface MemeLaunchpadConfig {
+  enabled: boolean;
+  allowUserLaunches: boolean;
+  launchFeeUsd: number;
+  tradingFeePercent: number;
+  graduationTargetUsd: number;
+  defaultLockDays: number;
+  customContracts?: CustomMemeContractEntry[];
+}
+
+export interface MemeLaunchpadToken {
+  id: string;
+  name: string;
+  ticker: string;
+  chain: MemeLaunchpadChain;
+  description: string;
+  logoUrl: string;
+  accentColor: string;
+  telegramUrl: string;
+  twitterUrl: string;
+  websiteUrl: string;
+  creatorUid: string;
+  creatorHandle: string;
+  creatorAddress: string;
+  status: MemeLaunchpadStatus;
+  dexListingStatus?: MemeDexListingStatus;
+  contractAddress?: string;
+  dexName?: string;
+  dexPairUrl?: string;
+  featured: boolean;
+  liquidityLocked: boolean;
+  lockDays: number;
+  antiRugAudit: boolean;
+  raisedUsd: number;
+  graduationTargetUsd: number;
+  marketCapUsd: number;
+  volume24hUsd: number;
+  progressPercent: number;
+  holdersCount: number;
+  initialBuyUsd: number;
+  launchFeePaidUsd: number;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
+export interface MemeLaunchpadTrade {
+  id: string;
+  uid: string;
+  userName: string;
+  tokenId: string;
+  tokenTicker: string;
+  chain: MemeLaunchpadChain;
+  side: 'buy' | 'sell';
+  amountUsd: number;
+  feeUsd: number;
+  netUsd: number;
+  tokenQuantity: number;
+  priceUsd: number;
+  createdAt?: unknown;
+}
+
+export interface BoosterTierConfig {
+  id: string;
+  name: string;
+  capital: number;
+  dailyPercent: number;
+  boostPowerLabel: string;
+  profitDays: number;
+  capitalLockDays: number;
+  thermalEfficiency: string;
+  description: string;
+  accent: 'amber' | 'teal' | 'sky' | 'violet';
+  enabled: boolean;
+}
+
+export interface BoosterConfig {
+  enabled: boolean;
+  brandName: string;
+  tagline: string;
+  turboBonusLabel: string;
+  tiers: BoosterTierConfig[];
+}
+
+export interface BoosterNode {
+  id: string;
+  uid: string;
+  userName: string;
+  tierId: string;
+  tierName: string;
+  boosterBrandSnapshot: string;
+  capital: number;
+  dailyPercent: number;
+  boostPowerLabel: string;
+  totalProfitDays: number;
+  capitalLockDays: number;
+  turboMode: boolean;
+  claimedProfit: number;
+  status: 'active' | 'completed';
+  startedAtMs: number;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
+export type RoadmapPhaseStatus = 'completed' | 'active' | 'upcoming';
+
+export interface RoadmapPhase {
+  id: string;
+  phaseLabel: string;
+  quarter: string;
+  title: string;
+  status: RoadmapPhaseStatus;
+  description: string;
+  milestones: string[];
+}
+
+export interface RoadmapConfig {
+  enabled: boolean;
+  title: string;
+  subtitle: string;
+  phases: RoadmapPhase[];
 }
 
 export type Web3ChainKey = 'BEP20' | 'POLYGON';
@@ -1081,6 +1235,9 @@ export type NavSection =
   | 'home'
   | 'how-it-works'
   | 'plans'
+  | 'meme-launchpad'
+  | 'booster'
+  | 'roadmap'
   | 'forex-news'
   | 'ai-trading'
   | 'forex'

@@ -4,6 +4,8 @@ import {
   Bot,
   ChevronRight,
   Coins,
+  Compass,
+  Cpu,
   FileText,
   Globe,
   Home,
@@ -13,6 +15,7 @@ import {
   Newspaper,
   PanelLeft,
   PlayCircle,
+  Rocket,
   ShieldCheck,
   Users,
   X,
@@ -24,6 +27,7 @@ import { AlphatradexLogo3D } from './AlphatradexLogo3D';
 interface NavbarProps {
   companyName: string;
   coinName: string;
+  boosterName?: string;
   activeSection: NavSection;
   authMode?: 'signin' | 'signup';
   onSelectSection: (section: NavSection) => void;
@@ -41,6 +45,7 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({
   companyName,
   coinName,
+  boosterName = 'ATXBooster',
   activeSection,
   authMode = 'signin',
   onSelectSection,
@@ -58,9 +63,15 @@ export const Navbar: React.FC<NavbarProps> = ({
   const { t } = useLanguage();
 
   const publicNavItems: { id: NavSection; label: string; Icon: React.ComponentType<{ className?: string }> }[] = [
-    { id: 'home', label: t('nav.home', 'Home Overview'), Icon: Home },
+    { id: 'home', label: t('nav.home', 'Home'), Icon: Home },
+    { id: 'plans', label: t('nav.plans', 'Plans'), Icon: Layers },
+    { id: 'meme-launchpad', label: 'Meme Launchpad', Icon: Rocket },
+    { id: 'booster', label: boosterName, Icon: Cpu },
+    { id: 'roadmap', label: 'Roadmap', Icon: Compass },
     { id: 'how-it-works', label: t('nav.howItWorks', 'How It Works'), Icon: PlayCircle },
-    { id: 'plans', label: t('nav.plans', 'Investment Plans'), Icon: Layers },
+  ];
+
+  const drawerExtraNavItems: { id: NavSection; label: string; Icon: React.ComponentType<{ className?: string }> }[] = [
     { id: 'forex-news', label: t('nav.forexNews', 'Forex News'), Icon: Newspaper },
     {
       id: 'mentor-referral',
@@ -292,7 +303,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <div className="px-2 text-[11px] font-mono uppercase tracking-wider text-slate-400">
               Overview &amp; Packages
             </div>
-            {publicNavItems.map(({ id, label, Icon }) => {
+            {[...publicNavItems, ...drawerExtraNavItems].map(({ id, label, Icon }) => {
               const isActive = activeSection === id;
               return (
                 <button

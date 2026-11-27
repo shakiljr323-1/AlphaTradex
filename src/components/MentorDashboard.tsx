@@ -22,12 +22,13 @@ import {
   Users,
   Wallet,
   X,
-  XCircle,
 } from 'lucide-react';
 import { usePlatform } from '../context/PlatformContext';
-import { CryptoNetwork, Investment } from '../types/platform';
+import { Investment } from '../types/platform';
 import { computeInvestmentMetrics, formatTimestamp, isWeekendDate } from '../utils/investmentMath';
 import { AlphatradexLogo3D } from './AlphatradexLogo3D';
+import { PayoutManagement } from './PayoutManagement';
+import { ReferralAnalytics } from './ReferralAnalytics';
 
 type MentorSection =
   | 'overview'
@@ -53,10 +54,7 @@ export const MentorDashboard: React.FC<MentorDashboardProps> = ({
     mlmCommissions,
     withdrawals,
     referralLinkClicks,
-    savedPaymentMethods,
     claimInvestmentProfit,
-    withdrawInstantProfit,
-    addUserPaymentMethod,
     signOutUser,
   } = usePlatform();
 
@@ -74,40 +72,6 @@ export const MentorDashboard: React.FC<MentorDashboardProps> = ({
   // Commissions filters
   const [commFilter, setCommFilter] = useState<'all' | 'mentor' | 'referral'>('all');
   const [commSearch, setCommSearch] = useState('');
-
-  // Mentor Payout form + tracker
-  const enabledWithdrawMethods = useMemo(
-    () =>
-      (platformConfig.paymentMethods || []).filter(
-        (m) => m.enabled && m.allowWithdrawal
-      ),
-    [platformConfig.paymentMethods]
-  );
-
-  const [wdNetwork, setWdNetwork] = useState<CryptoNetwork>(
-    () => enabledWithdrawMethods[0]?.id || 'USDT_TRC20'
-  );
-  const [wdAmount, setWdAmount] = useState('25');
-  const [wdAddress, setWdAddress] = useState('');
-  const [saveMethodAfter, setSaveMethodAfter] = useState(false);
-  const [wdSubmitting, setWdSubmitting] = useState(false);
-  const [payoutStatusFilter, setPayoutStatusFilter] = useState<
-    'all' | 'pending' | 'processed' | 'rejected'
-  >('all');
-  const [payoutSearch, setPayoutSearch] = useState('');
-
-  const activeWithdrawNetworkId = enabledWithdrawMethods.some((m) => m.id === wdNetwork)
-    ? wdNetwork
-    : enabledWithdrawMethods[0]?.id || 'USDT_TRC20';
-
-  const selectedWithdrawMethod =
-    enabledWithdrawMethods.find((m) => m.id === activeWithdrawNetworkId) ||
-    enabledWithdrawMethods[0];
-
-  const minWithdrawUsd = Math.max(
-    Number(platformConfig.minWithdrawalUsd || 10),
-    Number(selectedWithdrawMethod?.minWithdrawalUsd || 0)
-  );
 
   const isWeekend = isWeekendDate(new Date());
   const mentorCfg = platformConfig.mentorConfig;
@@ -268,28 +232,6 @@ export const MentorDashboard: React.FC<MentorDashboardProps> = ({
     });
   }, [mlmCommissions, commFilter, commSearch]);
 
-  const filteredWithdrawals = useMemo(() => {
-    const q = payoutSearch.trim().toLowerCase();
-    return withdrawals.filter((w) => {
-      if (payoutStatusFilter === 'pending' && w.status !== 'pending') return false;
-      if (
-        payoutStatusFilter === 'processed' &&
-        w.status !== 'approved' &&
-        w.status !== 'completed'
-      ) {
-        return false;
-      }
-      if (payoutStatusFilter === 'rejected' && w.status !== 'rejected') return false;
-      if (!q) return true;
-      return (
-        w.id.toLowerCase().includes(q) ||
-        w.network.toLowerCase().includes(q) ||
-        w.destinationAddress.toLowerCase().includes(q) ||
-        (w.adminNote || '').toLowerCase().includes(q)
-      );
-    });
-  }, [withdrawals, payoutStatusFilter, payoutSearch]);
-
   const navItems: {
     id: MentorSection;
     label: string;
@@ -299,7 +241,7 @@ export const MentorDashboard: React.FC<MentorDashboardProps> = ({
     { id: 'gifted-vaults', label: 'Gifted Vaults & Yield', Icon: Gift },
     { id: 'team-volume', label: 'Team & Volume Tracker', Icon: Users },
     { id: 'commissions', label: 'Override Commissions', Icon: Award },
-    { id: 'payouts', label: 'Mentor Payouts', Icon: Wallet },
+    { id: 'payouts', label: 'Payout Management', Icon: Wallet },
   ];
 
   // Strict security gate: never render Mentor Dashboard unless user is an Admin-gifted Mentor
@@ -323,62 +265,6 @@ export const MentorDashboard: React.FC<MentorDashboardProps> = ({
       setBusyId(null);
     }
   };
-
-  const handleSubmitMentorPayout = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const amt = Number(wdAmount);
-    if (!Number.isFinite(amt) || amt <= 0) {
-      notify('err', 'Enter a valid payout amount in USD.');
-      return;
-    }
-    if (!wdAddress.trim()) {
-      notify('err', 'Enter your receiving payout wallet or account details.');
-      return;
-    }
-    setWdSubmitting(true);
-    try {
-      await withdrawInstantProfit({
-        amountUsd: amt,
-        network: activeWithdrawNetworkId,
-        destinationAddress: wdAddress.trim(),
-        source: 'mentor_profit',
-        settlementMode: 'pending',
-      });
-      if (
-        saveMethodAfter &&
-        !savedPaymentMethods.some(
-          (pm) =>
-            pm.methodId === activeWithdrawNetworkId &&
-            pm.accountAddress === wdAddress.trim()
-        )
-      ) {
-        const methodName = selectedWithdrawMethod?.name || activeWithdrawNetworkId;
-        await addUserPaymentMethod({
-          label: `${methodName} Mentor Payout`,
-          methodId: activeWithdrawNetworkId,
-          methodName,
-          accountAddress: wdAddress.trim(),
-          accountHolder: userProfile.fullName,
-          isDefault: savedPaymentMethods.length === 0,
-        });
-      }
-      setWdAddress('');
-      setSaveMethodAfter(false);
-      notify(
-        'ok',
-        `Mentor payout request of $${amt.toFixed(2)} submitted and queued for settlement review.`
-      );
-    } catch (err) {
-      notify('err', (err as Error).message || 'Failed to submit mentor payout request.');
-    } finally {
-      setWdSubmitting(false);
-    }
-  };
-
-  const kycBlockedForWithdraw =
-    Boolean(platformConfig.kycSettings?.enabled) &&
-    Boolean(platformConfig.kycSettings?.requireKycForWithdrawals) &&
-    userProfile.kycStatus !== 'approved';
 
   const selectSection = (sec: MentorSection) => {
     setActiveTab(sec);
@@ -838,6 +724,14 @@ export const MentorDashboard: React.FC<MentorDashboardProps> = ({
                 </div>
               </div>
 
+              {/* Referral Distribution & Trading Volume Bar Chart */}
+              <ReferralAnalytics
+                downlineReferrals={downlineReferrals}
+                mlmCommissions={mlmCommissions}
+                mentorBroughtVolume={metricsSummary.mentorBrought}
+                mentorRequiredVolume={metricsSummary.mentorRequired}
+              />
+
               {/* Quick Gifted Vaults & Recent Commissions Split */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Active Gifted Vaults Preview */}
@@ -1114,6 +1008,14 @@ export const MentorDashboard: React.FC<MentorDashboardProps> = ({
                   </strong>
                 </div>
               </div>
+
+              {/* Visual Distribution & Trading Volume Analytics */}
+              <ReferralAnalytics
+                downlineReferrals={downlineReferrals}
+                mlmCommissions={mlmCommissions}
+                mentorBroughtVolume={metricsSummary.mentorBrought}
+                mentorRequiredVolume={metricsSummary.mentorRequired}
+              />
 
               {/* Filter & Search Toolbar */}
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
@@ -1402,338 +1304,12 @@ export const MentorDashboard: React.FC<MentorDashboardProps> = ({
             </div>
           )}
 
-          {/* TAB 5: MENTOR PAYOUTS */}
+          {/* TAB 5: PAYOUT MANAGEMENT & COMMISSION SETTLEMENT */}
           {activeTab === 'payouts' && (
-            <div className="space-y-6">
-              <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 pb-4 border-b border-slate-800/80">
-                <div>
-                  <h2 className="font-display font-bold text-xl text-white">
-                    Mentor Payouts &amp; Settlement Tracker
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Request Mentor profit and commission payouts from your Income Wallet and track Pending vs Processed settlements.
-                  </p>
-                </div>
-                <div className="flex items-center gap-4 text-xs font-mono tabular-nums">
-                  <span className="text-slate-400">
-                    Available:{' '}
-                    <strong className="text-emerald-400">
-                      ${userProfile.profitBalance.toFixed(2)}
-                    </strong>
-                  </span>
-                  <span className="text-slate-400">
-                    Pending:{' '}
-                    <strong className="text-amber-300">
-                      ${metricsSummary.pendingPayoutsUsd.toFixed(2)}
-                    </strong>
-                  </span>
-                  <span className="text-slate-400">
-                    Processed:{' '}
-                    <strong className="text-white">
-                      ${metricsSummary.processedPayoutsUsd.toFixed(2)}
-                    </strong>
-                  </span>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                {/* Payout Request Form */}
-                <div className="lg:col-span-5 bg-[#0B111E] border border-slate-800 rounded-xl p-6 space-y-4">
-                  <h3 className="font-display font-semibold text-base text-white">
-                    Request Mentor Payout
-                  </h3>
-
-                  {!metricsSummary.isVolumeUnlocked && (
-                    <div className="p-3.5 rounded-lg border border-amber-700/60 bg-amber-950/40 text-xs text-amber-200 space-y-1">
-                      <div className="font-semibold flex items-center gap-1.5">
-                        <Lock className="w-3.5 h-3.5 text-amber-400" />
-                        <span>Mentor Volume Requirement Active</span>
-                      </div>
-                      <p className="text-amber-200/85 leading-relaxed">
-                        Bring{' '}
-                        <strong className="font-mono text-white">
-                          ${metricsSummary.mentorRemaining.toFixed(2)}
-                        </strong>{' '}
-                        more in Direct L1 referred volume (${metricsSummary.mentorBrought.toFixed(2)} /{' '}
-                        ${metricsSummary.mentorRequired.toFixed(2)}) to unlock profit withdrawals.
-                      </p>
-                    </div>
-                  )}
-
-                  {platformConfig.withdrawalsPaused && (
-                    <div className="p-3.5 rounded-lg border border-red-700/60 bg-red-950/40 text-xs text-red-200 flex items-center gap-2">
-                      <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
-                      <span>Withdrawals are temporarily paused by administration.</span>
-                    </div>
-                  )}
-
-                  {kycBlockedForWithdraw && (
-                    <div className="p-3.5 rounded-lg border border-amber-700/60 bg-amber-950/40 text-xs text-amber-200 flex items-center justify-between gap-2">
-                      <span>KYC approval is required before requesting payouts.</span>
-                      <button
-                        type="button"
-                        onClick={onSwitchToClientVault}
-                        className="underline font-semibold text-amber-300 shrink-0"
-                      >
-                        Verify in Vault
-                      </button>
-                    </div>
-                  )}
-
-                  {savedPaymentMethods.length > 0 && (
-                    <div className="space-y-1.5">
-                      <div className="text-xs text-slate-400">Saved Payout Accounts</div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {savedPaymentMethods.map((pm) => (
-                          <button
-                            key={pm.id}
-                            type="button"
-                            onClick={() => {
-                              setWdNetwork(pm.methodId);
-                              setWdAddress(pm.accountAddress);
-                            }}
-                            className="px-2.5 py-1.5 rounded-lg border border-slate-700 bg-slate-900 hover:border-amber-500/60 text-xs text-slate-200 transition-colors"
-                          >
-                            {pm.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  <form onSubmit={handleSubmitMentorPayout} className="space-y-4">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-300 mb-1.5">
-                        Payout Channel
-                      </label>
-                      <select
-                        value={activeWithdrawNetworkId}
-                        onChange={(e) => setWdNetwork(e.target.value)}
-                        className="w-full px-3 py-2.5 rounded-lg border border-slate-700 bg-slate-900 text-white text-xs focus:outline-none focus:border-amber-500"
-                      >
-                        {enabledWithdrawMethods.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.name} (Min ${Math.max(platformConfig.minWithdrawalUsd, m.minWithdrawalUsd || 0)})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <div className="flex items-center justify-between mb-1.5">
-                        <label className="text-xs font-medium text-slate-300">
-                          Amount (USD)
-                        </label>
-                        <span className="text-[11px] font-mono text-slate-400 tabular-nums">
-                          Min ${minWithdrawUsd.toFixed(2)}
-                        </span>
-                      </div>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min={minWithdrawUsd}
-                        required
-                        value={wdAmount}
-                        onChange={(e) => setWdAmount(e.target.value)}
-                        className="w-full px-3.5 py-2.5 rounded-lg border border-slate-700 bg-slate-900 text-white font-mono text-sm tabular-nums focus:outline-none focus:border-amber-500"
-                      />
-                      <div className="grid grid-cols-4 gap-1.5 mt-2">
-                        {[
-                          { label: '25%', mult: 0.25 },
-                          { label: '50%', mult: 0.5 },
-                          { label: '75%', mult: 0.75 },
-                          { label: 'MAX', mult: 1 },
-                        ].map((pct) => (
-                          <button
-                            key={pct.label}
-                            type="button"
-                            onClick={() =>
-                              setWdAmount(
-                                Math.max(0, userProfile.profitBalance * pct.mult).toFixed(2)
-                              )
-                            }
-                            className="py-1.5 rounded-md border border-slate-800 bg-slate-900 hover:bg-slate-800 text-[11px] font-mono text-slate-300 hover:text-white transition-colors"
-                          >
-                            {pct.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-medium text-slate-300 mb-1.5">
-                        Destination Wallet / Account
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={wdAddress}
-                        onChange={(e) => setWdAddress(e.target.value)}
-                        placeholder={`Enter receiving ${selectedWithdrawMethod?.name || 'payout'} address`}
-                        className="w-full px-3.5 py-2.5 rounded-lg border border-slate-700 bg-slate-900 text-white font-mono text-xs placeholder:text-slate-500 focus:outline-none focus:border-amber-500"
-                      />
-                    </div>
-
-                    <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={saveMethodAfter}
-                        onChange={(e) => setSaveMethodAfter(e.target.checked)}
-                      />
-                      <span>Save payout destination for future requests</span>
-                    </label>
-
-                    <button
-                      type="submit"
-                      disabled={
-                        wdSubmitting ||
-                        !metricsSummary.isVolumeUnlocked ||
-                        Boolean(platformConfig.withdrawalsPaused) ||
-                        kycBlockedForWithdraw ||
-                        enabledWithdrawMethods.length === 0
-                      }
-                      className="w-full py-2.5 px-4 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-45 disabled:cursor-not-allowed text-white text-xs font-semibold transition-colors"
-                    >
-                      {wdSubmitting
-                        ? 'Submitting Request...'
-                        : !metricsSummary.isVolumeUnlocked
-                        ? 'Unlock Volume Target to Withdraw'
-                        : 'Submit Mentor Payout Request'}
-                    </button>
-                  </form>
-                </div>
-
-                {/* Settlement Status Tracker */}
-                <div className="lg:col-span-7 bg-[#0B111E] border border-slate-800 rounded-xl p-6 space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <h3 className="font-display font-semibold text-base text-white">
-                      Payout Settlement History ({filteredWithdrawals.length})
-                    </h3>
-                    <div className="inline-flex items-center p-1 rounded-lg bg-slate-900 border border-slate-800 text-xs">
-                      {(
-                        [
-                          { id: 'all', label: 'All' },
-                          { id: 'pending', label: 'Pending' },
-                          { id: 'processed', label: 'Processed' },
-                          { id: 'rejected', label: 'Rejected' },
-                        ] as const
-                      ).map((tab) => (
-                        <button
-                          key={tab.id}
-                          type="button"
-                          onClick={() => setPayoutStatusFilter(tab.id)}
-                          className={`px-2.5 py-1 rounded-md font-medium transition-colors whitespace-nowrap ${
-                            payoutStatusFilter === tab.id
-                              ? 'bg-amber-600 text-white'
-                              : 'text-slate-400 hover:text-white'
-                          }`}
-                        >
-                          {tab.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="relative">
-                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      value={payoutSearch}
-                      onChange={(e) => setPayoutSearch(e.target.value)}
-                      placeholder="Filter by request ID, wallet, channel, or TXID..."
-                      className="w-full pl-9 pr-3 py-2 rounded-lg border border-slate-800 bg-slate-900 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-amber-500"
-                    />
-                  </div>
-
-                  {filteredWithdrawals.length === 0 ? (
-                    <div className="py-10 text-center text-xs text-slate-400">
-                      No payout requests match this filter.
-                    </div>
-                  ) : (
-                    <div className="divide-y divide-slate-800/80">
-                      {filteredWithdrawals.map((w) => {
-                        const isProcessed =
-                          w.status === 'approved' || w.status === 'completed';
-                        const isRejected = w.status === 'rejected';
-                        const sourceLabel =
-                          w.source === 'mentor_profit'
-                            ? 'Mentor Profit'
-                            : w.source === 'mlm_commission'
-                            ? 'Referral Commission'
-                            : w.source === 'elite_capital'
-                            ? 'Capital Unlock'
-                            : 'Trading Profit';
-                        return (
-                          <div key={w.id} className="py-3.5 first:pt-0 last:pb-0 space-y-2 text-xs">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <div className="flex items-center gap-2 min-w-0">
-                                <span className="font-mono font-semibold text-white tabular-nums text-sm">
-                                  ${w.amountUsd.toFixed(2)}
-                                </span>
-                                <span className="text-slate-500">·</span>
-                                <span className="text-slate-300">{sourceLabel}</span>
-                                <span className="text-slate-500">·</span>
-                                <span className="font-mono text-slate-400">
-                                  {w.network.replace(/_/g, ' ')}
-                                </span>
-                              </div>
-                              <span
-                                className={`inline-flex items-center gap-1 font-semibold ${
-                                  isProcessed
-                                    ? 'text-emerald-400'
-                                    : isRejected
-                                    ? 'text-red-400'
-                                    : 'text-amber-300'
-                                }`}
-                              >
-                                {isProcessed ? (
-                                  <CheckCircle2 className="w-3.5 h-3.5" />
-                                ) : isRejected ? (
-                                  <XCircle className="w-3.5 h-3.5" />
-                                ) : (
-                                  <Clock className="w-3.5 h-3.5" />
-                                )}
-                                <span>
-                                  {isProcessed
-                                    ? 'Processed'
-                                    : isRejected
-                                    ? 'Rejected (Refunded)'
-                                    : 'Pending Review'}
-                                </span>
-                              </span>
-                            </div>
-
-                            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400 font-mono">
-                              <span className="truncate max-w-xs">
-                                To: {w.destinationAddress}
-                              </span>
-                              <span className="tabular-nums">
-                                {formatTimestamp(w.createdAt)}
-                              </span>
-                            </div>
-
-                            {w.adminNote && (
-                              <div className="flex items-center justify-between gap-2 text-[11px] text-slate-300 bg-slate-900/70 px-3 py-1.5 rounded-lg border border-slate-800">
-                                <span className="truncate font-mono">
-                                  Settlement Ref: {w.adminNote}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => copyValue(`tx-${w.id}`, w.adminNote)}
-                                  className="text-amber-400 hover:text-amber-300 shrink-0"
-                                >
-                                  {copiedKey === `tx-${w.id}` ? 'Copied' : 'Copy'}
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
+            <PayoutManagement
+              onSwitchToClientVault={onSwitchToClientVault}
+              onNotify={notify}
+            />
           )}
         </main>
       </div>
